@@ -1,0 +1,24 @@
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Runtime data (personal/financial) ─────────────────────────────────────────
+data/portfolio_snapshot.json
+data/execution_log.jsonl
+data/execution_state.json
+data/ideas_log.jsonl
+data/signals_log.jsonl
+data/trade_ideas.json
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+node_modules/
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Claude Code local state ────────────────────────────────────────────────────
+.claude/
+
+# ── Reports (generated, not source) ───────────────────────────────────────────
+reports/

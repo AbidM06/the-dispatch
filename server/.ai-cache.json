@@ -1,0 +1,148 @@
+{
+  "events:items": {
+    "value": [
+      {
+        "headline": "Iran Attacks Kuwaiti Oil Tanker Off Dubai Amid Escalating Strait of Hormuz Crisis",
+        "impact": "BEARISH",
+        "ticker": "CL",
+        "date": "2026-03-31",
+        "detail": "Iranian drone attack on Al-Salmi crude carrier signals willingness to escalate strikes on energy infrastructure as Strait of Hormuz remains effectively shut."
+      },
+      {
+        "headline": "US Gas Prices Hit $4/Gallon as Oil Tanker Traffic Halts Through Strait",
+        "impact": "BEARISH",
+        "ticker": "MACRO",
+        "date": "2026-03-31",
+        "detail": "Average US gas price has hit $4 per gallon, the highest since 2022, as Iran war has essentially shut off oil tanker traffic."
+      },
+      {
+        "headline": "Federal Reserve Holds Rates Steady at 3.5-3.75%, Signals Cautious Pause on Easing",
+        "impact": "NEUTRAL",
+        "ticker": "MACRO",
+        "date": "2026-03-18",
+        "detail": "Fed left rates unchanged at 3.5%-3.75% in March 2026, with only one rate cut projected for full year per updated dot plot."
+      },
+      {
+        "headline": "AMD Secures Major AI Deployment Commitments While ASIC Competition Accelerates",
+        "impact": "BULLISH",
+        "ticker": "AMD",
+        "date": "2026-03-30",
+        "detail": "AMD has secured 6 gigawatt OpenAI GPU commitment and 50,000 MI450 GPU order from Oracle for Q3 2026, contrasting with Intel's foundry challenges."
+      },
+      {
+        "headline": "Emerging Market Currencies Face Renewed Pressure as Oil Volatility Drives Safe-Haven Demand",
+        "impact": "BEARISH",
+        "ticker": "MACRO",
+        "date": "2026-03-31",
+        "detail": "EM currency index fell for worst session since November 2024 as dollar and gold surged on geopolitical risks."
+      }
+    ],
+    "fetchedAt": "2026-03-31T13:55:21.338Z",
+    "expiresAt": 1775051721338
+  },
+  "events:econ": {
+    "value": [
+      {
+        "id": 1,
+        "label": "MACRO THEME",
+        "color": "#c8392b",
+        "bg": "rgba(200,57,43,.08)",
+        "border": "rgba(200,57,43,.2)",
+        "date": "2026-03-31",
+        "title": "Oil Shock & Inflation Resurgence Risk",
+        "body": "Brent crude surpassed $100/barrel on March 8 for first time in 4 years, peaking at $126 as Strait disruption affects ~20% global daily oil supply. Fed entered wait-and-see mode pausing to assess impact of Iran conflict. Geopolitical premium persists despite diplomatic signals."
+      },
+      {
+        "id": 2,
+        "label": "RATES ANALYSIS",
+        "color": "#1a3a5c",
+        "bg": "rgba(26,58,92,.15)",
+        "border": "rgba(88,166,255,.2)",
+        "date": "2026-03-31",
+        "title": "Real Yields Sticky; Rate Cut Window Narrowing",
+        "body": "10-year Treasury yield at 4.27% on March 18, with Fed projecting only 50bp cuts through 2027 vs earlier expectations. Fed raised 2026 PCE inflation forecast to 2.7% from 2.4% due to oil shock, with 2027 raised to 2.2%. Neutral rate assumptions supporting persistent real yield premium."
+      },
+      {
+        "id": 3,
+        "label": "EQUITY DEEP DIVE",
+        "color": "#2c6e49",
+        "bg": "rgba(44,110,73,.08)",
+        "border": "rgba(63,185,80,.2)",
+        "date": "2026-03-31",
+        "title": "AI Capex Bifurcation: GPU vs ASIC vs Infrastructure",
+        "body": "2026 marked ASIC acceleration point with in-house silicon outshipping GPUs as hyperscalers pivot to custom chips. Broadcom emerged clear winner with $73B backlog, dominance in ASIC design for Google/Meta internal AI accelerators. Valuation risk rising as consensus becomes crowded in traditional GPU plays (NVDA, AMD)."
+      }
+    ],
+    "fetchedAt": "2026-03-31T13:55:21.340Z",
+    "expiresAt": 1775051721340
+  },
+  "risk:scores": {
+    "value": [
+      {
+        "id": 1,
+        "title": "US/Israel-Iran War Escalation & Strait Closure",
+        "level": "HIGH",
+        "score": 88,
+        "date": "2026-03-31",
+        "detail": "War has essentially shut off Strait tanker traffic, disrupting ~20% of world's daily oil supply and prompting 70%+ initial decline in maritime transit. Regime change occurred; military operations ongoing.",
+        "affects": "Energy, Inflation, Global Growth"
+      },
+      {
+        "id": 2,
+        "title": "US Tariffs on Canada/Mexico USMCA Uncertainty",
+        "level": "MEDIUM",
+        "score": 65,
+        "date": "2026-03-31",
+        "detail": "Canadian economy could enter recession within 6 months if tariffs maintained. USMCA exemption share reached 85% in January 2026, indicating aggressive tariff avoidance by importers.",
+        "affects": "Trade, Manufacturing, EM Currencies"
+      },
+      {
+        "id": 3,
+        "title": "AMD ASIC Competitive Threat from Hyperscaler Custom Silicon",
+        "level": "MEDIUM",
+        "score": 62,
+        "date": "2026-03-31",
+        "detail": "Custom ASIC shipments projected to grow 44.6% in 2026 vs GPU growth of 16.1%, marking 2026 as ASIC acceleration point. Hyperscalers deploying proprietary TPUs, Trainium.",
+        "affects": "NVDA, AMD, BROADCOM"
+      },
+      {
+        "id": 4,
+        "title": "Rising Real Yields & Fed Rate Cut Delays",
+        "level": "MEDIUM",
+        "score": 58,
+        "date": "2026-03-31",
+        "detail": "Fed revised 2026 GDP growth higher to 2.4% and PCE inflation higher to 2.7%, signaling slower easing cycle than previously expected.",
+        "affects": "Bonds, Equities, Credit"
+      },
+      {
+        "id": 5,
+        "title": "Emerging Market Currency Stress & Capital Outflows",
+        "level": "HIGH",
+        "score": 76,
+        "date": "2026-03-31",
+        "detail": "Traders buying protection on EM currencies at fastest pace since COVID-19 pandemic start, signaling severe near-term stress. Central banks in Indonesia, Turkey, India intervening to prevent currency slides.",
+        "affects": "EMFX, EM Equities, Local Currency Bonds"
+      },
+      {
+        "id": 6,
+        "title": "Credit Spread Widening & Private Credit Stress",
+        "level": "MEDIUM",
+        "score": 71,
+        "date": "2026-03-31",
+        "detail": "Global credit spreads widened 4bp in week—largest move since early November—as AI sector default risks cited by investors. Blue Owl down 59% after limiting redemptions in private credit funds.",
+        "affects": "HY Bonds, Private Equity, Credit Markets"
+      },
+      {
+        "id": 7,
+        "title": "Bank of Japan YCC Exit & JGB Volatility Spillovers",
+        "level": "MEDIUM",
+        "score": 59,
+        "date": "2026-03-31",
+        "detail": "Since BoJ abandoned YCC in March 2024, JGB yields risen significantly with 5s30s curve steepening ~120bp. JGB yields rose notably due to political uncertainty and fiscal concerns, with modest spillovers to other economies.",
+        "affects": "JGB, Global Rates, JPY, Carry Trades"
+      }
+    ],
+    "fetchedAt": "2026-03-31T13:55:21.340Z",
+    "expiresAt": 1775051721340
+  }
+}
