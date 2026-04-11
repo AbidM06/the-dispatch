@@ -2,8 +2,7 @@
 
 ## What this is
 A personal market intelligence dashboard. Express API server (port 3001) + single-page
-React frontend (`client/index.html`). Tracks an AMD equity position alongside a watchlist
-of peers, overlaid with macro rates, AI-generated analysis, and a scenario/stress-test engine.
+React frontend (`client/index.html`). Tracks a watchlist of equity positions, overlaid with macro rates, AI-generated analysis, and a scenario/stress-test engine.
 
 ## How to run
 ```bash
