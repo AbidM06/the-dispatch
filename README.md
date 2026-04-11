@@ -1,6 +1,6 @@
 # The Dispatch — Market Intelligence Dashboard
 
-A personal market intelligence dashboard built to develop a deeper understanding of the markets. Express API backend + single-file React SPA, no build step required.
+A personal market intelligence dashboard built by an economics student, looking to develop a deeper understanding of the markets. Express API backend + single-file React SPA, no build step required.
 
 Live macro rates, AI-powered analysis, watchlist prices, trading ideas, correlation models, sell-side research reports, and an interview prep module — all in one place.
 
