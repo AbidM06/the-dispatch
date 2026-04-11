@@ -1,6 +1,6 @@
 # The Dispatch — Market Intelligence Dashboard
 
-A personal market intelligence dashboard built by an economics student targeting S&T / Asset Management. Express API backend + single-file React SPA, no build step required.
+A personal market intelligence dashboard built to develop a deeper understanding of the markets. Express API backend + single-file React SPA, no build step required.
 
 Live macro rates, AI-powered analysis, watchlist prices, trading ideas, correlation models, sell-side research reports, and an interview prep module — all in one place.
 
@@ -31,7 +31,11 @@ server/index.js            Express entry point — mounts all routes
 server/routes/             One file per API domain
 server/providers/          Thin adapters for each external API
 server/engine/             Idea engine, correlation engine, backtest, exit logic
-server/analytics/          Deterministic narrative fallback
+server/analytics/          Execution policy, narrative fallback, risk checks
+server/importers/          Persistent log readers/writers (ideas, bulletin, models)
+server/jobs/               Scheduled background tasks (AI refresh, bulletin, weekly review)
+server/middleware/         Write-auth guard
+server/schemas/            Zod validation
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry, fetchWithTimeout, isRetryable
 seeds/fallback.js          Seed data for full graceful degradation
@@ -65,8 +69,10 @@ All API keys live server-side only. The browser makes only `fetch('/api/...')` c
 | Anthropic | https://console.anthropic.com | Pay-as-you-go (very cheap) |
 | Alpha Vantage | https://www.alphavantage.co/support/#api-key | 25 req/day |
 | FRED | https://fred.stlouisfed.org/docs/api/api_key.html | Unlimited |
-| Polygon.io | https://polygon.io | Unlimited aggs (15-min delay) |
 | Finnhub | https://finnhub.io | 60 req/min |
+| Polygon.io | https://polygon.io | Unlimited aggs (15-min delay) |
+| EIA | https://www.eia.gov/opendata/ | Unlimited (reasonable use) |
+| OpenAI *(optional)* | https://platform.openai.com | Pay-as-you-go |
 
 ### 2. Configure environment
 
@@ -85,7 +91,7 @@ npm start
 
 ```bash
 npm run dev    # auto-restart on file changes
-npm test       # Jest test suite (213 tests)
+npm test       # Jest test suite (227 tests)
 ```
 
 ---
@@ -94,19 +100,33 @@ npm test       # Jest test suite (213 tests)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | — | Claude API — events, risk, research, bulletin |
-| `ALPHA_VANTAGE_API_KEY` | Yes | — | AMD quote + USD/GBP FX (2 calls/refresh) |
+| `ANTHROPIC_API_KEY` | Yes* | — | Claude API — events, risk, research, bulletin |
+| `ALPHA_VANTAGE_API_KEY` | Yes | `demo` | AMD quote + USD/GBP FX (2 calls/refresh) |
 | `FRED_API_KEY` | Yes | — | Rates: DGS10, DFII10, T10YIE, HY spread, curve |
 | `POLYGON_API_KEY` | Yes | — | Watchlist peers via `/v2/aggs` |
 | `FINNHUB_API_KEY` | Yes | — | News, earnings calendar, sentiment |
-| `PORT` | No | 3001 | HTTP port |
-| `LOW_COST_MODE` | No | false | Disables all AI calls, returns deterministic narrative |
-| `ANTHROPIC_DAILY_CAP` | No | 5 | USD daily spend cap |
-| `ANTHROPIC_MONTHLY_CAP` | No | 50 | USD monthly spend cap |
+| `EIA_API_KEY` | No | — | WTI, Brent, Henry Hub price history for commodities report |
+| `OPENAI_API_KEY` | No | — | Fallback when Claude is overloaded or fails to parse JSON |
+| `PORT` | No | `3001` | HTTP port |
+| `LOW_COST_MODE` | No | `false` | Disables all AI calls; returns deterministic narrative |
+| `DISABLE_AI` | No | `false` | Hard block on all Anthropic calls |
+| `ANTHROPIC_DAILY_CAP` | No | `5` | USD daily spend cap |
+| `ANTHROPIC_MONTHLY_CAP` | No | `50` | USD monthly spend cap |
 | `DISPATCH_ADMIN_KEY` | No | — | If set, guards all POST/PATCH/DELETE routes |
-| `TRADING_ENABLED` | No | false | Master switch for paper trading |
+| `TRADING_ENABLED` | No | `false` | Master switch for paper trading |
+| `AUTO_APPROVE_PAPER` | No | `false` | Auto-approve engine ideas for paper execution |
+| `ALPACA_API_KEY` | No | — | Alpaca paper trading credentials |
+| `ALPACA_API_SECRET` | No | — | Alpaca paper trading credentials |
+| `ALPACA_BASE_URL` | No | `https://paper-api.alpaca.markets` | Must contain "paper" |
+| `ALPACA_AUTO_EXECUTE` | No | `false` | Auto-post approved ideas to Alpaca |
+| `WEBHOOK_URL` | No | — | Webhook endpoint for idea lifecycle events |
+| `WEBHOOK_SECRET` | No | — | Optional signing secret for webhook |
+| `ENGINE_SCHEDULE` | No | `08:00,15:30` | Comma-separated HH:MM run times (weekdays) |
+| `ENGINE_COOLDOWN_MIN` | No | `30` | Minimum minutes between engine runs |
 
 > **Tip:** The app degrades gracefully at every level. Missing keys = seeded fallback data, not errors. `LOW_COST_MODE=true` disables all AI and is free to run.
+
+*Not required when `LOW_COST_MODE=true`.
 
 ---
 
@@ -119,6 +139,10 @@ npm test       # Jest test suite (213 tests)
 **FRED** — no meaningful rate limit. Rates data updates once daily; TTL is 60 min.
 
 **Anthropic** — budget tracked in-process. When the daily/monthly cap is hit, the server enters a 60-min deterministic fallback automatically. The fallback narrative is always available at zero cost.
+
+**OpenAI** — optional fallback for research reports. If not set, the app falls back to a static deterministic narrative.
+
+**EIA** — optional. Used only for the commodities research report type. Free with no daily cap.
 
 ---
 
@@ -140,53 +164,80 @@ the_dispatch/
 ├── .env.example
 ├── package.json
 ├── client/
-│   └── index.html              ← Entire React frontend (no build)
+│   └── index.html                  ← Entire React frontend (no build)
 ├── server/
-│   ├── index.js
-│   ├── cache.js
-│   ├── retry.js
-│   ├── middleware/auth.js
-│   ├── schemas/index.js        ← Zod validation
+│   ├── index.js                    ← Express entry point
+│   ├── cache.js                    ← In-memory TTL cache singleton
+│   ├── retry.js                    ← withRetry, fetchWithTimeout, isRetryable
+│   ├── middleware/
+│   │   └── auth.js                 ← Write-auth guard (DISPATCH_ADMIN_KEY)
+│   ├── schemas/
+│   │   └── index.js                ← Zod validation schemas
 │   ├── providers/
-│   │   ├── alphaVantage.js
-│   │   ├── polygon.js
-│   │   ├── fred.js
-│   │   ├── finnhub.js
-│   │   ├── anthropic.js
-│   │   ├── budget.js           ← Spend tracking + fallback state machine
-│   │   └── webhook.js
+│   │   ├── alphaVantage.js         ← AMD quote + USD/GBP FX (2 calls/refresh)
+│   │   ├── polygon.js              ← 6 watchlist peers via /v2/aggs
+│   │   ├── fred.js                 ← Macro rates (DGS10, DFII10, T10YIE, etc.)
+│   │   ├── fredSeries.js           ← Extended FRED series fetcher
+│   │   ├── finnhub.js              ← News, calendars, sentiment
+│   │   ├── anthropic.js            ← Claude API + cite-tag stripping
+│   │   ├── openai.js               ← OpenAI fallback for research reports
+│   │   ├── eia.js                  ← EIA energy price history
+│   │   ├── alpaca.js               ← Paper trading order placement
+│   │   ├── budget.js               ← Spend tracking + fallback state machine
+│   │   └── webhook.js              ← Fire-and-forget lifecycle notifications
 │   ├── routes/
-│   │   ├── snapshot.js
-│   │   ├── events.js
-│   │   ├── risk.js
-│   │   ├── explain.js
-│   │   ├── bulletin.js
-│   │   ├── news.js
-│   │   ├── glossary.js
-│   │   ├── ideas.js
-│   │   ├── research.js
-│   │   ├── macro.js
-│   │   ├── correlations.js
-│   │   └── analytics.js
+│   │   ├── snapshot.js             ← GET /api/snapshot + POST /api/snapshot/prefetch
+│   │   ├── events.js               ← GET /api/events + POST /api/events/refresh
+│   │   ├── risk.js                 ← GET /api/risk + POST /api/risk/refresh
+│   │   ├── explain.js              ← GET /api/explain/:ticker
+│   │   ├── bulletin.js             ← GET /api/bulletin
+│   │   ├── brief.js                ← GET /api/brief (macro brief)
+│   │   ├── news.js                 ← GET /api/news + calendar + sentiment
+│   │   ├── glossary.js             ← GET /api/glossary (full term suite)
+│   │   ├── ideas.js                ← Idea CRUD + approve/reject/exits/backtest
+│   │   ├── research.js             ← GET /api/research/report
+│   │   ├── macro.js                ← GET /api/macro
+│   │   ├── correlations.js         ← GET /api/correlations
+│   │   ├── correlationsCustom.js   ← POST /api/correlations/custom
+│   │   ├── momentum.js             ← GET /api/momentum
+│   │   └── analyticsNarrative.js  ← GET /api/analytics/narrative
 │   ├── engine/
-│   │   ├── ideaEngine.js
-│   │   ├── exitEngine.js
-│   │   ├── correlationEngine.js
-│   │   ├── backtester.js
-│   │   ├── positionSizing.js
-│   │   ├── executionPolicy.js
-│   │   ├── glossary.js
-│   │   ├── playbooks.js
-│   │   └── universeScanner.js
-│   └── analytics/
-│       └── narrativeEngine.js  ← Deterministic fallback narrative
+│   │   ├── ideaEngine.js           ← AI idea generation with playbooks
+│   │   ├── exitEngine.js           ← Exit signal detection
+│   │   ├── autoExecute.js          ← Auto-execution flow
+│   │   ├── backtester.js           ← Historical backtest on seeded data
+│   │   ├── correlationEngine.js    ← Cross-asset correlation computation
+│   │   ├── positionSizing.js       ← Risk-based position sizing
+│   │   ├── riskGate.js             ← Pre-execution risk checks
+│   │   ├── shariahFilter.js        ← Shariah compliance filter
+│   │   ├── learningLayer.js        ← Playbook performance tracking
+│   │   ├── strategies.js           ← Strategy definitions
+│   │   ├── glossary.js             ← 80+ trading terms with definitions
+│   │   ├── playbooks.js            ← Entry + exit playbook definitions
+│   │   └── universeScanner.js      ← Shariah universe macro regime scan
+│   ├── analytics/
+│   │   ├── narrativeEngine.js      ← Deterministic fallback narrative
+│   │   ├── executionPolicy.js      ← Circuit breakers + daily limits
+│   │   ├── paperTrader.js          ← Paper trade state management
+│   │   └── riskCheck.js            ← Position-level risk validation
+│   ├── importers/
+│   │   ├── ideas.js                ← JSONL idea log reader/writer
+│   │   ├── ideaLog.js              ← Idea log utilities
+│   │   ├── bulletinLog.js          ← Bulletin log reader/writer
+│   │   └── savedModels.js          ← Saved analytics model persistence
+│   └── jobs/
+│       ├── ideaScheduler.js        ← Scheduled idea engine runs (weekdays)
+│       ├── aiRefreshJob.js         ← Scheduled AI refresh (events + risk)
+│       ├── bulletinScheduler.js    ← Daily bulletin generation
+│       └── weeklyReview.js         ← Weekly playbook performance review
 ├── seeds/
-│   └── fallback.js
-├── data/                       ← Runtime logs (gitignored)
+│   └── fallback.js                 ← Seed data for graceful degradation
+├── data/                           ← Runtime logs (gitignored)
 └── tests/
     ├── endpoints.test.js
     ├── providers.test.js
-    └── ideaEngine.test.js
+    ├── ideaEngine.test.js
+    └── phase1.test.js
 ```
 
 ---
