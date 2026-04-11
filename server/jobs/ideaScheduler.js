@@ -23,9 +23,11 @@ const cache     = require("../cache");
 const seeds     = require("../../seeds/fallback");
 const { generateIdeas, buildCtx } = require("../engine/ideaEngine");
 const { appendIdeasLog, appendSignalsLog } = require("../importers/ideaLog");
-const { loadIdeas }   = require("../importers/ideas");
+const { loadIdeas, addIdea }   = require("../importers/ideas");
 const { computeMetrics } = require("../analytics/paperTrader");
 const { generateWeeklyReport, saveWeeklyReport } = require("./weeklyReview");
+const { autoExecuteIdeas } = require("../engine/autoExecute");
+const { fireWebhook }      = require("../providers/webhook");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -96,17 +98,46 @@ function computeNextRunAt() {
   return d.toISOString();
 }
 
+// ── Engine ticket → persisted idea ───────────────────────────────────────────
+
+function ticketToIdea(ticket) {
+  return {
+    ticker:         ticket.ticker,
+    direction:      ticket.direction,
+    thesis:         ticket.rationale || ticket.playbook,
+    catalyst:       ticket.expectedDrivers?.[0] || "Scheduler-generated",
+    entry:          ticket.entry  ?? null,
+    stop:           ticket.stop   ?? null,
+    target:         ticket.target ?? null,
+    invalidation:   ticket.invalidation || "",
+    horizon:        ticket.horizon || "3 months",
+    confidence:     ticket.confidence || 50,
+    sizePct:        5,
+    notes:          `Engine: ${ticket.playbook} | Regime: ${ticket.regime}`,
+    playbook:       ticket.playbook,
+    regime:         ticket.regime,
+    strategyType:   ticket.strategyType,
+    riskFlags:      ticket.riskFlags || [],
+    engineDecision: ticket.engineDecision,
+    engineReasons:  ticket.engineReasons || [],
+    shariahStatus:  ticket.shariahStatus,
+    learning:       ticket.learning,
+    executionStatus: "PENDING_APPROVAL",
+    engineTicketId:  ticket.id,
+  };
+}
+
 // ── Engine run ────────────────────────────────────────────────────────────────
 
 /**
- * Execute one engine run: build ctx, generate ideas, log results.
+ * Execute one engine run: build ctx, generate ideas, persist, auto-execute.
  */
 async function runEngine() {
   if (status.running) {
     console.log("[scheduler] Engine already running — skipping.");
     return;
   }
-  status.running  = true;
+  status.running   = true;
   status.lastRunAt = new Date().toISOString();
   status.totalRuns++;
   status.lastError = null;
@@ -119,11 +150,51 @@ async function runEngine() {
     const ctx     = buildCtx(rawRates, portfolioData, watchlistRaw);
     const tickets = generateIdeas(ctx, { maxIdeas: 5 });
 
-    // Append to logs
+    // ── Log signals + ideas ──
     appendIdeasLog({ ideas: tickets, regime: ctx.regime, totalIdeas: tickets.length });
     appendSignalsLog({ signals: ctx.signals, rates: ctx.rates, regime: ctx.regime });
 
-    console.log(`[scheduler] Engine run complete — ${tickets.length} ideas generated (regime: ${ctx.regime}).`);
+    // ── Persist as PENDING_APPROVAL + fire webhook ──
+    const persisted = [];
+    for (const ticket of tickets) {
+      try {
+        const idea = addIdea(ticketToIdea(ticket));
+        persisted.push(idea);
+      } catch (err) {
+        console.warn("[scheduler] Could not persist ticket:", err.message);
+      }
+    }
+    if (persisted.length > 0) {
+      fireWebhook("idea.pending", {
+        count:   persisted.length,
+        tickers: persisted.map(i => i.ticker),
+        regime:  ctx.regime,
+        source:  "scheduler",
+      }).catch(() => {});
+    }
+
+    console.log(`[scheduler] Engine run — ${tickets.length} ideas generated (regime: ${ctx.regime}).`);
+
+    // ── Auto-execution (if TRADING_ENABLED + AUTO_APPROVE_PAPER + ALPACA_AUTO_EXECUTE) ──
+    let playbookPerf = {};
+    try {
+      const { runBacktest } = require("../engine/backtester");
+      const bt = runBacktest();
+      playbookPerf = Object.fromEntries(bt.byPlaybook.map(p => [p.playbookId, p]));
+    } catch (_) {}
+
+    const execResult = await autoExecuteIdeas(tickets, ctx, playbookPerf);
+
+    if (execResult.enabled) {
+      console.log(`[scheduler] Auto-execution: ${execResult.orders.length} executed, ${execResult.skipped.length} skipped.`);
+      if (execResult.freshness.warning) {
+        console.warn(`[scheduler] Freshness warning: ${execResult.freshness.warning}`);
+      }
+    } else {
+      const reason = execResult.freshness.warning || "Auto-execute not enabled";
+      console.log(`[scheduler] Auto-execution skipped — ${reason}`);
+    }
+
   } catch (err) {
     status.lastError = err.message;
     console.error("[scheduler] Engine run error:", err.message);

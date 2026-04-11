@@ -160,6 +160,97 @@ describe("Anthropic cite-tag stripping", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Anthropic macro-view JSON parsing robustness
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Anthropic fetchMacroView JSON parsing", () => {
+  let anthropic;
+  const macroPayload = {
+    headline: "Real yields are elevated <cite index=\"0\">source</cite> while growth softens.",
+    regimeLabel: "Bear Flattener / Risk-Off",
+    scenarios: {
+      base: {
+        probability: 55,
+        title: "Sticky Inflation / Slow Growth",
+        narrative: "Inflation cools slowly <cite index=\"1\">cited</cite> and policy stays restrictive.",
+        keyAssets: "USD, quality equities, short duration",
+      },
+      bull: {
+        probability: 25,
+        title: "Disinflation Relief",
+        narrative: "Core inflation decelerates and duration rallies.",
+        keyAssets: "Long duration, EMFX, cyclicals",
+      },
+      bear: {
+        probability: 20,
+        title: "Policy Error / Credit Stress",
+        narrative: "Credit spreads widen and unemployment rises.",
+        keyAssets: "USTs, gold, defensives",
+      },
+    },
+    crossAsset: [
+      { asset: "US Treasuries (Long Duration)", signal: "BULLISH", rationale: "Growth is slowing and real yields are restrictive." },
+      { asset: "TIPS / Real Assets", signal: "NEUTRAL", rationale: "Breakevens are range-bound after recent inflation prints." },
+      { asset: "IG Credit", signal: "NEUTRAL", rationale: "Spreads are stable but issuance remains elevated." },
+      { asset: "HY Credit", signal: "BEARISH", rationale: "Default risk rises if financing costs stay high." },
+      { asset: "US Equities (Growth)", signal: "NEUTRAL", rationale: "Valuations are rich versus real-rate backdrop." },
+      { asset: "US Equities (Value/Cyclical)", signal: "BEARISH", rationale: "PMI momentum is softening." },
+      { asset: "EM Equities", signal: "NEUTRAL", rationale: "China policy support offsets USD headwind." },
+      { asset: "USD (DXY)", signal: "BULLISH", rationale: "Rate differentials continue to support dollar carry." },
+      { asset: "Gold", signal: "BULLISH", rationale: "Geopolitical risk and central bank demand remain supportive." },
+      { asset: "Commodities", signal: "NEUTRAL", rationale: "Demand uncertainty balances supply constraints." },
+    ],
+    centralBank: {
+      fed: "Fed is likely on hold and reactive to labour-market softening.",
+      boe: "BoE remains cautious with services inflation still elevated.",
+      ecb: "ECB is easing gradually as growth stays weak.",
+    },
+    catalysts: [
+      { event: "US CPI", date: "2026-04-10", impact: "Hot print would push real yields up and pressure duration assets." },
+      { event: "FOMC", date: "2026-05-07", impact: "Dovish dots would support risk and weaken USD." },
+      { event: "NFP", date: "2026-04-04", impact: "Weak payrolls would accelerate repricing toward cuts." },
+    ],
+    morningNote: "Position for quality while the policy path remains state-dependent {growth scare still live.",
+  };
+
+  beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    anthropic = require("../server/providers/anthropic");
+  });
+
+  test("parses macro JSON wrapped in extra text/markdown and strips cite tags", async () => {
+    const wrapped = [
+      "Morning note draft:",
+      "```json",
+      JSON.stringify(macroPayload, null, 2),
+      "```",
+      "End of draft.",
+    ].join("\n");
+
+    mockFetch.mockResolvedValueOnce(mockResponse({
+      content: [{ type: "text", text: wrapped }],
+    }));
+
+    const result = await anthropic.fetchMacroView("rates context");
+    expect(result.headline).not.toMatch(/<cite/);
+    expect(result.scenarios.base.narrative).not.toMatch(/<cite/);
+    expect(result.crossAsset).toHaveLength(10);
+  });
+
+  test("recovers from truncated macro JSON by repairing missing closing braces", async () => {
+    const truncated = JSON.stringify(macroPayload).slice(0, -1); // drop final }
+
+    mockFetch.mockResolvedValueOnce(mockResponse({
+      content: [{ type: "text", text: truncated }],
+    }));
+
+    const result = await anthropic.fetchMacroView("rates context");
+    expect(result.headline).toContain("Real yields are elevated");
+    expect(result.scenarios.base.title).toBe("Sticky Inflation / Slow Growth");
+    expect(result.crossAsset).toHaveLength(10);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Alpha Vantage adapter
 // ─────────────────────────────────────────────────────────────────────────────
 describe("Alpha Vantage provider", () => {

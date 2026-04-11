@@ -296,10 +296,10 @@ describe("Playbook triggers", () => {
     expect(findPlaybook("breakout-failure").trigger(ctx)).toBe(false);
   });
 
-  // correlation-break: AMD chg vs NVDA chg divergence > 8%
-  test("correlation-break triggers when AMD-NVDA divergence > 8%", () => {
+  // correlation-break: only fires when AMD is laggard (AMD underperforms NVDA by >8%)
+  test("correlation-break triggers when AMD underperforms NVDA by > 8%", () => {
     const ctx = baseCtx({
-      watchlist: { AMD: { price: 195, chg: 5.0 }, NVDA: { price: 178, chg: -5.0 } },
+      watchlist: { AMD: { price: 195, chg: -5.0 }, NVDA: { price: 178, chg: 5.0 } },
     });
     expect(findPlaybook("correlation-break").trigger(ctx)).toBe(true);
   });
@@ -872,17 +872,6 @@ describe("Shariah SHORT rejection", () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.shariahRule).toBe("gharar");
-  });
-});
-
-// ── Phase 1: Scenario sourcePositions ────────────────────────────────────────
-
-describe("Scenario sourcePositions", () => {
-  test("GET /api/scenario returns sourcePositions field", async () => {
-    const res = await request(app).get("/api/scenario");
-    expect(res.status).toBe(200);
-    expect(res.body.data.sourcePositions).toBeDefined();
-    expect(["seeded", "snapshot"]).toContain(res.body.data.sourcePositions);
   });
 });
 

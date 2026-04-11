@@ -450,15 +450,17 @@ const correlationBreak = {
   trigger(ctx) {
     const amdChg  = ctx.watchlist.AMD?.chg  ?? 0;
     const nvdaChg = ctx.watchlist.NVDA?.chg ?? 0;
-    return Math.abs(amdChg - nvdaChg) > 8;
+    // Only fire when AMD is the laggard (underperforming NVDA by >8%) — the only
+    // actionable direction given Shariah prohibition on short selling.
+    return (amdChg - nvdaChg) < -8;
   },
 
   template(ctx) {
     const amdChg  = ctx.watchlist.AMD?.chg  ?? 0;
     const nvdaChg = ctx.watchlist.NVDA?.chg ?? 0;
-    const gap     = amdChg - nvdaChg;
-    const isBull  = gap > 0; // AMD is outperforming NVDA
-    const dir     = isBull ? "LONG" : "LONG"; // We LONG the laggard AMD on relative value
+    const gap     = amdChg - nvdaChg; // negative = AMD underperforming (laggard)
+    const isBull  = false; // trigger only fires when AMD is laggard — direction always LONG
+    const dir     = "LONG"; // Buy the laggard AMD for sector-convergence mean reversion
     const entry   = priceFmt(ctx, "AMD", 192.00);
     const stop    = +(entry * 0.92).toFixed(2);
     const target  = +(entry * 1.12).toFixed(2);
@@ -596,11 +598,13 @@ const exitRegimeChange = {
   category:    "exit",
   description: "Fires when the macro regime has shifted materially from the regime that generated the idea. Thesis invalidated by new macro context.",
   trigger(ctx) {
-    // Regime shift: HY spread compression or rates move counter to original thesis
-    const hySpreadsCompressed  = ctx.rates.hy_spread < 2.8;
-    const ratesDroppedSharply  = ctx.rates.dgs10 < 3.8;
-    const curveInverted        = ctx.rates.t10y2y < -0.1;
-    return hySpreadsCompressed || ratesDroppedSharply || curveInverted;
+    // Regime deterioration invalidating LONG ideas: credit stress worsening,
+    // rates rising further into restrictive territory, or curve inverting (recession).
+    // Thresholds calibrated to current regime (DGS10 ~4.2%, HY ~3.2%, curve +0.5%).
+    const creditStress     = ctx.rates.hy_spread > 3.8;  // HY widening materially beyond current
+    const ratesRestrictive = ctx.rates.dgs10     > 4.8;  // rates risen >60bps from current
+    const curveInverted    = ctx.rates.t10y2y    < -0.3; // firm inversion = recession signal
+    return creditStress || ratesRestrictive || curveInverted;
   },
   template(ctx) {
     return {

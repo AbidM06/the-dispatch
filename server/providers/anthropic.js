@@ -13,7 +13,8 @@
  */
 
 const { fetchWithTimeout, withRetry, isRetryable } = require("../retry");
-const budget = require("./budget");
+const budget   = require("./budget");
+const { callOpenAI } = require("./openai");
 
 const API_URL      = "https://api.anthropic.com/v1/messages";
 const MODEL        = "claude-haiku-4-5-20251001";  // Haiku — events, risk, econ, explains, fx, rates
@@ -105,6 +106,43 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MO
 }
 
 /**
+ * callWithFallback — three-tier AI fallback for research reports.
+ * Order: Claude Sonnet → OpenAI GPT → Claude Haiku → throw
+ *
+ * Bypasses callClaude's automatic Sonnet→Haiku cascade so OpenAI gets a
+ * chance before Haiku. Budget check is run independently for each Claude tier.
+ */
+async function callWithFallback(systemPrompt, userPrompt, maxTokens) {
+  if (process.env.DISABLE_AI === "true") throw new Error("AI disabled via DISABLE_AI=true");
+
+  // Tier 1: Claude Sonnet
+  let sonnetErr;
+  try {
+    budget.checkAndIncrement();
+    return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL_SONNET);
+  } catch (err) {
+    sonnetErr = err;
+    console.warn(`[anthropic] Sonnet failed (${err.message}) — trying OpenAI ${process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1"}`);
+  }
+
+  // Tier 2: OpenAI GPT
+  try {
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+  } catch (openaiErr) {
+    console.warn(`[anthropic] OpenAI failed (${openaiErr.message}) — trying Haiku`);
+  }
+
+  // Tier 3: Claude Haiku
+  try {
+    budget.checkAndIncrement();
+    return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL);
+  } catch (haikusErr) {
+    console.warn(`[anthropic] Haiku also failed: ${haikusErr.message}`);
+    throw sonnetErr; // surface the original Sonnet error to the route's catch
+  }
+}
+
+/**
  * repairJSON — state-machine JSON fixer.
  *
  * Walks the string character by character, tracking whether we're inside a
@@ -171,32 +209,80 @@ function repairJSON(str) {
  *  3. Literal control characters inside string values
  *  4. Unescaped double-quote characters inside string values
  */
+function sliceJSONCandidate(str, type = "array") {
+  const open = type === "array" ? "[" : "{";
+  const start = str.indexOf(open);
+  if (start === -1) return null;
+
+  let inStr = false;
+  let esc = false;
+  const stack = [];
+  let end = -1;
+
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') inStr = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inStr = true;
+      esc = false;
+      continue;
+    }
+
+    if (ch === "{") { stack.push("}"); continue; }
+    if (ch === "[") { stack.push("]"); continue; }
+
+    if ((ch === "}" || ch === "]") && stack.length > 0 && ch === stack[stack.length - 1]) {
+      stack.pop();
+      if (stack.length === 0) { end = i; break; }
+    }
+  }
+
+  if (end !== -1) {
+    return {
+      candidate: str.slice(start, end + 1),
+      truncated: false,
+    };
+  }
+
+  // Truncated output: close any unterminated string + remaining structures.
+  let candidate = str.slice(start);
+  if (inStr) {
+    if (esc) candidate += "\\";
+    candidate += '"';
+  }
+  while (stack.length > 0) candidate += stack.pop();
+
+  return {
+    candidate,
+    truncated: true,
+  };
+}
+
 function extractJSON(raw, type = "array") {
-  const [open, close] = type === "array" ? ["[", "]"] : ["{", "}"];
+  if (typeof raw !== "string" || raw.trim() === "") return null;
 
   // Step 1 — strip cite tags that web_search injects into text values
   const cleaned = raw
     .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
     .replace(/<cite[^>]*>/gi, "")
-    .replace(/<\/cite>/gi, "");
+    .replace(/<\/cite>/gi, "")
+    .trim();
 
   // Step 2 — try direct parse
   try { return JSON.parse(cleaned); } catch (_) {}
 
-  // Step 3 — slice to outermost JSON structure using depth counting.
-  // lastIndexOf(close) is unreliable when the model appends trailing text that
-  // itself contains braces/brackets (e.g. "Note: {values} sourced from...").
-  // Depth counting finds the exact matching close for the first open.
-  const start = cleaned.indexOf(open);
-  if (start === -1) return null;
-  let depth = 0;
-  let end   = -1;
-  for (let i = start; i < cleaned.length; i++) {
-    if (cleaned[i] === open)       depth++;
-    else if (cleaned[i] === close) { depth--; if (depth === 0) { end = i; break; } }
-  }
-  if (end === -1 || end <= start) return null;
-  const candidate = cleaned.slice(start, end + 1);
+  // Step 3 — isolate first JSON structure while respecting strings so braces
+  // inside narrative text don't break depth counting.
+  const sliced = sliceJSONCandidate(cleaned, type);
+  if (!sliced?.candidate) return null;
+  const candidate = sliced.candidate;
 
   // Step 4 — try sliced candidate
   try { return JSON.parse(candidate); } catch (_) {}
@@ -272,11 +358,25 @@ Be concise. Total response must fit in 3500 tokens.${newsContext}`;
     throw new Error("fetchAllAnalysis: could not parse merged JSON from AI response");
   }
 
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const now = Date.now();
+  const RECENCY_MS = 30 * 24 * 60 * 60_000; // 30 days
+
+  function validateEventDate(dateStr) {
+    if (!dateStr || !ISO_DATE_RE.test(dateStr)) return { date: null, dateVerified: false };
+    const ts = Date.parse(dateStr);
+    if (isNaN(ts) || ts > now + 86_400_000 || ts < now - RECENCY_MS) {
+      return { date: null, dateVerified: false };
+    }
+    return { date: dateStr, dateVerified: true };
+  }
+
   return {
     events: data.events.slice(0, 5).map(e => ({
       ...e,
       headline: stripCiteTags(e.headline),
       detail:   stripCiteTags(e.detail),
+      ...validateEventDate(e.date),
     })),
     risks: data.risks.slice(0, 7).map((r, i) => ({
       ...r,
@@ -448,43 +548,105 @@ async function generateTradeIdeas(portfolioContext, count = 3) {
 }
 
 /**
- * fetchMacroView — global macro view for S&T Sales.
- * Returns: headline view, base/bull/bear scenarios, cross-asset matrix,
- *          central bank reaction function, 3 key catalysts, morning call narrative.
- * ratesContext: string summary of current FRED rates.
+ * fetchMacroView — institutional-grade morning note for S&T Sales.
+ *
+ * Produces a JPMorgan/Goldman-quality briefing a salesperson can use
+ * on the phone with institutional clients from 7:30am. Uses Sonnet via
+ * callWithFallback (Sonnet → OpenAI → Haiku) with 6500 tokens.
+ *
+ * JSON fields (backward-compatible + new sections):
+ *   Existing: headline, regimeLabel, scenarios, crossAsset, centralBank, catalysts
+ *   New:      overnightRecap, keyLevels, salesNote, tradeIdea, clientTalkingPoints, volSurface
+ *
+ * @param {string} ratesContext  - FRED rates string (already includes VIX3M/SKEW if available)
+ * @param {{ vix3m, skew }}      - vol surface from Yahoo Finance (optional, for output pass-through)
  */
-async function fetchMacroView(ratesContext = "") {
-  const today   = todayString();
-  const isoDate = new Date().toISOString().slice(0, 10);
-  const system  = `Today is ${today}. You are a senior global macro strategist at a bulge-bracket bank. You MUST use web_search for current data. Return ONLY valid JSON — no markdown fences.`;
+async function fetchMacroView(ratesContext = "", volSurface = {}) {
+  const today = todayString();
 
-  const prompt = `You are preparing a morning macro briefing for the S&T sales desk. Use web_search to find the latest rates, equity, credit, FX, and geopolitical developments as of ${today}.
+  const system = `Today is ${today}. You are the head of global macro strategy at a bulge-bracket bank (JPMorgan / Goldman Sachs tier). You write the morning note that S&T sales read before speaking to pension funds, hedge funds, and asset managers. You MUST use web_search to find today's actual market levels — specific prices, not approximations. Return ONLY valid JSON. No markdown fences. No commentary outside the JSON object.`;
 
-Current rates context: ${ratesContext || "see web search for latest data"}
+  const prompt = `Use web_search right now to find today's actual market data as of ${today}. Search for:
+1. SPX futures, Nasdaq futures (current pre-market or most recent)
+2. US 10Y yield, 2Y yield (exact, with today's move in bps)
+3. DXY and GBP/USD (cable) specifically — do NOT substitute EUR/USD for cable
+4. Brent crude and WTI spot
+5. Gold spot (single consistent price — do not cite two different prices for gold)
+6. VIX level
+7. CDX HY spread (today's level and OVERNIGHT move in bps — not monthly or weekly)
+8. Asian session: Nikkei, Hang Seng, Shanghai (closing levels with % change)
+9. European session: FTSE 100, DAX, Euro Stoxx 50 (opening levels with % change)
+10. The single biggest macro story driving markets right now
 
-Return a single JSON object with EXACTLY these keys:
+Current FRED rates (prior close): ${ratesContext || "use web search for latest"}
 
-"headline": string — one punchy sentence summarising the macro regime and primary risk, as you'd say on a morning call (e.g. "Real yields back at 2% as tariff uncertainty keeps the Fed on hold — risk assets face a tough spring")
+CRITICAL OUTPUT RULES — violating any of these makes the note unusable:
+- Every number must be internally consistent. If Gold is $X and the move is -Y%, then yesterday's price must equal X / (1 - Y/100). Check this before writing. If inconsistent, write [UNVERIFIED] for that field.
+- cable (GBP/USD): if you cannot find it, return null. Do NOT substitute EUR/USD or any other pair.
+- CDX HY OAS: report the overnight bps move only. Do not cite a monthly or weekly figure.
+- Never write parenthetical hedges like "(prior day)", "(data limited)", or "(limited in searches)" — if data is unavailable, return null for that field.
+- Append a source tag to every keyLevels value: "(FRED)", "(web search)", or "(unverified)".
 
-"regimeLabel": string — 2-4 word label (e.g. "Bear Flattener / Risk-Off")
+Return a single JSON object with ALL of the following keys:
 
-"scenarios": object with three keys:
-  "base":  { "probability": integer, "title": string, "narrative": string (2 sentences), "keyAssets": string }
+"headline": string — one sentence with the dominant theme and 2-3 specific levels. Example: "10Y at 4.37% (+5bps) as oil hits $111 on Iran escalation — SPX futures -0.8%, VIX 25"
+
+"regimeLabel": string — 2-4 words
+
+"overnightRecap": object:
+  "asia": string — 2 sentences, specific index levels and % changes, one causal driver. State dates explicitly, no hedging language.
+  "europe": string — 2 sentences, specific index levels and % changes, one causal driver. State dates explicitly.
+  "dominantTheme": string — 1 sentence, the single biggest force in markets right now
+
+"keyLevels": object — append source tag to each value, return null if unavailable:
+  "spxFutures": string or null (e.g. "5,210 (-0.8%) (web search)")
+  "us10y": string or null (e.g. "4.37% (+5bps) (web search)")
+  "us2y": string or null
+  "dxy": string or null
+  "cable": string or null — GBP/USD ONLY, null if not found
+  "brent": string or null
+  "gold": string or null — ONE price only, math-checked against pct move
+  "vix": string or null
+  "hyOas": string or null — must include overnight bps move (e.g. "376bps (+8bps overnight) (web search)")
+  "vix3m": string or null — CBOE 3-Month VIX level with source tag (e.g. "23.1 (Yahoo Finance)")
+  "skew": string or null — CBOE SKEW Index level with interpretation (e.g. "132 — elevated tail risk (Yahoo Finance)")
+
+"scenarios": object:
+  "base":  { "probability": integer, "title": string, "narrative": string (2 sentences with specific thresholds), "keyAssets": string }
   "bull":  { "probability": integer, "title": string, "narrative": string (2 sentences), "keyAssets": string }
   "bear":  { "probability": integer, "title": string, "narrative": string (2 sentences), "keyAssets": string }
 Probabilities must sum to 100.
 
-"crossAsset": array of exactly 10 objects, one per asset class, covering: US Treasuries (Long Duration), TIPS / Real Assets, IG Credit, HY Credit, US Equities (Growth), US Equities (Value/Cyclical), EM Equities, USD (DXY), Gold, Commodities. Each: { "asset": string, "signal": "BULLISH"|"BEARISH"|"NEUTRAL", "rationale": string (1 sentence with specific data points) }
+"crossAsset": array of exactly 10 objects — US Treasuries (Long Duration), TIPS / Inflation-Linked, IG Credit, HY Credit, US Equities (Growth/Tech), US Equities (Value/Cyclical), EM Equities, USD (DXY), Gold, Commodities:
+  { "asset": string, "signal": "BULLISH"|"BEARISH"|"NEUTRAL", "rationale": string (1 sentence with a specific level or overnight move) }
 
-"centralBank": object: { "fed": string (2 sentences on Fed outlook + reaction function), "boe": string (1 sentence on BoE), "ecb": string (1 sentence on ECB) }
+"centralBank": object:
+  "fed": string — 3 sentences: current rate, next meeting date + expected decision, one specific data point that would change the call
+  "boe": string — 2 sentences: current stance, GBP implication
+  "ecb": string — 2 sentences: current stance, EUR implication
 
-"catalysts": array of exactly 3 objects: { "event": string, "date": string, "impact": string (1 sentence on what a beat/miss means for markets) }
+"catalysts": array of exactly 3 objects — most market-moving events in the next 2 weeks:
+  { "event": string, "date": string (YYYY-MM-DD), "consensus": string, "impact": string (beat vs miss with specific asset reaction) }
 
-"morningNote": string — 3-4 sentences in the style of a Goldman/JPM morning note. What would you tell clients at 7:30am? Include specific data. Cite the top trade implication.
+"salesNote": string — STRICT STRUCTURE, 5 sentences maximum:
+  Sentences 1-2: What happened overnight and the single catalyst that drove it (specific levels, no index closes to 2 decimal places).
+  Sentences 3-5: What the client should DO today — specific rotation, hedge, or position change with instrument named. End with one concrete reason to act now, not tomorrow.
+  Do not recap after sentence 2. No passive voice. No generic macro commentary without a number attached.
 
-Be data-driven. Use specific numbers. Total response under 2500 tokens.`;
+"tradeIdea": object:
+  "instrument": string — specific and tradeable (ETF ticker, futures contract, or single name)
+  "direction": "LONG"|"SHORT"
+  "rationale": string — ONE sentence only: why this trade and what is the catalyst
+  "entry": string (current level)
+  "stop": string (specific trigger, not just a price — tie it to a catalyst or level break)
+  "target": string (specific level with implied return %)
+  "timeframe": string
 
-  const raw  = await callClaude(system, prompt, 2500);
+"clientTalkingPoints": array of exactly 3 strings — one sentence each, usable verbatim on the phone right now. Each must contain a specific number and an action verb. No generic macro commentary.
+
+Total response under 6000 tokens.`;
+
+  const raw  = await callWithFallback(system, prompt, 6500);
   const data = extractJSON(raw, "object");
 
   if (!data || !data.headline || !data.scenarios || !Array.isArray(data.crossAsset)) {
@@ -492,6 +654,7 @@ Be data-driven. Use specific numbers. Total response under 2500 tokens.`;
   }
 
   return {
+    // ── Backward-compatible fields ──────────────────────────────────────────────
     headline:    stripCiteTags(data.headline),
     regimeLabel: data.regimeLabel || "Unknown",
     scenarios:   {
@@ -512,7 +675,29 @@ Be data-driven. Use specific numbers. Total response under 2500 tokens.`;
       ...c,
       impact: stripCiteTags(c.impact || ""),
     })),
-    morningNote: stripCiteTags(data.morningNote || ""),
+    // Keep morningNote for any consumers that depend on it — maps to salesNote
+    morningNote: stripCiteTags(data.salesNote || data.morningNote || ""),
+    // ── New institutional fields ────────────────────────────────────────────────
+    overnightRecap: {
+      asia:           stripCiteTags(data.overnightRecap?.asia || ""),
+      europe:         stripCiteTags(data.overnightRecap?.europe || ""),
+      dominantTheme:  stripCiteTags(data.overnightRecap?.dominantTheme || ""),
+    },
+    keyLevels:   data.keyLevels || {},
+    salesNote:   stripCiteTags(data.salesNote || ""),
+    tradeIdea:   data.tradeIdea ? {
+      ...data.tradeIdea,
+      rationale: stripCiteTags(data.tradeIdea.rationale || ""),
+    } : null,
+    clientTalkingPoints: (data.clientTalkingPoints || []).map(s => stripCiteTags(s)),
+    // ── Vol surface (pass-through from Yahoo + AI-formatted fields) ────────────
+    volSurface: {
+      vix3m: volSurface.vix3m || null,
+      skew:  volSurface.skew  || null,
+      // Also surface AI-formatted strings from keyLevels for convenience
+      vix3mFormatted: data.keyLevels?.vix3m || null,
+      skewFormatted:  data.keyLevels?.skew  || null,
+    },
     fetchedAt:   new Date().toISOString(),
   };
 }
@@ -757,7 +942,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Use MS language: "We believe", "Key Theme: X". Return pure JSON only — no extra text outside the JSON object.`;
 
-    const raw  = await callClaude(system, prompt, 5000, MODEL_SONNET);
+    const raw  = await callWithFallback(system, prompt, 5000);
     const data = extractJSON(raw, "object");
     if (!data || !data.title || !Array.isArray(data.keyThemes) || !Array.isArray(data.predictions)) {
       throw new Error("fetchResearchReport[thematic]: could not parse JSON response");
@@ -839,7 +1024,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Use GS language: "We forecast", "We estimate", "We expect". Return pure JSON only — no extra text outside the JSON object.`;
 
-    const raw  = await callClaude(system, prompt, 5000, MODEL_SONNET);
+    const raw  = await callWithFallback(system, prompt, 5000);
     const data = extractJSON(raw, "object");
     if (!data || !data.title || !data.epsOutlook) {
       throw new Error("fetchResearchReport[equity]: could not parse JSON response");
@@ -919,12 +1104,17 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
     { "type": "Long-Only Asset Manager", "relevance": "HIGH|MEDIUM|LOW", "positioning_change": "<one sentence>", "risk": "<one sentence>", "opportunity": "<one sentence>" }
   ],
   "macro_linkages": "<2-3 sentences — how commodity moves feed through to FX (petrocurrencies, EM terms of trade), rates (inflation pass-through), and equities (sector rotation).>",
-  "key_watchpoints": ["<data release or event to watch 1>", "<watchpoint 2>", "<watchpoint 3>"]
+  "key_watchpoints": ["<data release or event to watch 1>", "<watchpoint 2>", "<watchpoint 3>"],
+  "live_market_data": [
+    { "label": "<e.g. Brent Crude>", "value": "<e.g. $112.40/bbl>", "change": "<e.g. +1.2% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
+    { "label": "<e.g. WTI Crude>",   "value": "<e.g. $108.20/bbl>", "change": "<e.g. +0.8% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
+    { "label": "<e.g. Henry Hub NG>","value": "<e.g. $3.10/mmbtu>","change": "<e.g. -0.5% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" }
+  ]
 }
 
-Write at graduate level. Every price, volume, and percentage must be real and sourced from your web search. Use language: "We estimate", "We identify four reasons", "Effects could be larger if". Return pure JSON only.`;
+Write at graduate level. Every price, volume, and percentage must be real and sourced from your web search. Use web_search to find today's actual spot prices for the live_market_data array — search CME, Bloomberg, or Reuters for current Brent, WTI, and Henry Hub prices as of ${today}. The EIA historical data in context is for trend reference only (it lags ~1 week). Populate live_market_data with today's actual market prices. Return pure JSON only.`;
 
-    const raw  = await callClaude(system, prompt, 6000, MODEL_SONNET);
+    const raw  = await callWithFallback(system, prompt, 6000);
     const data = extractJSON(raw, "object");
     if (!data || !data.title || !Array.isArray(data.keyTakeaways)) {
       throw new Error("fetchResearchReport[commodities]: could not parse JSON response");
@@ -1041,7 +1231,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 Write at graduate level. Every number must be specific and sourced. Use language: "We estimate", "We see incremental risks", "Effects could be larger if", "Under our baseline". Keep each string value under 200 words. Return pure JSON only — no markdown, no preamble, no trailing text.`;
 
-  const raw  = await callClaude(system, prompt, 8000, MODEL_SONNET);
+  const raw  = await callWithFallback(system, prompt, 8000);
   const data = extractJSON(raw, "object");
 
   if (!data || !data.title || !data.scenarios || !Array.isArray(data.abstract)) {
@@ -1078,4 +1268,6 @@ module.exports = {
   fetchMacroView,
   fetchClientImpact,
   fetchResearchReport,
+  callClaude,
+  MODEL_SONNET,
 };

@@ -31,9 +31,11 @@
 
 const { Router } = require("express");
 const cache      = require("../cache");
+const { fetchWithTimeout } = require("../retry");
 const { getAllRates, getRecentHistory } = require("../providers/fred");
-const { getQuotes, getFxRate }          = require("../providers/alphaVantage");
-const { getSnapshots, POLYGON_PEERS }   = require("../providers/polygon");
+const { getQuotes, getFxRate: getAvFxRate } = require("../providers/alphaVantage");
+const { getSnapshots, getTnxYield, POLYGON_PEERS } = require("../providers/polygon");
+const finnhub                           = require("../providers/finnhub");
 const { schemas, validate }             = require("../schemas");
 const seeds = require("../../seeds/fallback");
 const requireWriteAuth = require("../middleware/auth");
@@ -104,6 +106,49 @@ async function resolveWithFallback(key, fetchFn, ttl, seedData) {
 
   // 4. Seed fallback
   return { value: seedData, source: "seeded", fetchedAt: seeds.SEED_DATE, stale: true };
+}
+
+/**
+ * getLiveFxRate — free open.er-api.com first (no key, hourly updates), AV fallback.
+ * Saves 1 of 25 daily AV calls and gives a fresher rate.
+ */
+async function getLiveFxRate(from, to) {
+  try {
+    const res = await fetchWithTimeout(
+      `https://open.er-api.com/v6/latest/${from}`, {}, 8_000
+    );
+    if (res.ok) {
+      const json = await res.json();
+      const rate = json?.rates?.[to];
+      if (rate) {
+        return {
+          fromCurrency:  from,
+          toCurrency:    to,
+          rate:          parseFloat(rate),
+          lastRefreshed: new Date().toISOString().slice(0, 19).replace("T", " "),
+          source:        "ExchangeRate-API",
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(`[snapshot] ExchangeRate-API FX failed (${err.message}) — falling back to AV`);
+  }
+  return getAvFxRate(from, to);
+}
+
+/**
+ * upgradeDgs10 — replaces the FRED DGS10 observation with Polygon I:TNX
+ * when available (15-min delay vs 1-day FRED lag).
+ * No-op if Polygon returns null (free tier may 403 on index tickers).
+ */
+async function upgradeDgs10(rates) {
+  const live = await getTnxYield();
+  if (!live) return rates; // FRED value stays untouched
+  console.log(`[snapshot] DGS10 upgraded: FRED ${rates.dgs10?.value}% (${rates.dgs10?.date}) → Polygon ${live.value}% (${live.date})`);
+  return {
+    ...rates,
+    dgs10: { ...rates.dgs10, value: live.value, date: live.date, source: live.source },
+  };
 }
 
 /**
@@ -178,7 +223,7 @@ router.get("/", async (req, res, next) => {
       resolveWithFallback(
         KEYS.fx,
         async () => {
-          const r = await getFxRate("USD", "GBP");
+          const r = await getLiveFxRate("USD", "GBP");
           return {
             value:  r.rate,
             pair:   "USDGBP",
@@ -227,6 +272,10 @@ router.get("/", async (req, res, next) => {
         seeds.HY_HISTORY_SEED
       ),
     ]);
+
+    // ── Upgrade DGS10 with Polygon I:TNX (15-min delay) if available ──────────
+    // Best-effort: silently keeps FRED value on any Polygon failure.
+    ratesResult.value = await upgradeDgs10(ratesResult.value);
 
     // ── Envelope ──────────────────────────────────────────────────────────────
     const sources = [ratesResult, fxResult, watchlistResult, ratesHistResult, hyHistResult];
@@ -286,7 +335,7 @@ router.post("/prefetch", requireWriteAuth, async (req, res, next) => {
       resolveWithFallback(
         KEYS.fx,
         async () => {
-          const r = await getFxRate("USD", "GBP");
+          const r = await getLiveFxRate("USD", "GBP");
           return { value: r.rate, pair: "USDGBP", date: r.lastRefreshed, source: r.source };
         },
         TTL_MARKET,

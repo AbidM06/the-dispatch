@@ -14,16 +14,22 @@ const { Router }  = require("express");
 const cache       = require("../cache");
 const anthropic   = require("../providers/anthropic");
 const fred        = require("../providers/fred");
+const eia         = require("../providers/eia");
 
 const router    = Router();
 const TTL_24H   = 24 * 60 * 60 * 1000;
 const VALID_TYPES = new Set(["macro", "fx", "rates", "thematic", "equity", "commodities"]);
 
-/** Extract numeric value from FRED observation object or pass through numbers. */
+/** Extract numeric value from FRED observation object or pass through numbers.
+ *  Handles both shapes:
+ *    { value, date, source }     ← from getAllRates() / getLatestObservation()
+ *    { observations: [{...}] }  ← legacy shape (uses last element = most recent)
+ */
 function rateVal(obs, fallback = null) {
   if (typeof obs === "number") return obs;
+  if (obs && typeof obs.value === "number") return obs.value;
   if (obs && Array.isArray(obs.observations) && obs.observations.length > 0) {
-    return obs.observations[0].value;
+    return obs.observations[obs.observations.length - 1]?.value ?? fallback;
   }
   return fallback;
 }
@@ -396,6 +402,12 @@ function buildCommoditiesFallback(rates = {}) {
       "OPEC+ emergency meeting or quota communication — production increase would partially offset Hormuz shortfall and cap price upside",
       "Strait of Hormuz vessel count (tracked via Bloomberg/Kpler) — the primary real-time indicator of whether flows are normalising"
     ],
+    live_market_data: [
+      { label: "Brent Crude",    value: "$85/bbl",    change: "Live data unavailable — refresh report to fetch", direction: "flat", source: "Seeded estimate", as_of: isoDate },
+      { label: "WTI Crude",      value: "$81/bbl",    change: "Live data unavailable — refresh report to fetch", direction: "flat", source: "Seeded estimate", as_of: isoDate },
+      { label: "Gold",           value: "$2,650/oz",  change: "Live data unavailable — refresh report to fetch", direction: "flat", source: "Seeded estimate", as_of: isoDate },
+      { label: "Natural Gas HH", value: "$2.10/mmbtu",change: "Live data unavailable — refresh report to fetch", direction: "flat", source: "Seeded estimate", as_of: isoDate },
+    ],
     generatedAt: new Date().toISOString(),
     source: "seeded",
   };
@@ -410,6 +422,93 @@ function buildFallbackForType(type, rates) {
   return buildFallbackReport(rates);
 }
 
+// ── Build live_market_data from EIA snapshot ──────────────────────────────────
+function buildLiveMarketData(prices) {
+  const rows = [];
+  if (prices.brent) rows.push({ label: "Brent Crude", value: prices.brent.formatted, change: prices.brent.change || "—", direction: prices.brent.direction, source: "EIA", as_of: prices.brent.as_of });
+  if (prices.wti)   rows.push({ label: "WTI Crude",   value: prices.wti.formatted,   change: prices.wti.change   || "—", direction: prices.wti.direction,   source: "EIA", as_of: prices.wti.as_of });
+  if (prices.ng)    rows.push({ label: "Henry Hub NG", value: prices.ng.formatted,    change: prices.ng.change    || "—", direction: prices.ng.direction,    source: "EIA", as_of: prices.ng.as_of });
+  return rows;
+}
+
+// ── Merge FRED series history into chart-ready array ─────────────────────────
+function mergeRatesHistory(dgs10Res, dfii10Res, hyRes) {
+  const byDate = {};
+  function merge(res, field) {
+    if (res.status === "fulfilled") {
+      (res.value.observations || []).forEach(o => {
+        byDate[o.date] = { ...byDate[o.date], [field]: o.value };
+      });
+    }
+  }
+  merge(dgs10Res,  "dgs10");
+  merge(dfii10Res, "dfii10");
+  merge(hyRes,     "hy_spread");
+
+  return Object.entries(byDate)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, vals]) => ({ date, ...vals }));
+}
+
+// ── Shared fetch-and-merge helper ─────────────────────────────────────────────
+async function fetchChartData(type) {
+  let eiaLiveData   = null;
+  let priceHistory  = [];
+  let ratesHistory  = [];
+  let priceContext  = "";
+
+  if (type === "commodities") {
+    try {
+      const [priceHist, latestPrices] = await Promise.all([
+        eia.getPriceHistory(52),
+        eia.getLatestPrices(6),
+      ]);
+      priceHistory = priceHist;
+      if (latestPrices) {
+        eiaLiveData  = buildLiveMarketData(latestPrices);
+        const parts  = [];
+        if (latestPrices.brent) parts.push(`Brent: ${latestPrices.brent.formatted} (${latestPrices.brent.change || "flat"}, EIA ${latestPrices.brent.as_of})`);
+        if (latestPrices.wti)   parts.push(`WTI: ${latestPrices.wti.formatted} (${latestPrices.wti.change || "flat"}, EIA ${latestPrices.wti.as_of})`);
+        if (latestPrices.ng)    parts.push(`NG Henry Hub: ${latestPrices.ng.formatted} (${latestPrices.ng.change || "flat"}, EIA ${latestPrices.ng.as_of})`);
+        if (parts.length) priceContext = `EIA official weekly prices (published with ~1 week lag — use web_search for today's spot prices): ${parts.join("; ")}`;
+      }
+    } catch (err) {
+      console.warn("[research] EIA fetch failed:", err.message);
+    }
+  }
+
+  if (type === "macro") {
+    try {
+      const [dgs10Res, dfii10Res, hyRes] = await Promise.allSettled([
+        fred.getRecentHistory("DGS10",        90),
+        fred.getRecentHistory("DFII10",       90),
+        fred.getRecentHistory("BAMLH0A0HYM2", 90),
+      ]);
+      ratesHistory = mergeRatesHistory(dgs10Res, dfii10Res, hyRes);
+    } catch (err) {
+      console.warn("[research] FRED history fetch failed:", err.message);
+    }
+  }
+
+  return { eiaLiveData, priceHistory, ratesHistory, priceContext };
+}
+
+// ── Merge server-side chart data into report ──────────────────────────────────
+function injectChartData(report, type, { eiaLiveData, priceHistory, ratesHistory }) {
+  if (type === "commodities") {
+    // EIA is for the 52-week historical chart only (structural ~1 week lag)
+    // live_market_data is populated by Claude's web_search (real-time); EIA is fallback only
+    if (priceHistory && priceHistory.length) report.price_history = priceHistory;
+    if (!report.live_market_data || !report.live_market_data.length) {
+      if (eiaLiveData && eiaLiveData.length) report.live_market_data = eiaLiveData;
+    }
+  }
+  if (type === "macro") {
+    if (ratesHistory && ratesHistory.length) report.rates_history   = ratesHistory;
+  }
+  return report;
+}
+
 // ── GET /api/research/report ──────────────────────────────────────────────────
 router.get("/report", async (req, res) => {
   const type   = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
@@ -419,7 +518,7 @@ router.get("/report", async (req, res) => {
     return res.json(envelope(cached.value, "cache", false));
   }
 
-  // Build rates context for AI prompt
+  // Fetch rates context for AI prompt (always)
   let rates = {};
   let ratesStr = "";
   try {
@@ -428,16 +527,24 @@ router.get("/report", async (req, res) => {
     ratesStr = `10Y: ${rates.dgs10}%, real yield: ${rates.dfii10}%, HY OAS: ${rates.hy_spread}%, BEI: ${rates.t10y_ie}%, curve: ${rates.t10y2y}%`;
   } catch (_) {}
 
+  // Fetch EIA/FRED chart data in parallel with AI generation
+  const chartDataPromise = fetchChartData(type);
+
   let report;
   let source = "live";
   try {
     if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
-    report = await anthropic.fetchResearchReport(ratesStr, "", type);
+    const { priceContext } = await chartDataPromise;
+    const contextStr = [ratesStr, priceContext].filter(Boolean).join(" | ");
+    report = await anthropic.fetchResearchReport(contextStr, "", type);
   } catch (err) {
     console.warn(`[research:${type}] AI unavailable, using deterministic fallback:`, err.message);
     report = buildFallbackForType(type, rates);
     source = "seeded";
   }
+
+  const chartData = await chartDataPromise.catch(() => ({}));
+  injectChartData(report, type, chartData);
 
   cache.set(key, report, TTL_24H);
   res.json(envelope(report, source, false));
@@ -457,16 +564,23 @@ router.post("/report/refresh", async (req, res) => {
     ratesStr = `10Y: ${rates.dgs10}%, real yield: ${rates.dfii10}%, HY OAS: ${rates.hy_spread}%, BEI: ${rates.t10y_ie}%`;
   } catch (_) {}
 
+  const chartDataPromise = fetchChartData(type);
+
   let report;
   let source = "live";
   try {
     if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
-    report = await anthropic.fetchResearchReport(ratesStr, topic || "", type);
+    const { priceContext } = await chartDataPromise;
+    const contextStr = [ratesStr, priceContext].filter(Boolean).join(" | ");
+    report = await anthropic.fetchResearchReport(contextStr, topic || "", type);
   } catch (err) {
     console.warn(`[research:${type}] AI unavailable, using deterministic fallback:`, err.message);
     report = buildFallbackForType(type, rates);
     source = "seeded";
   }
+
+  const chartData = await chartDataPromise.catch(() => ({}));
+  injectChartData(report, type, chartData);
 
   cache.set(key, report, TTL_24H);
   res.json(envelope(report, source, false));

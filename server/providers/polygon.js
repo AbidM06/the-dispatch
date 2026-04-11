@@ -149,4 +149,148 @@ async function getSnapshots(symbols) {
   return quotes;
 }
 
-module.exports = { getSnapshots, POLYGON_PEERS };
+/**
+ * getTnxYield — fetch the CBOE 10-Year Treasury yield (^TNX / I:TNX).
+ * Tries Polygon first (15-min delay, free tier may 403 on index data).
+ * Falls back to Yahoo Finance (same-day data, no key required).
+ * Returns null on all failures so callers degrade silently to FRED.
+ */
+async function getTnxYield() {
+  // ── Tier 1: Polygon I:TNX ──────────────────────────────────────────────────
+  const key = apiKey();
+  if (key) {
+    try {
+      const today = new Date();
+      const from  = new Date(today);
+      from.setDate(from.getDate() - 7);
+      const url =
+        `${BASE_URL}/v2/aggs/ticker/I:TNX/range/1/day/${toDateStr(from)}/${toDateStr(today)}` +
+        `?adjusted=true&sort=desc&limit=1&apiKey=${key}`;
+      const res = await fetchWithTimeout(url, {}, 12_000);
+      if (res.ok) {
+        const json = await res.json();
+        const bar  = json.results?.[0];
+        if (bar) {
+          return {
+            value:    +(bar.c / 10).toFixed(3), // TNX price × 10 = yield bp → / 10 = %
+            date:     new Date(bar.t).toISOString().slice(0, 10),
+            source:   "Polygon (15min delay)",
+            seriesId: "I:TNX",
+          };
+        }
+      }
+    } catch (_) { /* fall through to Yahoo */ }
+  }
+
+  // ── Tier 2: Yahoo Finance ^TNX (no key, same-day data) ────────────────────
+  try {
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?interval=1d&range=2d";
+    const res = await fetchWithTimeout(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+    }, 10_000);
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+    const json  = await res.json();
+    const meta  = json.chart?.result?.[0]?.meta;
+    const price = meta?.regularMarketPrice;
+    const ts    = meta?.regularMarketTime;
+    if (!price || !ts) throw new Error("Yahoo TNX: missing price/time");
+    return {
+      value:    +parseFloat(price).toFixed(3), // Yahoo quotes yield directly in %
+      date:     new Date(ts * 1000).toISOString().slice(0, 10),
+      source:   "Yahoo Finance (15min delay)",
+      seriesId: "^TNX",
+    };
+  } catch (err) {
+    console.warn("[Polygon/Yahoo] TNX fetch failed:", err.message, "— keeping FRED value");
+    return null;
+  }
+}
+
+/**
+ * getVolSurface — fetch VIX term structure and skew proxy from Yahoo Finance.
+ * Returns:
+ *   vix3m  — CBOE 3-Month VIX (^VIX3M): spot VIX vs VIX3M tells you if fear
+ *            is a spike (spot > 3m) or a sustained regime (spot ≈ 3m).
+ *   skew   — CBOE SKEW Index (^SKEW): measures tail risk / put demand.
+ *            100 = normal, 130+ = elevated crash protection buying.
+ * Both are free via Yahoo Finance, no key required.
+ * Returns { vix3m, skew } — either field is null on failure.
+ */
+async function getVolSurface() {
+  async function yahooIndex(symbol) {
+    try {
+      const encoded = encodeURIComponent(symbol);
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encoded}?interval=1d&range=2d`;
+      const res = await fetchWithTimeout(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+      }, 10_000);
+      if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+      const json  = await res.json();
+      const meta  = json.chart?.result?.[0]?.meta;
+      const price = meta?.regularMarketPrice;
+      const ts    = meta?.regularMarketTime;
+      if (!price || !ts) throw new Error(`${symbol}: missing price/time`);
+      return {
+        value:  +parseFloat(price).toFixed(2),
+        date:   new Date(ts * 1000).toISOString().slice(0, 10),
+        source: "Yahoo Finance (15min delay)",
+      };
+    } catch (err) {
+      console.warn(`[Polygon/Yahoo] ${symbol} fetch failed:`, err.message);
+      return null;
+    }
+  }
+
+  const [vix3m, skew] = await Promise.all([
+    yahooIndex("^VIX3M"),
+    yahooIndex("^SKEW"),
+  ]);
+
+  return { vix3m, skew };
+}
+
+/**
+ * getHistory — fetch N calendar days of daily bars for a single ticker.
+ * Returns array of { date: "YYYY-MM-DD", close: number } ascending.
+ * Works for any ticker (not just POLYGON_PEERS) — used for momentum screen.
+ *
+ * @param {string} sym    Ticker symbol
+ * @param {number} days   Lookback in calendar days (default 252 ≈ 1 trading year)
+ * @returns {Promise<Array<{date, close}>>}
+ */
+async function getHistory(sym, days = 252) {
+  const key = apiKey();
+  if (!key) throw new Error("POLYGON_API_KEY not configured");
+
+  const today = new Date();
+  const from  = new Date(today);
+  from.setDate(from.getDate() - days);
+
+  const url =
+    `${BASE_URL}/v2/aggs/ticker/${sym}/range/1/day/${toDateStr(from)}/${toDateStr(today)}` +
+    `?adjusted=true&sort=asc&limit=${days}&apiKey=${key}`;
+
+  const json = await withRetry(
+    async () => {
+      const res = await fetchWithTimeout(url, {}, 15_000);
+      if (!res.ok) {
+        const err = new Error(`Polygon HTTP ${res.status} for ${sym} history`);
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    },
+    { attempts: 3, baseMs: 5_000, maxMs: 20_000, shouldRetry: (e) => isRetryable(e) }
+  );
+
+  if (json.status === "ERROR") {
+    throw new Error(`Polygon error: ${json.error || "unknown error"}`);
+  }
+
+  return (json.results || []).map(bar => ({
+    date:  new Date(bar.t).toISOString().slice(0, 10),
+    close: bar.c,
+  }));
+}
+
+module.exports = { getSnapshots, getTnxYield, getVolSurface, getHistory, POLYGON_PEERS };

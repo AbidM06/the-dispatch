@@ -124,6 +124,43 @@ function splitByDate(dates, a, b) {
   };
 }
 
+/**
+ * Split aligned arrays using caller-supplied date boundaries (custom backtest).
+ * isSampleEnd:   last date of in-sample window (inclusive)
+ * oosSampleStart: first date of out-of-sample window (inclusive)
+ * oosSampleEnd:  last date of OOS window (inclusive, null = present)
+ */
+function splitByCustomDates(dates, a, b, isSampleEnd, oosSampleStart, oosSampleEnd) {
+  const splitEnd   = isSampleEnd   || IN_SAMPLE_END;
+  const splitStart = oosSampleStart || OUT_SAMPLE_START;
+
+  let isEndIdx = dates.findIndex(d => d > splitEnd);
+  if (isEndIdx === -1) isEndIdx = dates.length;
+
+  let oosStartIdx = dates.findIndex(d => d >= splitStart);
+  if (oosStartIdx === -1) oosStartIdx = dates.length;
+
+  let outDates = dates.slice(oosStartIdx);
+  let outA     = a.slice(oosStartIdx);
+  let outB     = b.slice(oosStartIdx);
+
+  if (oosSampleEnd) {
+    const endIdx = outDates.findIndex(d => d > oosSampleEnd);
+    if (endIdx !== -1) {
+      outDates = outDates.slice(0, endIdx);
+      outA     = outA.slice(0, endIdx);
+      outB     = outB.slice(0, endIdx);
+    }
+  }
+
+  return {
+    inDates:  dates.slice(0, isEndIdx),
+    inA:      a.slice(0, isEndIdx),
+    inB:      b.slice(0, isEndIdx),
+    outDates, outA, outB,
+  };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // SECTION 2 — Pearson correlation
 // ═════════════════════════════════════════════════════════════════════════════
@@ -220,6 +257,44 @@ function maSignals(dates, driver, fast, slow, direction) {
     });
   }
   return signals;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SECTION 4b — Z-Score mean reversion signals
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generate signals from a rolling z-score of the driver series.
+ *
+ * Mean-reversion logic:
+ *   z > +threshold → driver overbought → will revert DOWN
+ *     If direction = +1 (driver up → target up):  target will also revert → go SHORT target (sig = -1)
+ *     If direction = -1 (driver up → target down): target will revert UP  → go LONG target  (sig = +1)
+ *   z < -threshold → driver oversold  → will revert UP
+ *     Opposite of above.
+ *
+ * Holds last signal until a new threshold is crossed — avoids constant churning.
+ * Returns [{ date, signal: 1|-1|0, z }]
+ */
+function zscoreSignals(dates, driver, zWindow = 12, threshold = 1.5, direction) {
+  const result = [];
+  let currentSig = 0; // start flat until first threshold crossing
+
+  for (let i = zWindow - 1; i < driver.length; i++) {
+    const slice = driver.slice(i - zWindow + 1, i + 1);
+    const m  = mean(slice);
+    const sd = stddev(slice);
+    const z  = sd > 0 ? (driver[i] - m) / sd : 0;
+
+    if (sd > 0) {
+      // Overbought driver → bet on reversion → take position against direction
+      if (z >  threshold) currentSig = -direction;
+      // Oversold driver → bet on reversion upward → take position with direction
+      if (z < -threshold) currentSig =  direction;
+    }
+    result.push({ date: dates[i], signal: currentSig, z: Math.round(z * 100) / 100 });
+  }
+  return result;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -539,6 +614,177 @@ function getCurrentRegime(allSeries) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// SECTION 9b — Custom backtest runner
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * runCustomBacktest — user-configurable backtest.
+ *
+ * config keys:
+ *   driverSeriesId, targetSeriesId — FRED series IDs (must exist in seriesMap)
+ *   direction        — +1 or -1
+ *   strategy         — "ma-crossover" | "zscore-reversion"
+ *   isSampleStart    — ISO date string, default "2014-01-01"
+ *   isSampleEnd      — ISO date string, default IN_SAMPLE_END
+ *   oosSampleStart   — ISO date string, default OUT_SAMPLE_START
+ *   oosSampleEnd     — ISO date string | null (null = present)
+ *   maFast, maSlow   — explicit MA params (null = auto-optimize by Sharpe)
+ *   zscoreWindow     — rolling z-score lookback in months (default 12)
+ *   zscoreThreshold  — z-score threshold to trigger a signal (default 1.5)
+ *   name             — friendly label for display
+ *
+ * seriesMap: Map<seriesId, [{date, value}]>
+ */
+function runCustomBacktest(config, seriesMap) {
+  const {
+    driverSeriesId,
+    targetSeriesId,
+    direction       = 1,
+    strategy        = "ma-crossover",
+    isSampleStart   = "2014-01-01",
+    isSampleEnd     = IN_SAMPLE_END,
+    oosSampleStart  = OUT_SAMPLE_START,
+    oosSampleEnd    = null,
+    maFast          = null,
+    maSlow          = null,
+    zscoreWindow    = 12,
+    zscoreThreshold = 1.5,
+    name            = `${driverSeriesId} → ${targetSeriesId}`,
+  } = config;
+
+  const driverData = seriesMap.get(driverSeriesId);
+  const targetData = seriesMap.get(targetSeriesId);
+
+  if (!driverData?.length || !targetData?.length) {
+    return {
+      id: "custom", name, driverSeriesId, targetSeriesId, direction, strategy,
+      error: `Missing series data (${!driverData?.length ? driverSeriesId : targetSeriesId})`,
+      fullCorrelation: null, inSampleCorrelation: null, outSampleCorrelation: null,
+      rollingCorrelation: [], backtest: null, currentSignal: 0,
+    };
+  }
+
+  // Align and filter to history start
+  const { dates: allDates, a: allDriver, b: allTarget } = alignSeries(driverData, targetData);
+  const histStart = isSampleStart || "2014-01-01";
+  const startIdx  = allDates.findIndex(d => d >= histStart);
+  const dates  = startIdx > 0 ? allDates.slice(startIdx)  : allDates;
+  const driver = startIdx > 0 ? allDriver.slice(startIdx) : allDriver;
+  const target = startIdx > 0 ? allTarget.slice(startIdx) : allTarget;
+
+  if (dates.length < 24) {
+    return {
+      id: "custom", name, driverSeriesId, targetSeriesId, direction, strategy,
+      error: `Insufficient aligned data for chosen window (${dates.length} months — need ≥ 24)`,
+      fullCorrelation: null, inSampleCorrelation: null, outSampleCorrelation: null,
+      rollingCorrelation: [], backtest: null, currentSignal: 0,
+    };
+  }
+
+  // IS/OOS split with custom boundaries
+  const { inDates, inA: inDriver, inB: inTarget, outDates, outA: outDriver, outB: outTarget } =
+    splitByCustomDates(dates, driver, target, isSampleEnd, oosSampleStart, oosSampleEnd);
+
+  // Pearson correlations
+  const fullCorrelation      = pearson(driver, target);
+  const inSampleCorrelation  = inDates.length >= 3 ? pearson(inDriver, inTarget) : null;
+  const outSampleCorrelation = outDates.length >= 3 ? pearson(outDriver, outTarget) : null;
+
+  // Rolling 12m correlation (full window)
+  const rolling = rollingCorrelation(dates, driver, target, 12);
+
+  const EMPTY_METRICS = { totalReturn: null, annReturn: null, sharpe: null, maxDD: null, hitRate: null, signals: 0, equityCurve: [] };
+  let inMetrics  = EMPTY_METRICS;
+  let outMetrics = EMPTY_METRICS;
+  let bestParams = {};
+  let paramGrid  = null;
+  let currentSignal = 0;
+
+  if (strategy === "zscore-reversion") {
+    // ── Z-Score Mean Reversion ─────────────────────────────────────────────
+    const allSigs  = zscoreSignals(dates, driver, zscoreWindow, zscoreThreshold, direction);
+    const inSigs   = allSigs.filter(s => s.date <= isSampleEnd);
+    const outSigs  = allSigs.filter(s => s.date >= oosSampleStart && (!oosSampleEnd || s.date <= oosSampleEnd));
+
+    inMetrics  = inDates.length  >= 3 ? computeMetrics(inDates,  inTarget,  inSigs)  : EMPTY_METRICS;
+    outMetrics = outDates.length >= 3 ? computeMetrics(outDates, outTarget, outSigs) : EMPTY_METRICS;
+    bestParams = { zscoreWindow, zscoreThreshold };
+    currentSignal = allSigs.length > 0 ? allSigs[allSigs.length - 1].signal : 0;
+
+  } else {
+    // ── MA Crossover — auto-optimize or use provided params ────────────────
+    let fast, slow;
+    if (maFast && maSlow) {
+      fast = maFast; slow = maSlow;
+    } else if (inDates.length >= 20) {
+      const opt = optimizeParams(inDates, inDriver, inTarget, direction);
+      fast = opt.bestParams.fast; slow = opt.bestParams.slow;
+      paramGrid = opt.paramGrid;
+    } else {
+      fast = 3; slow = 9; // fallback for short windows
+      console.warn(`[correlationEngine] runCustomBacktest: IS window too short for optimisation (${inDates.length} obs); falling back to fast=3/slow=9`);
+    }
+    bestParams = { fast, slow };
+
+    const inSigs = maSignals(inDates, inDriver, fast, slow, direction);
+    inMetrics    = computeMetrics(inDates, inTarget, inSigs);
+
+    if (outDates.length >= slow + 2) {
+      // Seed OOS with IS tail to avoid MA cold-start
+      const seedLen   = slow;
+      const seedD     = [...inDriver.slice(-seedLen), ...outDriver];
+      const seedDates = [...inDates.slice(-seedLen), ...outDates];
+      const allSigs   = maSignals(seedDates, seedD, fast, slow, direction);
+      const outSigs   = allSigs.filter(s => s.date >= oosSampleStart && (!oosSampleEnd || s.date <= oosSampleEnd));
+      outMetrics      = computeMetrics(outDates, outTarget, outSigs);
+    }
+
+    // Current live signal
+    const recentDates  = dates.slice(-slow - fast);
+    const recentDriver = driver.slice(-slow - fast);
+    const recentSigs   = maSignals(recentDates, recentDriver, fast, slow, direction);
+    currentSignal = recentSigs.length > 0 ? recentSigs[recentSigs.length - 1].signal : 0;
+  }
+
+  // Combined equity curve (IS then OOS, renormalised to continue from IS terminal value)
+  const inFinal = inMetrics.equityCurve.slice(-1)[0]?.strategy ?? 1;
+  const combinedCurve = [
+    ...inMetrics.equityCurve.map(p => ({ ...p, phase: "in-sample" })),
+    ...outMetrics.equityCurve.map(p => ({
+      date:     p.date,
+      strategy: Math.round(inFinal * p.strategy * 1000) / 1000,
+      buyHold:  p.buyHold,
+      phase:    "out-of-sample",
+    })),
+  ];
+
+  return {
+    id:   "custom",
+    name,
+    driverSeriesId,
+    targetSeriesId,
+    direction,
+    strategy,
+    error:                null,
+    fullCorrelation,
+    inSampleCorrelation,
+    outSampleCorrelation,
+    rollingCorrelation:   rolling,
+    seriesA: { id: driverSeriesId, data: driverData.slice(-60) },
+    seriesB: { id: targetSeriesId, data: targetData.slice(-60) },
+    config:  { isSampleStart, isSampleEnd, oosSampleStart, oosSampleEnd, strategy, ...bestParams },
+    backtest: {
+      bestParams,
+      paramGrid,
+      inSample:  { ...inMetrics,  n: inDates.length  },
+      outSample: { ...outMetrics, n: outDates.length },
+      equityCurve: combinedCurve.slice(-120),
+    },
+    currentSignal,
+  };
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // SECTION 10 — Top-level orchestrator
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -590,11 +836,14 @@ function runFullAnalysis(allSeries) {
 
 module.exports = {
   runFullAnalysis,
-  // Exported for testing
+  runCustomBacktest,
+  getCurrentRegime,
+  // Exported for testing / custom routes
   pearson,
   rollingCorrelation,
   alignSeries,
   maSignals,
+  zscoreSignals,
   computeMetrics,
   buildCorrelationMatrix,
   PAIRS_CONFIG,

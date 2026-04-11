@@ -112,14 +112,16 @@ function buildCtx(rawRates, portfolioData, watchlistData) {
   };
 
   // ── Rate deltas vs history ──
-  const history = seeds.RATES_HISTORY_SEED;
-  const prev = history.length >= 2 ? history[history.length - 2] : null;
+  const history   = seeds.RATES_HISTORY_SEED;
+  const hyHistory = seeds.HY_HISTORY_SEED;
+  const prev    = history.length >= 2   ? history[history.length - 2]     : null;
+  const prevHY  = hyHistory.length >= 2 ? hyHistory[hyHistory.length - 2] : null;
   const deltas = {
-    dgs10_d:     prev ? +(rates.dgs10     - prev.y10) * 100 : 0,   // in bps (×100)
-    dfii10_d:    prev ? +(rates.dfii10    - (prev.real ?? rates.dfii10)) * 100 : 0,
-    t10yie_d:    prev ? +(rates.t10yie    - (prev.bei  ?? rates.t10yie)) * 100 : 0,
-    hy_spread_d: 0,  // HY history not in rates history (only in hyHistory)
-    t10y2y_d:    prev ? +(rates.t10y2y   - ((prev.y10 - 2.5) || 0)) * 100 : 0,  // approximate 2Y
+    dgs10_d:     prev   ? +(rates.dgs10     - prev.y10) * 100                     : 0,   // bps
+    dfii10_d:    prev   ? +(rates.dfii10    - (prev.real ?? rates.dfii10)) * 100   : 0,
+    t10yie_d:    prev   ? +(rates.t10yie    - (prev.bei  ?? rates.t10yie)) * 100   : 0,
+    hy_spread_d: prevHY ? +(rates.hy_spread - prevHY.oas) * 100                    : 0,   // bps
+    t10y2y_d:    prev   ? +(rates.t10y2y   - (prev.y10 - (prev.real != null ? prev.y10 - (prev.y10 - 2.0) : 2.0))) * 100 : 0,
   };
 
   // ── Portfolio ──

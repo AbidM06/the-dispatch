@@ -7,10 +7,11 @@
  */
 "use strict";
 
-const { Router }  = require("express");
-const cache       = require("../cache");
-const anthropic   = require("../providers/anthropic");
-const fred        = require("../providers/fred");
+const { Router }      = require("express");
+const cache           = require("../cache");
+const anthropic       = require("../providers/anthropic");
+const fred            = require("../providers/fred");
+const { getVolSurface } = require("../providers/polygon");
 
 const router = Router();
 
@@ -279,7 +280,41 @@ function buildMacroViewFallback(rates = {}) {
         impact: "A weak jobs number (<100k) would shift the Fed reaction function toward cuts, rally bonds and EM — the cleanest long signal in the current regime.",
       },
     ],
-    morningNote: `Real yields at ${dfii10}% and HY OAS at ${hy_spread}% paint a clear picture: the market is in a risk-off, higher-for-longer regime that favours quality over duration and value over growth. With the yield curve at +${t10y2y}% and breakevens at ${t10y_ie}%, there is no imminent recession signal but there is meaningful compression in risk premium. Key event this week: watch for any Fed speak that signals shifting tolerance on inflation. Our top trade implication: long USD vs. EM FX baskets and reduce HY allocation toward IG quality.`,
+    morningNote: `Real yields at ${dfii10}% and HY OAS at ${hy_spread}% paint a clear picture: the market is in a risk-off, higher-for-longer regime that favours quality over duration and value over growth. With the yield curve at +${t10y2y}% and breakevens at ${t10y_ie}%, there is no imminent recession signal but there is meaningful compression in risk premium. Our top trade implication: long USD vs. EM FX baskets and reduce HY allocation toward IG quality — wait for a catalyst before adding duration.`,
+    // ── Institutional fields (deterministic estimates) ────────────────────────
+    overnightRecap: {
+      asia:          "Asian markets closed mixed; check live data for exact levels — this is a deterministic fallback.",
+      europe:        "European session open direction unclear without live data — refresh for AI-generated levels.",
+      dominantTheme: `Higher-for-longer rates regime: 10Y at ~${dgs10}%, real yield at ${dfii10}%, HY OAS at ${hy_spread}% — risk assets under pressure from cost-of-capital repricing.`,
+    },
+    keyLevels: {
+      spxFutures: "N/A (refresh for live data)",
+      us10y:      `~${dgs10}%`,
+      us2y:       "N/A (refresh for live data)",
+      dxy:        "N/A (refresh for live data)",
+      cable:      "N/A (refresh for live data)",
+      brent:      "N/A (refresh for live data)",
+      gold:       "N/A (refresh for live data)",
+      vix:        "N/A (refresh for live data)",
+      hyOas:      `~${hy_spread * 100}bps`,
+      vix3m:      "N/A (refresh for live data)",
+      skew:       "N/A (refresh for live data)",
+    },
+    salesNote: `Real yields at ${dfii10}% and HY OAS at ${hy_spread}% are flashing a clear risk-off signal — this is a higher-for-longer regime until the data breaks. The yield curve at +${t10y2y}% is not pricing recession yet, but credit is starting to widen in a way that historically leads equity weakness by 4-6 weeks. Our message to clients today: reduce HY exposure to IG quality, get long USD vs EM FX on rate differentials, and do not add duration until you see the Fed soften language. The first data point to watch is the next CPI print — a hot number above 3% reprices the whole curve.`,
+    tradeIdea: {
+      instrument: "IG vs HY credit spread trade (CDX IG long / CDX HY short)",
+      direction:  "LONG",
+      rationale:  `HY OAS at ${hy_spread}% vs IG — the spread between quality tiers is compressing relative to historical norms given real yields at ${dfii10}%. A risk-off catalyst (weak NFP, hot CPI, or credit event) would widen this spread sharply.`,
+      entry:      `Current: HY OAS ~${hy_spread}%, IG OAS tighter — enter on any further HY spread widening`,
+      stop:       "Stop: HY OAS compresses back through 3.0% (credit re-risk signal)",
+      target:     "Target: HY OAS widens to 4.5%+ on credit stress scenario",
+      timeframe:  "4-8 weeks",
+    },
+    clientTalkingPoints: [
+      `With real yields at ${dfii10}% — the highest in over a decade — we're telling clients to lock in IG credit duration now before the next macro shock resets spreads wider.`,
+      `The yield curve at +${t10y2y}% is not pricing a hard landing, but HY spreads at ${hy_spread}% are starting to move — that divergence historically resolves to the downside for risk assets within 6-8 weeks.`,
+      `For pension clients, this is the environment to have that LDI conversation — ${dgs10}% on 10Y Treasuries is the most compelling liability-matching entry point since 2007, and we'd be showing receiver swaptions to lock it in.`,
+    ],
     fetchedAt:   new Date().toISOString(),
     source:      "seeded",
   };
@@ -297,11 +332,15 @@ router.get("/view", async (req, res) => {
     }
   }
 
-  // Build rates context from FRED for the AI prompt
+  // Build rates context from FRED + vol surface (parallel, best-effort)
   let rates = {};
   let ratesStr = "";
+  let volSurface = { vix3m: null, skew: null };
   try {
-    const r = await fred.getAllRates();
+    const [r, vol] = await Promise.all([
+      fred.getAllRates(),
+      getVolSurface().catch(() => ({ vix3m: null, skew: null })),
+    ]);
     rates = {
       dgs10:     rateVal(r.dgs10, 4.2),
       dfii10:    rateVal(r.dfii10, 1.85),
@@ -309,7 +348,13 @@ router.get("/view", async (req, res) => {
       hy_spread: rateVal(r.hy_spread, 3.2),
       t10y2y:    rateVal(r.t10y2y, 0.5),
     };
-    ratesStr = `10Y nominal: ${rates.dgs10}%, real yield: ${rates.dfii10}%, breakeven inflation: ${rates.t10y_ie}%, HY OAS: ${rates.hy_spread}%, yield curve (10Y-2Y): ${rates.t10y2y}%`;
+    volSurface = vol;
+    const volStr = [
+      vol.vix3m ? `VIX3M: ${vol.vix3m.value}` : null,
+      vol.skew  ? `CBOE SKEW: ${vol.skew.value}` : null,
+    ].filter(Boolean).join(", ");
+    ratesStr = `10Y nominal: ${rates.dgs10}%, real yield: ${rates.dfii10}%, breakeven inflation: ${rates.t10y_ie}%, HY OAS: ${rates.hy_spread}%, yield curve (10Y-2Y): ${rates.t10y2y}%`
+      + (volStr ? `. Vol surface: ${volStr}` : "");
   } catch (_) {
     ratesStr = "latest FRED data unavailable — use web search for current rates";
   }
@@ -320,7 +365,7 @@ router.get("/view", async (req, res) => {
   try {
     const lowCost = process.env.LOW_COST_MODE === "true";
     if (lowCost) throw new Error("LOW_COST_MODE");
-    viewData = await anthropic.fetchMacroView(ratesStr);
+    viewData = await anthropic.fetchMacroView(ratesStr, volSurface);
     viewData.crossAsset = viewData.crossAsset && viewData.crossAsset.length > 0
       ? viewData.crossAsset
       : buildCrossAssetMatrix(rates);

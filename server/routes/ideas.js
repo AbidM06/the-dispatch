@@ -42,6 +42,7 @@ const requireWriteAuth            = require("../middleware/auth");
 const { computeSize }             = require("../engine/positionSizing");
 const executionPolicy             = require("../analytics/executionPolicy");
 const { fireWebhook }            = require("../providers/webhook");
+const { autoExecuteIdeas }        = require("../engine/autoExecute");
 
 const router = Router();
 
@@ -778,27 +779,6 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
     console.warn("[ideas/generate] Log append failed:", err.message);
   }
 
-  // ── Freshness gate ──
-  const MAX_AGE_MIN = parseInt(process.env.TRADING_DATA_MAX_AGE_MIN || "20", 10);
-  const snapshotMeta  = cache.getWithMeta("snapshot:rates");
-  const portfolioMeta = cache.getWithMeta("portfolio:data");
-  let dataFresh = true;
-  let freshnessWarning = null;
-
-  if (!snapshotMeta) {
-    dataFresh = false;
-    freshnessWarning = "Snapshot rates cache empty — skipping auto-execution.";
-  } else if (snapshotMeta.stale) {
-    dataFresh = false;
-    freshnessWarning = "Snapshot rates cache is stale — skipping auto-execution.";
-  } else {
-    const ageMin = (Date.now() - new Date(snapshotMeta.fetchedAt).getTime()) / 60_000;
-    if (ageMin > MAX_AGE_MIN) {
-      dataFresh = false;
-      freshnessWarning = `Snapshot data is ${ageMin.toFixed(0)} min old (max ${MAX_AGE_MIN} min) — skipping auto-execution.`;
-    }
-  }
-
   // ── Persist engine ideas as PENDING_APPROVAL ──
   const persistedIdeas = [];
   for (const ticket of engineIdeas) {
@@ -815,101 +795,22 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
     fireWebhook("idea.pending", { count: persistedIdeas.length, tickers: persistedIdeas.map(i => i.ticker), regime: ctx.regime }).catch(() => {});
   }
 
-  // ── Alpaca auto-execution for allowed US instruments ──
-  const alpacaOrders = [];
-  const shouldAutoExecute =
-    alpaca.isAutoExecuteEnabled() &&
-    executionPolicy.getConfig().tradingEnabled &&
-    executionPolicy.getConfig().autoApprovePaper &&
-    dataFresh;
+  // ── Alpaca auto-execution — shared module (also used by ideaScheduler) ──
+  let playbookPerf = {};
+  try {
+    const { runBacktest } = require("../engine/backtester");
+    const bt = runBacktest();
+    playbookPerf = Object.fromEntries(bt.byPlaybook.map(p => [p.playbookId, p]));
+  } catch (_) {}
 
-  if (shouldAutoExecute) {
-    const maxOrders = alpaca.getMaxOrdersPerRun();
-    const usdgbpRate = ctx._usdgbp ?? 0.7558;
+  const execResult = await autoExecuteIdeas(engineIdeas, ctx, playbookPerf);
+  const alpacaOrders = execResult.orders;
+  const freshnessWarning = execResult.freshness.warning;
 
-    // ── Fetch Alpaca account equity once for position sizing ──────────────────
-    let accountEquityGBP = 75000; // fallback (~$100k * 0.75)
-    try {
-      const acct = await alpaca.getAccount();
-      accountEquityGBP = parseFloat(acct.portfolio_value) * usdgbpRate;
-    } catch (err) {
-      console.warn("[ideas/generate] Could not fetch account for sizing:", err.message);
-    }
-
-    // ── Run backtest once — attach per-playbook evidence to each order ────────
-    let playbookPerf = {};
-    try {
-      const { runBacktest } = require("../engine/backtester");
-      const bt = runBacktest();
-      playbookPerf = Object.fromEntries(bt.byPlaybook.map(p => [p.playbookId, p]));
-    } catch (_) {}
-
-    for (const ticket of engineIdeas.slice(0, maxOrders)) {
-      // Paper trading: execute allowed AND caution ideas — only blocked is skipped.
-      const executableDecision = ticket.engineDecision === "allowed" || ticket.engineDecision === "caution";
-      if (executableDecision && alpaca.isSupported(ticket.ticker)) {
-        const policyCheck = executionPolicy.checkPolicy({ ticker: ticket.ticker, notionalGBP: 100 });
-        if (!policyCheck.allowed) {
-          appendExecutionLog({ ideaId: ticket.id, ticker: ticket.ticker, direction: ticket.direction,
-            decision: "SKIPPED", reasons: policyCheck.reasons, freshnessSnapshot: { dataFresh },
-            orderPayload: null, result: null, error: null });
-          continue;
-        }
-        try {
-          // ── Risk-based position sizing ──────────────────────────────────────
-          const priceUSD  = ticket.entry ?? ctx.watchlist[ticket.ticker]?.price ?? null;
-          const priceInGBP = priceUSD ? priceUSD * usdgbpRate : null;
-          const sizing = computeSize(ticket.entry, ticket.stop, accountEquityGBP, priceInGBP);
-          const qty = (!sizing.blocked && sizing.qty > 0) ? sizing.qty : 1;
-          const notionalGBP = priceInGBP ? +(qty * priceInGBP).toFixed(2) : null;
-
-          const dateStr = new Date().toISOString().slice(0, 10);
-          const clientOrderId = `dispatch-${ticket.ticker.toLowerCase()}-${dateStr}`;
-          const side  = ticket.direction === "LONG" ? "buy" : "sell";
-          const order = await alpaca.placeOrder(ticket.ticker, side, qty, "market", clientOrderId);
-
-          // ── Backtest evidence for this playbook ─────────────────────────────
-          const btEvidence = playbookPerf[ticket.playbook] ?? null;
-
-          alpacaOrders.push({
-            ticker:        ticket.ticker,
-            direction:     ticket.direction,
-            orderId:       order.id,
-            qty,
-            notionalGBP,
-            accountEquityGBP: +accountEquityGBP.toFixed(0),
-            playbook:      ticket.playbook,
-            rationale:     ticket.rationale,
-            confidence:    ticket.confidence,
-            regime:        ticket.regime,
-            entry:         ticket.entry,
-            stop:          ticket.stop,
-            target:        ticket.target,
-            riskPerShare:  sizing.riskPerShare,
-            riskGBP:       sizing.riskGBP,
-            sizingReason:  sizing.sizingReason,
-            caution:       ticket.engineDecision === "caution" ? ticket.engineReasons : [],
-            backtestEvidence: btEvidence ? {
-              triggerRate:      btEvidence.triggerRate,
-              timesTriggered:   btEvidence.timesTriggered,
-              avgConfidence:    btEvidence.avgConfidence,
-              triggeredMonths:  btEvidence.triggeredMonths,
-              totalMonths:      7,
-            } : null,
-          });
-          executionPolicy.recordTrade(ticket.ticker, notionalGBP ?? 100);
-          appendExecutionLog({ ideaId: ticket.id, ticker: ticket.ticker, direction: ticket.direction,
-            decision: "EXECUTED", reasons: [], freshnessSnapshot: { dataFresh },
-            orderPayload: { ticker: ticket.ticker, side, qty, type: "market", clientOrderId, notionalGBP },
-            result: { orderId: order.id }, error: null });
-        } catch (err) {
-          appendExecutionLog({ ideaId: ticket.id, ticker: ticket.ticker, direction: ticket.direction,
-            decision: "FAILED", reasons: [], freshnessSnapshot: { dataFresh },
-            orderPayload: null, result: null, error: err.message });
-          console.warn(`[ideas/generate] Alpaca order failed for ${ticket.ticker}:`, err.message);
-        }
-      }
-    }
+  if (execResult.enabled) {
+    console.log(`[ideas/generate] Auto-execution: ${execResult.orders.length} executed, ${execResult.skipped.length} skipped.`);
+  } else if (freshnessWarning) {
+    console.log(`[ideas/generate] Auto-execution skipped — ${freshnessWarning}`);
   }
 
   // ── Optional AI enrichment of learning layer ──

@@ -6,15 +6,9 @@
  * Architecture:
  *   PORT 3001               ← Express
  *   /api/snapshot           ← FRED + Alpha Vantage (cached)
- *   /api/portfolio          ← Alpha Vantage + T212 snapshot + computation (cached)
  *   /api/risk               ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/events             ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/explain/:ticker    ← Anthropic AI (cached per ticker)
- *   /api/thesis             ← Anthropic AI — thesis evaluation (POST)
- *   /api/scenario           ← seeded scenario P&L (GET)
- *   /api/scenario/custom    ← custom shock computation with factor decomposition (POST)
- *   /api/import/t212        ← T212 CSV import → /data/portfolio_snapshot.json (POST)
- *   /api/import/status      ← current snapshot metadata (GET)
  *   /                       ← serves client/ as static files
  *
  * Environment variables (see .env.example):
@@ -33,20 +27,20 @@ const path     = require("path");
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 const snapshotRouter  = require("./routes/snapshot");
-const portfolioRouter = require("./routes/portfolio");
 const riskRouter      = require("./routes/risk");
-const thesisRouter    = require("./routes/thesis");
-const scenarioRouter  = require("./routes/scenario");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
-const importRouter    = require("./routes/import");
 const ideasRouter     = require("./routes/ideas");
 const briefRouter     = require("./routes/brief");
 const newsRouter      = require("./routes/news");
 const glossaryRouter  = require("./routes/glossary");
 const macroRouter        = require("./routes/macro");
-const correlationsRouter = require("./routes/correlations");
-const researchRouter     = require("./routes/research");
+const correlationsRouter       = require("./routes/correlations");
+const analyticsNarrativeRouter = require("./routes/analyticsNarrative");
+const correlationsCustomRouter = require("./routes/correlationsCustom");
+const momentumRouter           = require("./routes/momentum");
+const researchRouter           = require("./routes/research");
+const bulletinRouter           = require("./routes/bulletin");
 
 const app  = express();
 const PORT = parseInt(process.env.PORT, 10) || 3001;
@@ -54,8 +48,6 @@ const PORT = parseInt(process.env.PORT, 10) || 3001;
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-// Accept raw CSV text bodies for POST /api/import/t212
-app.use(express.text({ type: ["text/csv", "text/plain"] }));
 
 // ── Request logging ───────────────────────────────────────────────────────────
 app.use((req, _res, next) => {
@@ -66,20 +58,20 @@ app.use((req, _res, next) => {
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use("/api/snapshot",  snapshotRouter);
-app.use("/api/portfolio", portfolioRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
-app.use("/api/thesis",    thesisRouter);
-app.use("/api/scenario",  scenarioRouter);
-app.use("/api/import",    importRouter);
 app.use("/api/ideas",     ideasRouter);
 app.use("/api/brief",     briefRouter);
 app.use("/api/news",      newsRouter);
 app.use("/api/glossary",  glossaryRouter);
 app.use("/api/macro",         macroRouter);
 app.use("/api/correlations",  correlationsRouter);
+app.use("/api/correlations",  analyticsNarrativeRouter);
+app.use("/api/correlations",  correlationsCustomRouter);
+app.use("/api/analytics",    momentumRouter);
 app.use("/api/research",      researchRouter);
+app.use("/api/bulletin",      bulletinRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
@@ -139,14 +131,11 @@ if (require.main === module) {
     console.log(`\nAPI endpoints:`);
     console.log(`  GET  /api/health`);
     console.log(`  GET  /api/snapshot`);
-    console.log(`  GET  /api/portfolio`);
     console.log(`  GET  /api/risk`);
     console.log(`  POST /api/risk/refresh`);
     console.log(`  GET  /api/events`);
     console.log(`  POST /api/events/refresh`);
     console.log(`  GET  /api/explain/:ticker`);
-    console.log(`  POST /api/import/t212`);
-    console.log(`  GET  /api/import/status`);
     console.log(`  GET  /api/brief`);
     console.log(`  GET  /api/ideas`);
     console.log(`  POST /api/ideas`);
@@ -182,6 +171,10 @@ if (require.main === module) {
     if (process.env.NODE_ENV !== "test") {
       const { start: startScheduler } = require("./jobs/ideaScheduler");
       startScheduler();
+      const { start: startAiRefresh } = require("./jobs/aiRefreshJob");
+      startAiRefresh();
+      const { start: startBulletin } = require("./jobs/bulletinScheduler");
+      startBulletin();
     }
   });
 }

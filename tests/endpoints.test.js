@@ -10,16 +10,10 @@
  *   - POST /refresh endpoints call fetchAllAnalysis (merged) and return updated data
  *   - Cooldown guard returns cache/seed instead of calling AI within cooldown period
  *   - POST /events/refresh populates risk cache as side-effect (and vice versa)
- *   - /api/portfolio costGBP_ = shares × avg cost per share (correctness fix)
- *   - /api/portfolio T212 snapshot costGBP_total used directly when snapshot present
- *   - /api/portfolio analystMetrics are present and numerically valid
- *   - /api/scenario returns non-zero impacts (scenario engine fix)
- *   - /api/scenario/custom returns per-factor decomposition (Phase 5)
  *   - /api/health returns all key flags including budget status
  *   - /api/explain/:ticker returns structured AI explanation
  *   - LOW_COST_MODE=true returns deterministic narrative without calling AI
  *   - Budget exhaustion (BUDGET_DAILY) falls back to deterministic narrative
- *   - /api/import routes accept CSV, persist snapshot, bust portfolio cache
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -42,8 +36,10 @@ jest.mock("../server/providers/alphaVantage", () => ({
   _resetBudget: jest.fn(),
 }));
 jest.mock("../server/providers/polygon", () => ({
-  getSnapshots:  jest.fn(),
-  POLYGON_PEERS: new Set(["NVDA", "MSFT", "TSLA", "MU", "AMAT", "LRCX"]),
+  getSnapshots:   jest.fn(),
+  getTnxYield:    jest.fn().mockResolvedValue(null),                         // null = graceful no-op, FRED value kept
+  getVolSurface:  jest.fn().mockResolvedValue({ vix3m: null, skew: null }), // null = no vol data, omitted from prompt
+  POLYGON_PEERS:  new Set(["NVDA", "MSFT", "TSLA", "MU", "AMAT", "LRCX"]),
 }));
 jest.mock("../server/providers/anthropic", () => ({
   // Phase 2b: events and risk routes now use fetchAllAnalysis (merged call)
@@ -54,15 +50,8 @@ jest.mock("../server/providers/anthropic", () => ({
   fetchRiskScores:     jest.fn(),
   // Deprecated
   fetchWatchlistPrices: jest.fn(),
-  // Still used by explain and thesis routes
+  // Still used by explain route
   fetchTickerExplain:  jest.fn(),
-  evaluateThesis:      jest.fn(),
-}));
-// T212 importer — mocked so tests never touch the filesystem
-jest.mock("../server/importers/t212", () => ({
-  parseCsv:     jest.fn(),
-  loadSnapshot: jest.fn(),
-  saveSnapshot: jest.fn(),
 }));
 // Finnhub — mocked so news routes don't make real HTTP calls
 jest.mock("../server/providers/finnhub", () => ({
@@ -81,7 +70,6 @@ const fredMock      = require("../server/providers/fred");
 const avMock        = require("../server/providers/alphaVantage");
 const polyMock      = require("../server/providers/polygon");
 const anthropicMock = require("../server/providers/anthropic");
-const t212Mock      = require("../server/importers/t212");
 const cache         = require("../server/cache");
 const budget        = require("../server/providers/budget");
 const seeds         = require("../seeds/fallback");
@@ -99,7 +87,6 @@ beforeAll(() => {
 beforeEach(() => {
   cache.clear();
   jest.clearAllMocks();
-  t212Mock.loadSnapshot.mockReturnValue(null); // default: no T212 snapshot on disk
   budget._reset();                             // reset AI call counters
   delete process.env.LOW_COST_MODE;            // ensure full-AI mode by default
 });
@@ -126,37 +113,6 @@ function mockAllAnalysis(overrides = {}) {
   ];
   anthropicMock.fetchAllAnalysis.mockResolvedValue({ events, risks, econ });
   return { events, risks, econ };
-}
-
-/** Build a realistic T212 snapshot fixture. */
-function makeT212Snapshot(overrides = {}) {
-  return {
-    importedAt:       overrides.importedAt ?? "2026-03-09T22:34:23.077Z",
-    usdgbpAtImport:   overrides.usdgbp ?? 0.7921,
-    totalInvestedGBP: overrides.totalInvestedGBP ?? 409.44,
-    totalValueGBP:    overrides.totalValueGBP    ?? 409.73,
-    positions: overrides.positions ?? [
-      {
-        ticker:                 "AMD",
-        name:                   "Advanced Micro Devices",
-        shares:                 1.9366,
-        currency:               "USD",
-        costGBP_total:          156.31,   // ← used directly as cost basis
-        snapshotValueGBP_total: 148.23,
-        snapshotPriceNative:     96.44,   // back-calculated USD price
-      },
-      {
-        ticker:                 "HIES",
-        name:                   "iShares MSCI EM UCITS ETF",
-        shares:                 100,
-        currency:               "GBP",
-        costGBP_total:          253.13,
-        snapshotValueGBP_total: 261.50,
-        snapshotPriceNative:      2.615,
-      },
-    ],
-    ...overrides,
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -328,242 +284,6 @@ describe("POST /api/snapshot/prefetch", () => {
     expect(res.status).toBe(200);
     expect(res.body.prefetched).toBe(true);
     expect(res.body.watchlist.source).toBe("seeded");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// /api/portfolio — correctness (Phase 1a fix) + T212 snapshot (Phase 2)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("GET /api/portfolio", () => {
-  test("returns portfolio rows with P&L fields", async () => {
-    avMock.getQuote.mockImplementation(async (sym) => ({
-      sym, price: 100, chgPct: 1.0, volume: 1_000_000,
-      latestTradingDay: "2026-03-06", source: "Alpha Vantage",
-    }));
-    avMock.getFxRate.mockResolvedValue({
-      rate: 0.79, fromCurrency: "USD", toCurrency: "GBP",
-      lastRefreshed: "2026-03-06", source: "Alpha Vantage",
-    });
-
-    const res = await request(app).get("/api/portfolio");
-    expect(res.status).toBe(200);
-    expect(res.body.data.rows).toBeInstanceOf(Array);
-    expect(res.body.data.rows.length).toBeGreaterThan(0);
-    expect(typeof res.body.data.totalGBP).toBe("number");
-    expect(typeof res.body.data.totalPnL).toBe("number");
-    expect(res.body.data.betas).toBeDefined();
-    expect(res.body.data.scenarios).toBeInstanceOf(Array);
-  });
-
-  test("costGBP_ = shares × avg_cost_per_share (correctness fix for total cost basis)", async () => {
-    // Force seed fallback so math is deterministic
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    expect(res.status).toBe(200);
-
-    const usdgbp = res.body.data.usdgbp;
-    expect(typeof usdgbp).toBe("number");
-    expect(usdgbp).toBeGreaterThan(0);
-
-    for (const row of res.body.data.rows) {
-      const pos = seeds.POSITIONS_SEED.find(p => p.ticker === row.ticker);
-      if (!pos) continue;
-
-      const expectedCost = pos.currency === "USD"
-        ? pos.shares * pos.costUSD * usdgbp   // total USD cost → GBP
-        : pos.shares * pos.costGBP;            // total GBP cost
-
-      // Allow 0.5% tolerance for floating point / FX rounding
-      const relativeDiff = Math.abs(row.costGBP_ - expectedCost) / (expectedCost || 1);
-      expect(relativeDiff).toBeLessThan(0.005);
-    }
-  });
-
-  test("pnlGBP = valGBP − costGBP_ for each row", async () => {
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    for (const row of res.body.data.rows) {
-      const expectedPnL = +(row.valGBP - row.costGBP_).toFixed(2);
-      expect(Math.abs(row.pnlGBP - expectedPnL)).toBeLessThan(0.02); // £0.02 tolerance
-    }
-  });
-
-  test("analystMetrics are present with valid HHI (0–10000) and beta", async () => {
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    const m = res.body.data.analystMetrics;
-
-    expect(m).toBeDefined();
-    expect(typeof m.weightedBeta).toBe("number");
-    expect(m.weightedBeta).toBeGreaterThan(0);
-
-    expect(typeof m.hhi).toBe("number");
-    expect(m.hhi).toBeGreaterThan(0);
-    expect(m.hhi).toBeLessThanOrEqual(10_000);
-
-    expect(typeof m.usdExposurePct).toBe("number");
-    expect(m.usdExposurePct).toBeGreaterThanOrEqual(0);
-    expect(m.usdExposurePct).toBeLessThanOrEqual(100);
-
-    expect(m.scenarioSensitivity).toBeInstanceOf(Array);
-    expect(m.scenarioSensitivity.length).toBeGreaterThan(0);
-
-    expect(typeof m.expectedImpactPct).toBe("number");
-  });
-
-  test("returns seeded values when prices are unavailable", async () => {
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    expect(res.status).toBe(200);
-    expect(res.body.data.rows).toBeInstanceOf(Array);
-    expect(res.body.data.rows.length).toBeGreaterThan(0);
-  });
-
-  test("T212 snapshot: costGBP_total used directly as cost basis (Phase 2)", async () => {
-    // Mock the snapshot so portfolio.js uses it instead of seeds
-    t212Mock.loadSnapshot.mockReturnValue(makeT212Snapshot());
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    expect(res.status).toBe(200);
-
-    const rows = res.body.data.rows;
-    expect(rows.length).toBe(2); // AMD + HIES from fixture
-
-    const amd  = rows.find(r => r.ticker === "AMD");
-    const hies = rows.find(r => r.ticker === "HIES");
-
-    expect(amd).toBeDefined();
-    expect(hies).toBeDefined();
-
-    // costGBP_ should come directly from costGBP_total, not shares × costPerShare
-    expect(Math.abs(amd.costGBP_  - 156.31)).toBeLessThan(0.02);
-    expect(Math.abs(hies.costGBP_ - 253.13)).toBeLessThan(0.02);
-  });
-
-  test("T212 snapshot: loadSnapshot consulted and row count matches snapshot positions", async () => {
-    // snapshotMeta is added to portfolioData but stripped by Zod on schema validation.
-    // Instead verify loadSnapshot was called and the row count matches the fixture.
-    t212Mock.loadSnapshot.mockReturnValue(makeT212Snapshot());
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-
-    const res = await request(app).get("/api/portfolio");
-    expect(res.status).toBe(200);
-    expect(t212Mock.loadSnapshot).toHaveBeenCalled();
-    // Fixture has 2 positions: AMD + HIES
-    expect(res.body.data.rows.length).toBe(2);
-    expect(res.body.data.rows.map(r => r.ticker).sort()).toEqual(["AMD", "HIES"]);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// /api/scenario — math correctness (Phase 1b fix) + per-factor (Phase 5)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("GET /api/scenario", () => {
-  test("named scenarios have non-zero totalImpactGBP (scenario engine fix)", async () => {
-    const res = await request(app).get("/api/scenario");
-    expect(res.status).toBe(200);
-
-    const scenarios = res.body.data?.scenarios ?? [];
-    expect(scenarios.length).toBeGreaterThan(0);
-
-    // At least one scenario (bear) should have a meaningful negative impact
-    const hasNonZero = scenarios.some(s => Math.abs(s.impact?.totalImpactGBP ?? 0) > 1);
-    expect(hasNonZero).toBe(true);
-  });
-
-  test("scenario impact rows sum to totalImpactGBP", async () => {
-    const res = await request(app).get("/api/scenario");
-    expect(res.status).toBe(200);
-
-    for (const sc of res.body.data?.scenarios ?? []) {
-      const rowSum = (sc.impact?.rows ?? []).reduce((s, r) => s + (r.impactGBP ?? 0), 0);
-      const diff   = Math.abs(rowSum - (sc.impact?.totalImpactGBP ?? 0));
-      expect(diff).toBeLessThan(0.05); // £0.05 rounding tolerance
-    }
-  });
-
-  test("POST /scenario/custom returns computed result with non-zero impact for -10% equity shock", async () => {
-    const res = await request(app)
-      .post("/api/scenario/custom")
-      .send({ equityMktDelta: -0.10, ratesDelta: 0, fxDelta: 0 });
-
-    expect(res.status).toBe(200);
-    expect(res.body.source).toBe("computed");
-    expect(res.body.data.impact.totalImpactGBP).toBeLessThan(-1); // meaningful negative impact
-    expect(res.body.data.impact.impactPct).toBeLessThan(0);
-  });
-
-  test("POST /scenario/custom validates bounds — equityMktDelta > 1 is rejected", async () => {
-    const res = await request(app)
-      .post("/api/scenario/custom")
-      .send({ equityMktDelta: 5 });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-
-  test("POST /scenario/custom returns per-factor decomposition per position (Phase 5)", async () => {
-    const res = await request(app)
-      .post("/api/scenario/custom")
-      .send({ equityMktDelta: -0.10, ratesDelta: 50, fxDelta: -0.05 });
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.impact.rows).toBeInstanceOf(Array);
-    expect(res.body.data.impact.rows.length).toBeGreaterThan(0);
-
-    for (const row of res.body.data.impact.rows) {
-      expect(typeof row.equityImpactGBP).toBe("number");
-      expect(typeof row.ratesImpactGBP).toBe("number");
-      expect(typeof row.fxImpactGBP).toBe("number");
-      expect(typeof row.totalImpactGBP).toBe("number");
-
-      // Sum of factor impacts should equal totalImpactGBP (within rounding)
-      const factorSum = row.equityImpactGBP + row.ratesImpactGBP + row.fxImpactGBP;
-      expect(Math.abs(factorSum - row.totalImpactGBP)).toBeLessThan(0.02);
-    }
-  });
-
-  test("POST /scenario/custom returns portfolio-level factor totals (Phase 5)", async () => {
-    const res = await request(app)
-      .post("/api/scenario/custom")
-      .send({ equityMktDelta: -0.10, ratesDelta: 50, fxDelta: -0.05 });
-
-    const impact = res.body.data.impact;
-    expect(typeof impact.totalEquityImpact).toBe("number");
-    expect(typeof impact.totalRatesImpact).toBe("number");
-    expect(typeof impact.totalFxImpact).toBe("number");
-    expect(typeof impact.totalImpactGBP).toBe("number");
-
-    // Verify portfolio-level totals are consistent with row sums
-    const rowEquitySum = impact.rows.reduce((s, r) => s + r.equityImpactGBP, 0);
-    const rowRatesSum  = impact.rows.reduce((s, r) => s + r.ratesImpactGBP,  0);
-    const rowFxSum     = impact.rows.reduce((s, r) => s + r.fxImpactGBP,     0);
-
-    expect(Math.abs(rowEquitySum - impact.totalEquityImpact)).toBeLessThan(0.05);
-    expect(Math.abs(rowRatesSum  - impact.totalRatesImpact)).toBeLessThan(0.05);
-    expect(Math.abs(rowFxSum     - impact.totalFxImpact)).toBeLessThan(0.05);
-  });
-
-  test("POST /scenario/custom includes assumptions object (Phase 5)", async () => {
-    const res = await request(app)
-      .post("/api/scenario/custom")
-      .send({ equityMktDelta: 0, ratesDelta: 0, fxDelta: 0 });
-
-    expect(res.body.data.assumptions).toBeDefined();
-    expect(res.body.data.assumptions.betas).toBeDefined();
-    expect(res.body.data.assumptions.rateDurations).toBeDefined();
-    expect(typeof res.body.data.assumptions.note).toBe("string");
   });
 });
 
@@ -895,117 +615,6 @@ describe("GET /api/explain/:ticker", () => {
     await request(app).get("/api/explain/HIES");
 
     expect(anthropicMock.fetchTickerExplain).toHaveBeenCalledTimes(2);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// /api/import — T212 CSV import (Phase 2)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("/api/import", () => {
-  test("GET /status returns hasSnapshot:false when no snapshot on disk", async () => {
-    t212Mock.loadSnapshot.mockReturnValue(null);
-
-    const res = await request(app).get("/api/import/status");
-    expect(res.status).toBe(200);
-    expect(res.body.hasSnapshot).toBe(false);
-    expect(res.body.snapshot).toBeNull();
-  });
-
-  test("GET /status returns metadata when snapshot exists", async () => {
-    t212Mock.loadSnapshot.mockReturnValue(makeT212Snapshot());
-
-    const res = await request(app).get("/api/import/status");
-    expect(res.status).toBe(200);
-    expect(res.body.hasSnapshot).toBe(true);
-    expect(res.body.snapshot.positionCount).toBe(2);
-    expect(res.body.snapshot.importedAt).toBe("2026-03-09T22:34:23.077Z");
-    expect(Array.isArray(res.body.snapshot.tickers)).toBe(true);
-    expect(res.body.snapshot.tickers).toContain("AMD");
-  });
-
-  test("POST /t212 with valid JSON body parses CSV and returns position summary", async () => {
-    const mockSnapshot = makeT212Snapshot();
-    t212Mock.parseCsv.mockReturnValue(mockSnapshot);
-    t212Mock.saveSnapshot.mockImplementation(() => {}); // no-op (no FS)
-
-    const csvStr = [
-      '"Slice","Name","Invested value","Value","Result","Owned quantity","Dividends gained","Dividends cash","Dividends reinvested"',
-      '"AMD","Advanced Micro Devices","156.31","148.23","-8.08","1.9366","0","0","0"',
-      '"HIES","iShares MSCI EM UCITS ETF","253.13","261.50","8.37","100","0","0","0"',
-    ].join("\n");
-
-    const res = await request(app)
-      .post("/api/import/t212")
-      .set("Content-Type", "application/json")
-      .send({ csv: csvStr, usdgbp: 0.7921 });
-
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.positionCount).toBe(2);
-    expect(typeof res.body.importedAt).toBe("string");
-    expect(t212Mock.parseCsv).toHaveBeenCalled();
-    expect(t212Mock.saveSnapshot).toHaveBeenCalled();
-  });
-
-  test("POST /t212 returns 400 when parseCsv throws (malformed CSV)", async () => {
-    t212Mock.parseCsv.mockImplementation(() => {
-      throw new Error("t212.parseCsv: missing expected columns: qty");
-    });
-
-    const res = await request(app)
-      .post("/api/import/t212")
-      .set("Content-Type", "application/json")
-      .send({ csv: "bad,csv,data\nno,valid,headers" });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("missing expected columns");
-  });
-
-  test("POST /t212 returns 400 when JSON body is missing the csv field", async () => {
-    const res = await request(app)
-      .post("/api/import/t212")
-      .set("Content-Type", "application/json")
-      .send({ usdgbp: 0.79 }); // no csv field
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
-  });
-
-  test("POST /t212 busts portfolio cache so next GET recomputes from snapshot", async () => {
-    // 1. Warm the portfolio cache (using seeds — no snapshot yet)
-    avMock.getQuote.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-    await request(app).get("/api/portfolio");
-    expect(cache.has("portfolio:data")).toBe(true);
-
-    // 2. Import a T212 snapshot — should delete the portfolio cache key
-    const mockSnapshot = makeT212Snapshot({
-      positions: [{
-        ticker: "AMD", name: "AMD", shares: 2, currency: "USD",
-        costGBP_total: 200, snapshotValueGBP_total: 190, snapshotPriceNative: 95,
-      }],
-      totalInvestedGBP: 200, totalValueGBP: 190,
-    });
-    t212Mock.parseCsv.mockReturnValue(mockSnapshot);
-    t212Mock.saveSnapshot.mockImplementation(() => {});
-
-    await request(app)
-      .post("/api/import/t212")
-      .set("Content-Type", "application/json")
-      .send({ csv: "some,csv,data", usdgbp: 0.79 });
-
-    // 3. Portfolio cache should now be busted
-    expect(cache.has("portfolio:data")).toBe(false);
-  });
-
-  test("POST /t212 returns 415 for unsupported Content-Type", async () => {
-    const res = await request(app)
-      .post("/api/import/t212")
-      .set("Content-Type", "application/xml")
-      .send("<csv>not valid</csv>");
-
-    expect(res.status).toBe(415);
-    expect(res.body.error).toBeDefined();
   });
 });
 

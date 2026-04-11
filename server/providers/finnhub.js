@@ -159,6 +159,24 @@ async function getNewsSentiment(ticker) {
 }
 
 /**
+ * getFxRate — real-time forex rate via Finnhub /forex/rates.
+ * Free tier, no daily cap. Used as primary FX source to save AV calls.
+ * Returns same shape as alphaVantage.getFxRate so callers are interchangeable.
+ */
+async function getFxRate(from = "USD", to = "GBP") {
+  const json = await finnhubGet(`/forex/rates?base=${from}`);
+  const rate = json?.quote?.[to];
+  if (!rate) throw new Error(`Finnhub: no ${from}/${to} rate in response`);
+  return {
+    fromCurrency:  from,
+    toCurrency:    to,
+    rate:          parseFloat(rate),
+    lastRefreshed: new Date().toISOString().slice(0, 19).replace("T", " "),
+    source:        "Finnhub",
+  };
+}
+
+/**
  * isConfigured — returns true if API key is set.
  */
 function isConfigured() {
@@ -171,6 +189,7 @@ module.exports = {
   getEarningsCalendar,
   getEconomicCalendar,
   getNewsSentiment,
+  getFxRate,
   isConfigured,
   TTL_NEWS_MS,
   TTL_CALENDAR_MS,

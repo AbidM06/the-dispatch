@@ -3,13 +3,19 @@
 .env.*
 !.env.example
 
-# ── Runtime data (personal/financial) ─────────────────────────────────────────
+# ── Runtime AI cache (regenerated on demand, must not be committed) ────────────
+server/.ai-cache.json
+
+# ── Runtime data (personal/financial — never commit) ──────────────────────────
 data/portfolio_snapshot.json
 data/execution_log.jsonl
 data/execution_state.json
 data/ideas_log.jsonl
 data/signals_log.jsonl
 data/trade_ideas.json
+data/bulletin_log.jsonl
+data/saved_models.json
+data/saved_ideas.json
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 node_modules/
@@ -19,6 +25,11 @@ node_modules/
 
 # ── Claude Code local state ────────────────────────────────────────────────────
 .claude/
+.mcp.json
+
+# ── Local design previews (not source) ────────────────────────────────────────
+.aidesigner/
+design-preview.html
 
 # ── Reports (generated, not source) ───────────────────────────────────────────
 reports/

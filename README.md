@@ -1,67 +1,58 @@
 # The Dispatch — Market Intelligence Dashboard
 
-A production-grade market intelligence and portfolio analytics dashboard, built for an economics student learning markets deeply and suitable for a demo to a JP Morgan trading desk.
+A personal market intelligence dashboard built by an economics student targeting S&T / Asset Management. Express API backend + single-file React SPA, no build step required.
+
+Live macro rates, AI-powered analysis, watchlist prices, trading ideas, correlation models, sell-side research reports, and an interview prep module — all in one place.
+
+---
+
+## Features
+
+| Tab | What it does |
+|-----|-------------|
+| **Snapshot** | Live FRED rates (10Y, real yield, breakeven, HY spread, curve), USD/GBP FX, US + international watchlist prices, RSI, interactive charts |
+| **Risk** | AI-scored risk monitor across 7 channels, refreshable with live news via Claude |
+| **Analytics** | Cross-asset correlation engine, MA crossover backtester, momentum scanner, model builder with IS/OOS split, AI narrative |
+| **Desk** | Trade idea tracker with risk/reward checks, AI idea generation, position sizing |
+| **Sales** | S&T macro view — morning note, scenario grid, cross-asset matrix, central bank reaction functions, institutional client impact map |
+| **News** | Live Finnhub headlines, economic + earnings calendar, company news + sentiment, AI morning bulletin with 1-min pitch script |
+| **Research** | AI sell-side report generator (macro note, sector deep-dive, thematic, rates, FX) |
+| **Glossary** | 80+ S&T / AM terms with definitions, interview angles, and term-of-the-day |
+| **Engine** | Automated idea engine with playbooks, Shariah universe scanner, backtester, execution log |
+| **Interview** | Flashcard system for S&T / AM interview prep — behavioural, markets, investment, product |
 
 ---
 
 ## Architecture
 
 ```
-Browser (client/index.html)
-        │  fetch('/api/...')
-        ▼
-┌───────────────────────────────────┐
-│  Express  :3001                   │
-│                                   │
-│  GET  /api/snapshot  ────────┐    │
-│  GET  /api/portfolio ────────┤    │
-│  GET  /api/risk      ────────┤    │
-│  POST /api/risk/refresh      │    │
-│  GET  /api/events    ────────┤    │
-│  POST /api/events/refresh    │    │
-│  GET  /api/explain/:ticker   │    │
-│  GET  /api/health            │    │
-│                              │    │
-│  server/cache.js  (TTL)      │    │
-│  server/retry.js  (backoff)  │    │
-│                              │    │
-└──────────────────────────────┘    │
-         │                          │
-    ┌────┴──────────────────────┐   │
-    │  Provider adapters        │   │
-    │  providers/fred.js        │   │
-    │  providers/alphaVantage.js│   │
-    │  providers/anthropic.js   │   │
-    └────┬──────────────────────┘   │
-         │                          │
-    ┌────▼──────────────────────┐   │
-    │  External APIs (server-   │   │
-    │  side only — keys never   │   │
-    │  reach the browser)       │   │
-    │                           │   │
-    │  api.stlouisfed.org/fred  │   │
-    │  alphavantage.co/query    │   │
-    │  api.anthropic.com/v1/... │   │
-    └───────────────────────────┘   │
+client/index.html          Single-file React 18 SPA (createElement, no JSX build step)
+server/index.js            Express entry point — mounts all routes
+server/routes/             One file per API domain
+server/providers/          Thin adapters for each external API
+server/engine/             Idea engine, correlation engine, backtest, exit logic
+server/analytics/          Deterministic narrative fallback
+server/cache.js            In-memory TTL cache singleton
+server/retry.js            withRetry, fetchWithTimeout, isRetryable
+seeds/fallback.js          Seed data for full graceful degradation
+data/                      Runtime JSONL logs (gitignored)
 ```
 
 ### Data flow
 
 ```
-Request → Check cache (TTLCache)
+Request → Check cache (TTL)
                │
-          HIT ─┤─ return { source:"cache", stale: bool }
+          HIT ─┴─ return { source:"cache", stale:bool }
                │
-          MISS ─► Fetch from live provider
-                      │
-                 OK ──┤── cache result, return { source:"live" }
-                      │
-                 ERR ─┤── Check stale cache
-                           │
-                      HIT ─┤── return { source:"cache", stale:true }
-                           │
-                      MISS ─► return seed fallback { source:"seeded", stale:true }
+          MISS ─► Live provider fetch
+                       │
+                  OK ──┴── cache + return { source:"live" }
+                       │
+                  ERR ─► Stale cache → Seed fallback { source:"seeded" }
 ```
+
+All API keys live server-side only. The browser makes only `fetch('/api/...')` calls — no key is ever exposed to the client.
 
 ---
 
@@ -69,134 +60,76 @@ Request → Check cache (TTLCache)
 
 ### 1. Get API keys (all free tiers)
 
-| Service       | URL                              | Notes                      |
-|---------------|----------------------------------|----------------------------|
-| Anthropic     | https://console.anthropic.com    | claude-sonnet-4-6 + web_search |
-| Alpha Vantage | https://www.alphavantage.co/support/#api-key | Free: 25 req/day |
-| FRED          | https://fred.stlouisfed.org/docs/api/api_key.html | Free |
+| Service | Sign-up URL | Free tier |
+|---------|-------------|-----------|
+| Anthropic | https://console.anthropic.com | Pay-as-you-go (very cheap) |
+| Alpha Vantage | https://www.alphavantage.co/support/#api-key | 25 req/day |
+| FRED | https://fred.stlouisfed.org/docs/api/api_key.html | Unlimited |
+| Polygon.io | https://polygon.io | Unlimited aggs (15-min delay) |
+| Finnhub | https://finnhub.io | 60 req/min |
 
 ### 2. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env and add your three API keys
+# Fill in your API keys
 ```
 
-### 3. Install dependencies
+### 3. Install and run
 
 ```bash
-cd the_dispatch
 npm install
-```
-
-### 4. Start the server
-
-```bash
 npm start
-# → Server running at http://localhost:3001
+# → http://localhost:3001
 ```
 
-Open http://localhost:3001 in your browser.
-
----
-
-## Development
-
 ```bash
-npm run dev   # nodemon auto-restart on file changes
-npm test      # run Jest test suite
+npm run dev    # auto-restart on file changes
+npm test       # Jest test suite (213 tests)
 ```
 
 ---
 
 ## Environment Variables
 
-| Variable              | Required | Default | Description                        |
-|-----------------------|----------|---------|------------------------------------|
-| `ANTHROPIC_API_KEY`   | ✅       | —       | Anthropic API key (sk-ant-...)      |
-| `ALPHA_VANTAGE_API_KEY` | ✅     | demo    | Alpha Vantage API key               |
-| `FRED_API_KEY`        | ✅       | —       | FRED API key                        |
-| `PORT`                | No       | 3001    | HTTP server port                    |
-| `CACHE_TTL_MARKET`    | No       | 5       | Market data cache TTL (minutes)     |
-| `CACHE_TTL_FRED`      | No       | 60      | FRED data cache TTL (minutes)       |
-| `CACHE_TTL_AI`        | No       | 30      | AI-generated content TTL (minutes)  |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes | — | Claude API — events, risk, research, bulletin |
+| `ALPHA_VANTAGE_API_KEY` | Yes | — | AMD quote + USD/GBP FX (2 calls/refresh) |
+| `FRED_API_KEY` | Yes | — | Rates: DGS10, DFII10, T10YIE, HY spread, curve |
+| `POLYGON_API_KEY` | Yes | — | Watchlist peers via `/v2/aggs` |
+| `FINNHUB_API_KEY` | Yes | — | News, earnings calendar, sentiment |
+| `PORT` | No | 3001 | HTTP port |
+| `LOW_COST_MODE` | No | false | Disables all AI calls, returns deterministic narrative |
+| `ANTHROPIC_DAILY_CAP` | No | 5 | USD daily spend cap |
+| `ANTHROPIC_MONTHLY_CAP` | No | 50 | USD monthly spend cap |
+| `DISPATCH_ADMIN_KEY` | No | — | If set, guards all POST/PATCH/DELETE routes |
+| `TRADING_ENABLED` | No | false | Master switch for paper trading |
+
+> **Tip:** The app degrades gracefully at every level. Missing keys = seeded fallback data, not errors. `LOW_COST_MODE=true` disables all AI and is free to run.
 
 ---
 
-## API Reference
+## Provider Notes
 
-### GET /api/snapshot
-Returns FRED rates, USD/GBP FX, US watchlist prices, chart history.
+**Alpha Vantage** — only used for AMD quote + USD/GBP FX. Free tier is 25 calls/day; the app uses exactly 2 per refresh. Do not add more AV symbols.
 
-**Response envelope** (all endpoints):
-```json
-{
-  "source":    "live | cache | seeded",
-  "fetchedAt": "2026-03-08T14:23:01.000Z",
-  "stale":     false,
-  "data":      { ... }
-}
-```
+**Polygon** — peers (`NVDA MSFT TSLA MU AMAT LRCX`) via `/v2/aggs/ticker/{sym}/range/1/day/...`. The `/v2/snapshot/` endpoint is paid-only (returns 403 on free tier) — this app deliberately avoids it.
 
-### GET /api/portfolio
-Computes live portfolio P&L for all 6 positions using live prices and USD/GBP FX.
+**FRED** — no meaningful rate limit. Rates data updates once daily; TTL is 60 min.
 
-### GET /api/risk
-Returns current risk monitor (7 items). Served from cache or seed fallback.
-
-### POST /api/risk/refresh
-Triggers Anthropic AI re-assessment with live web search. Updates cache.
-
-### GET /api/events
-Returns market events log + 3 economic analysis cards.
-
-### POST /api/events/refresh
-Triggers parallel Anthropic AI calls for events and econ analysis.
-
-### GET /api/explain/:ticker
-Returns AI explanation of any ticker or macro concept, grounded in portfolio context.
-Results are cached per ticker for 30 minutes.
-
-### GET /api/health
-Returns server uptime and API key status flags.
+**Anthropic** — budget tracked in-process. When the daily/monthly cap is hit, the server enters a 60-min deterministic fallback automatically. The fallback narrative is always available at zero cost.
 
 ---
 
 ## Caching Strategy
 
-| Data type              | TTL          | Notes                                      |
-|------------------------|--------------|--------------------------------------------|
-| FRED rates             | 60 min       | FRED only publishes once daily             |
-| Alpha Vantage prices   | 5 min        | Intraday; AV free tier is 25 req/day       |
-| AI events / econ       | 30 min       | Expensive — use POST /refresh on demand    |
-| AI risk scores         | 30 min       | Same                                        |
-| AI ticker explains     | 30 min       | Cached per ticker                           |
-
-Stale cache is always served in preference to a 500 error. The `stale` flag in the response envelope tells the UI to show a ⚠ badge.
-
----
-
-## Data Provenance
-
-Every API response includes:
-- `source`: `"live"` | `"cache"` | `"seeded"`
-- `fetchedAt`: ISO 8601 timestamp of when data was fetched
-- `stale`: boolean — true if serving stale/fallback data
-
-The client renders these as colour-coded source badges on each card:
-- 🟢 **LIVE** — fresh from the provider
-- 🟡 **CACHED** — from TTL cache (may be slightly delayed)
-- ⬜ **SEEDED** — hardcoded fallback (server offline / API key missing)
-
----
-
-## Security
-
-**The original dashboard called Anthropic's API directly from the browser** with `anthropic-dangerous-direct-browser-access: true` and stored the key in localStorage. This Phase 1 rewrite eliminates that completely:
-
-- All API keys are in `.env` (server-side only, gitignored)
-- The browser makes only `fetch('/api/...')` calls to the local Express server
-- No API key ever appears in browser network requests, localStorage, or JavaScript
+| Data | TTL | Notes |
+|------|-----|-------|
+| FRED rates | 60 min | Published once daily |
+| Market prices (AV + Polygon) | 30 min | Intraday with staleness badge |
+| AI events / risk / research | 24 h | Expensive — refresh on demand |
+| News / bulletin | 30 min / daily | Finnhub free tier |
 
 ---
 
@@ -204,54 +137,66 @@ The client renders these as colour-coded source badges on each card:
 
 ```
 the_dispatch/
-├── .env.example             ← Copy to .env and fill in keys
+├── .env.example
 ├── package.json
-├── README.md
-├── seeds/
-│   └── fallback.js          ← All hardcoded seed data with provenance
-├── server/
-│   ├── index.js             ← Express entry point
-│   ├── cache.js             ← TTL in-memory cache
-│   ├── retry.js             ← fetchWithTimeout + withRetry + isRetryable
-│   ├── schemas/
-│   │   └── index.js         ← Zod schemas for all API responses
-│   ├── providers/
-│   │   ├── alphaVantage.js  ← getQuote, getQuotes, getFxRate
-│   │   ├── fred.js          ← getLatestObservation, getAllRates, getRecentHistory
-│   │   └── anthropic.js     ← fetchMarketEvents, fetchRiskScores, fetchEconAnalysis,
-│   │                            fetchWatchlistPrices, fetchTickerExplain
-│   └── routes/
-│       ├── snapshot.js      ← GET /api/snapshot
-│       ├── portfolio.js     ← GET /api/portfolio
-│       ├── risk.js          ← GET /api/risk  POST /api/risk/refresh
-│       ├── events.js        ← GET /api/events  POST /api/events/refresh
-│       └── explain.js       ← GET /api/explain/:ticker
 ├── client/
-│   └── index.html           ← React 18 UMD SPA — all API calls via fetch('/api/...')
+│   └── index.html              ← Entire React frontend (no build)
+├── server/
+│   ├── index.js
+│   ├── cache.js
+│   ├── retry.js
+│   ├── middleware/auth.js
+│   ├── schemas/index.js        ← Zod validation
+│   ├── providers/
+│   │   ├── alphaVantage.js
+│   │   ├── polygon.js
+│   │   ├── fred.js
+│   │   ├── finnhub.js
+│   │   ├── anthropic.js
+│   │   ├── budget.js           ← Spend tracking + fallback state machine
+│   │   └── webhook.js
+│   ├── routes/
+│   │   ├── snapshot.js
+│   │   ├── events.js
+│   │   ├── risk.js
+│   │   ├── explain.js
+│   │   ├── bulletin.js
+│   │   ├── news.js
+│   │   ├── glossary.js
+│   │   ├── ideas.js
+│   │   ├── research.js
+│   │   ├── macro.js
+│   │   ├── correlations.js
+│   │   └── analytics.js
+│   ├── engine/
+│   │   ├── ideaEngine.js
+│   │   ├── exitEngine.js
+│   │   ├── correlationEngine.js
+│   │   ├── backtester.js
+│   │   ├── positionSizing.js
+│   │   ├── executionPolicy.js
+│   │   ├── glossary.js
+│   │   ├── playbooks.js
+│   │   └── universeScanner.js
+│   └── analytics/
+│       └── narrativeEngine.js  ← Deterministic fallback narrative
+├── seeds/
+│   └── fallback.js
+├── data/                       ← Runtime logs (gitignored)
 └── tests/
-    ├── providers.test.js    ← Unit tests: FRED, AV, cache, retry
-    └── endpoints.test.js    ← API contract tests (supertest + jest.mock)
+    ├── endpoints.test.js
+    ├── providers.test.js
+    └── ideaEngine.test.js
 ```
 
 ---
 
-## Portfolio Holdings
+## Design
 
-| Ticker | Name                            | Currency | Asset class          |
-|--------|---------------------------------|----------|----------------------|
-| AMD    | Advanced Micro Devices          | USD      | US equity            |
-| HIES   | iShares MSCI EM Semiconductors  | GBP      | EM semi ETF          |
-| HIUS   | iShares Core S&P 500 ETF        | GBP      | US large-cap ETF     |
-| HIJS   | iShares MSCI Japan Small Cap    | GBP      | Japan small-cap ETF  |
-| SGLN   | iShares Physical Gold ETC       | GBP      | Gold ETC             |
-| HBKS   | iShares $ Corp Bond ETF (GBP)   | GBP      | Investment grade bonds |
+Swiss editorial aesthetic — Playfair Display (headers) · IBM Plex Mono (data) · Inter (chrome). Dual day/night theme toggled per-session, persisted to localStorage.
 
 ---
 
-## Phase Roadmap
+## Licence
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| **1** | ✅ Done | Backend API, server-side keys, caching, fallback, schema validation |
-| **2** | Planned | Thesis workflow, scenario engine, attribution panel, Learning Mode |
-| **3** | Planned | Morning Note export, Risk Pack PDF, Desk Brief mode, confidence scores |
+MIT — built for learning, not for production trading.
