@@ -33,9 +33,6 @@ jest.mock("../server/providers/anthropic",    () => ({
   evaluateThesis:       jest.fn(),
   generateTradeIdeas:   jest.fn().mockResolvedValue([]),
 }));
-jest.mock("../server/importers/t212", () => ({
-  parseCsv: jest.fn(), loadSnapshot: jest.fn().mockReturnValue(null), saveSnapshot: jest.fn(),
-}));
 
 // Idea log — mock file I/O
 jest.mock("../server/importers/ideaLog", () => ({
@@ -116,8 +113,7 @@ beforeEach(() => {
   cache.clear();
   jest.clearAllMocks();
   // Re-apply stable mock returns after clearAllMocks
-  require("../server/importers/t212").loadSnapshot.mockReturnValue(null);
-  require("../server/importers/ideaLog").readIdeasLog.mockReturnValue([]);
+require("../server/importers/ideaLog").readIdeasLog.mockReturnValue([]);
   require("../server/providers/alpaca").isConfigured.mockReturnValue(false);
   require("../server/providers/alpaca").isAutoExecuteEnabled.mockReturnValue(false);
   require("../server/providers/alpaca").getSummary.mockResolvedValue(null);
