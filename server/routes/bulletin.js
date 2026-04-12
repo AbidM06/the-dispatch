@@ -197,7 +197,7 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
   const userPrompt   = buildUserPrompt(articleList, macroContext);
 
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 3000, MODEL_SONNET);
+    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 4500, MODEL_SONNET);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON object in Claude response");
 
@@ -324,7 +324,7 @@ module.exports.generateBulletin = async function() {
   const userPrompt   = buildUserPrompt(articleList, macroContext);
 
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 3000, MODEL_SONNET);
+    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 4500, MODEL_SONNET);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in Claude response");
     const cleaned   = deepStrip(JSON.parse(jsonMatch[0]));
