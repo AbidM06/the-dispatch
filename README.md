@@ -15,7 +15,7 @@ Live macro rates, AI-powered analysis, watchlist prices, trading ideas, correlat
 | **Analytics** | Cross-asset correlation engine, MA crossover backtester, momentum scanner, model builder with IS/OOS split, AI narrative |
 | **Desk** | Trade idea tracker with risk/reward checks, AI idea generation, position sizing |
 | **Sales** | S&T macro view — morning note, scenario grid, cross-asset matrix, central bank reaction functions, institutional client impact map |
-| **News** | Live Finnhub headlines, economic + earnings calendar, company news + sentiment, AI morning bulletin with 1-min pitch script |
+| **News** | Live Finnhub headlines, economic + earnings calendar, company news + sentiment, AI morning bulletin with 1-min pitch script (optionally cross-checked against verified live X/Twitter sentiment — see [Provider Notes](#provider-notes)) |
 | **Research** | AI sell-side report generator (macro note, sector deep-dive, thematic, rates, FX) |
 | **Glossary** | 80+ S&T / AM terms with definitions, interview angles, and term-of-the-day |
 | **Engine** | Automated idea engine with playbooks, Shariah universe scanner, backtester, execution log |
@@ -143,6 +143,13 @@ npm test       # Jest test suite (227 tests)
 **OpenAI** — optional fallback for research reports. If not set, the app falls back to a static deterministic narrative.
 
 **EIA** — optional. Used only for the commodities research report type. Free with no daily cap.
+
+**X/Twitter (optional, local-only, no API key)** — The morning bulletin can fold in live X/Twitter chatter related to the day's top story via [`opencli`](https://github.com/jackwener/opencli), which reuses your local Chrome session through a Browser Bridge extension — no Twitter API key, no scraping.
+
+- **Intent**: give the AI bulletin a real-time crowd-sentiment signal alongside the FRED/EIA/Finnhub data it already has, without the model fabricating "what people are saying."
+- **Complications**: X has no usable free API, so any integration either pays for access or relies on session reuse (fragile across environments). Raw search results are also full of bot clusters, off-topic noise, and unverifiable claims — feeding that straight into an LLM risks it repeating misinformation as fact.
+- **How it's handled**: `server/providers/twitter.js` shells out to `opencli` with a timeout and returns `null` on any failure (not installed, no browser session, daemon down). `server/providers/twitterVerify.js` runs every result through a verification pipeline *before* it reaches the prompt — filtering to financially-relevant and recent posts, deduping/clustering near-identical posts (a bot/coordination signal), unwinding quote-tweets to their original source, cross-referencing numeric claims (oil prices, 10Y yield) against the app's own live FRED/EIA data, and finally a Haiku pass that labels each surviving item `corroborated` / `plausible-unverified` / `contradicted` / `suspicious`. Only non-suspicious, non-contradicted items reach Claude, explicitly framed as sentiment color — never as a source of figures.
+- **Graceful degradation**: this is a pure addition. If `opencli` isn't installed or you're not logged into x.com in Chrome, the bulletin generates exactly as it did before — no config, no errors, no missing data.
 
 ---
 
