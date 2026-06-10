@@ -17,6 +17,9 @@
 const { Router }       = require("express");
 const finnhub          = require("../providers/finnhub");
 const fred             = require("../providers/fred");
+const eia              = require("../providers/eia");
+const twitter          = require("../providers/twitter");
+const twitterVerify    = require("../providers/twitterVerify");
 const { callClaude, MODEL_SONNET } = require("../providers/anthropic");
 const budget           = require("../providers/budget");
 const requireWriteAuth = require("../middleware/auth");
@@ -39,6 +42,17 @@ function deepStrip(obj) {
   return obj;
 }
 
+// Sonnet sometimes returns `opportunities` as a sibling of `tradingView` instead of
+// nested inside it. Move it into place so the client's analysis.tradingView.opportunities
+// read doesn't render an empty table.
+function fixOpportunitiesNesting(analysis) {
+  if (analysis && analysis.opportunities && analysis.tradingView && !analysis.tradingView.opportunities) {
+    analysis.tradingView.opportunities = analysis.opportunities;
+    delete analysis.opportunities;
+  }
+  return analysis;
+}
+
 // ── Live macro context from FRED ──────────────────────────────────────────────
 /** Fetch current FRED rates and format as a grounding data block for the prompt. */
 async function fetchMacroContext() {
@@ -57,6 +71,48 @@ async function fetchMacroContext() {
   }
 }
 
+// ── Live X/Twitter context (verified) ─────────────────────────────────────────
+/**
+ * Search X for chatter related to the top story, run it through the
+ * verification pipeline (dedup, recency, cross-reference, Haiku classification),
+ * and format the survivors as a grounding block.
+ *
+ * Degrades to null on any failure — opencli not installed, daemon down, no
+ * browser session, or Anthropic call failure all result in the bulletin
+ * proceeding exactly as before.
+ */
+async function fetchTwitterContext(headline) {
+  if (!headline) return null;
+  try {
+    const [fredRates, eiaPrices] = await Promise.all([
+      fred.getAllRates().catch(() => null),
+      eia.getLatestPrices().catch(() => null),
+    ]);
+
+    const query  = headline.length > 80 ? headline.slice(0, 80) : headline;
+    const tweets = await twitter.searchTweets(query, { limit: 15, filter: "live" });
+    if (!tweets || !tweets.length) return null;
+
+    const verified = await twitterVerify.verifyTweets(tweets, {
+      marketData:   { fredRates, eiaPrices },
+      contextLabel: headline,
+    });
+    if (!verified.length) return null;
+
+    return verified.map(v => {
+      const tags = [];
+      if (v.isAmplification)    tags.push(`amplifying @${v.claimAuthor}`);
+      if (v.clusterSize > 1)    tags.push(`${v.clusterSize}x similar posts`);
+      if (v.crossRef.tag !== "n/a") tags.push(`cross-ref: ${v.crossRef.tag}${v.crossRef.note ? " — " + v.crossRef.note : ""}`);
+      const tagStr = tags.length ? ` (${tags.join("; ")})` : "";
+      return `- @${v.author}: "${v.text}"${tagStr} [${v.verdict}]`;
+    }).join("\n");
+  } catch (err) {
+    console.warn("[bulletin] Twitter context unavailable:", err.message);
+    return null;
+  }
+}
+
 // ── Shared prompt builders ────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are a dual-role expert: (1) a senior macro economist at a major research house, and (2) a senior S&T professional at JPMorgan briefing buy-side clients before market open. You produce morning bulletins combining rigorous economic analysis with immediately actionable cross-asset trading ideas. Your audience is an Economics student preparing for JPMorgan Spring Week.
 
@@ -67,13 +123,17 @@ ACCURACY RULES — NON-NEGOTIABLE:
 - Trade rationales must follow a direct, mechanistic causal chain from the article to the asset. No speculative leaps without a stated transmission mechanism.
 - Every sentence must carry information. No filler phrases, no hedging language that adds no meaning.`;
 
-function buildUserPrompt(articleList, macroContext) {
+function buildUserPrompt(articleList, macroContext, xContext) {
   const macroBlock = macroContext
     ? `LIVE MACRO DATA (FRED, as of ${todayStr()}):\n${macroContext}\n\n`
     : "";
 
+  const xBlock = xContext
+    ? `X / SOCIAL CONTEXT (verified live posts related to today's top story — each tagged with a reliability verdict):\n${xContext}\n\nUse this only as supplementary color for clientExposure/clientConcerns or sentiment framing. Treat "plausible-unverified" as opinion, not fact. Never use this block as the source of any specific figure — figures must come from the article or the live macro data above.\n\n`
+    : "";
+
   return `Today is ${todayStr()}.
-${macroBlock}ARTICLES (Finnhub real-time feed — select the single most market-moving story):
+${macroBlock}${xBlock}ARTICLES (Finnhub real-time feed — select the single most market-moving story):
 ${articleList}
 
 Your tasks:
@@ -194,10 +254,11 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
 
   // ── 3. Generate with Claude ────────────────────────────────────────────────
   const macroContext = await fetchMacroContext();
-  const userPrompt   = buildUserPrompt(articleList, macroContext);
+  const xContext     = await fetchTwitterContext(articles[0]?.headline);
+  const userPrompt   = buildUserPrompt(articleList, macroContext, xContext);
 
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 4500, MODEL_SONNET);
+    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON object in Claude response");
 
@@ -211,7 +272,7 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
       dataSource:  "finnhub",
       article:     cleaned.article    || {},
       pitchScript: cleaned.pitchScript || "",
-      analysis:    cleaned.analysis   || {},
+      analysis:    fixOpportunitiesNesting(cleaned.analysis || {}),
       metadata: {
         next_fetch:  new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) + "T07:00:00Z",
         api_version: "1.1",
@@ -321,10 +382,11 @@ module.exports.generateBulletin = async function() {
   }
 
   const macroContext = await fetchMacroContext();
-  const userPrompt   = buildUserPrompt(articleList, macroContext);
+  const xContext     = await fetchTwitterContext(articles[0]?.headline);
+  const userPrompt   = buildUserPrompt(articleList, macroContext, xContext);
 
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 4500, MODEL_SONNET);
+    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON in Claude response");
     const cleaned   = deepStrip(JSON.parse(jsonMatch[0]));
@@ -332,7 +394,7 @@ module.exports.generateBulletin = async function() {
       date: todayStr(), bulletinId: `${todayStr()}-${(cleaned.article?.source||"finnhub").toLowerCase().replace(/\s+/g,"-")}`,
       generatedAt: now(), dataSource: "finnhub",
       article: cleaned.article || {}, pitchScript: cleaned.pitchScript || "",
-      analysis: cleaned.analysis || {},
+      analysis: fixOpportunitiesNesting(cleaned.analysis || {}),
       metadata: { next_fetch: new Date(Date.now()+86_400_000).toISOString().slice(0,10)+"T07:00:00Z", api_version: "1.1" },
     };
     appendBulletin(bulletin);
