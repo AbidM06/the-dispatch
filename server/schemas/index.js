@@ -200,6 +200,33 @@ const ExplainResponse = Envelope.extend({
   data: ExplainPayload,
 });
 
+// ── /api/pitch/:ticker ────────────────────────────────────────────────────────
+const PitchRiskItem = z.object({
+  risk:       z.string(),
+  mitigation: z.string(),
+});
+
+const PitchPayload = z.object({
+  ticker:       z.string(),
+  companyName:  z.string(),
+  direction:    z.enum(["OVERWEIGHT", "UNDERWEIGHT"]),
+  priceTarget:  z.number().nullable(),
+  currentPrice: z.number().nullable(),
+  timeframe:    z.string(),
+  upsidePct:    z.number().nullable(),
+  conclusion:   z.string(),
+  scene:        z.string(),
+  thesis:       z.string(),
+  catalyst:     z.string(),
+  risks:        z.array(PitchRiskItem),
+  hedge:        z.string(),
+  confidence:   z.number().min(0).max(100),
+});
+
+const PitchResponse = Envelope.extend({
+  data: PitchPayload,
+});
+
 // ── /api/ideas ────────────────────────────────────────────────────────────────
 const RiskCheckItem = z.object({
   name:   z.string(),
@@ -365,6 +392,7 @@ module.exports = {
     RiskResponse,
     EventsResponse,
     ExplainResponse,
+    PitchResponse,
     BriefResponse,
     IdeaItem,
     IdeaStats,

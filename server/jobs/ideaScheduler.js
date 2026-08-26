@@ -23,7 +23,7 @@ const cache     = require("../cache");
 const seeds     = require("../../seeds/fallback");
 const { generateIdeas, buildCtx } = require("../engine/ideaEngine");
 const { appendIdeasLog, appendSignalsLog } = require("../importers/ideaLog");
-const { loadIdeas, addIdea }   = require("../importers/ideas");
+const { loadIdeas, addIdea, saveIdeas } = require("../importers/ideas");
 const { computeMetrics } = require("../analytics/paperTrader");
 const { generateWeeklyReport, saveWeeklyReport } = require("./weeklyReview");
 const { autoExecuteIdeas } = require("../engine/autoExecute");
@@ -38,6 +38,53 @@ const TICK_INTERVAL_MS = 60_000;                    // check every minute
 
 function cooldownMin() {
   return parseInt(process.env.ENGINE_COOLDOWN_MIN ?? "30", 10);
+}
+
+function maxOpenIdeas() {
+  return parseInt(process.env.MAX_OPEN_IDEAS ?? "60", 10);
+}
+
+const PENDING_EXPIRY_DAYS = 14;
+
+/**
+ * Idea data hygiene — runs before persisting new tickets each engine cycle:
+ *  1. Expire PENDING_APPROVAL ideas older than PENDING_EXPIRY_DAYS (never reviewed).
+ *  2. Drop duplicate tickets that match an existing OPEN idea on ticker + playbook
+ *     (the universe-scan playbook re-proposes the same setup every run otherwise).
+ *  3. If still at/over MAX_OPEN_IDEAS after expiry, drop the lowest-confidence
+ *     incoming tickets so the open book never grows unbounded.
+ * Returns { tickets: keptTickets, expiredCount, dedupedCount }
+ */
+function applyIdeaHygiene(store, tickets) {
+  const now = Date.now();
+  const expiryMs = PENDING_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+  let expiredCount = 0;
+
+  for (const idea of store.ideas) {
+    if (idea.status === "OPEN" && idea.executionStatus === "PENDING_APPROVAL") {
+      const age = now - new Date(idea.openedAt).getTime();
+      if (age > expiryMs) {
+        idea.status = "CLOSED";
+        idea.outcome = "EXPIRED";
+        idea.closedAt = new Date().toISOString();
+        idea.executionStatus = "SKIPPED";
+        expiredCount++;
+      }
+    }
+  }
+
+  const openIdeas = store.ideas.filter(i => i.status === "OPEN");
+  const openKeys = new Set(openIdeas.map(i => `${i.ticker}|${i.playbook || "manual"}`));
+
+  let deduped = tickets.filter(t => !openKeys.has(`${t.ticker}|${t.playbook}`));
+  const dedupedCount = tickets.length - deduped.length;
+
+  const room = Math.max(0, maxOpenIdeas() - openIdeas.length);
+  if (deduped.length > room) {
+    deduped = [...deduped].sort((a, b) => (b.confidence || 0) - (a.confidence || 0)).slice(0, room);
+  }
+
+  return { tickets: deduped, expiredCount, dedupedCount };
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -154,9 +201,17 @@ async function runEngine() {
     appendIdeasLog({ ideas: tickets, regime: ctx.regime, totalIdeas: tickets.length });
     appendSignalsLog({ signals: ctx.signals, rates: ctx.rates, regime: ctx.regime });
 
+    // ── Idea hygiene: expire stale pending ideas, dedupe vs. existing open book, cap size ──
+    const store = loadIdeas();
+    const { tickets: keptTickets, expiredCount, dedupedCount } = applyIdeaHygiene(store, tickets);
+    if (expiredCount > 0 || dedupedCount > 0) {
+      saveIdeas(store.ideas);
+      console.log(`[scheduler] Idea hygiene — expired ${expiredCount} stale pending idea(s), deduped ${dedupedCount} repeat ticket(s).`);
+    }
+
     // ── Persist as PENDING_APPROVAL + fire webhook ──
     const persisted = [];
-    for (const ticket of tickets) {
+    for (const ticket of keptTickets) {
       try {
         const idea = addIdea(ticketToIdea(ticket));
         persisted.push(idea);
@@ -183,7 +238,7 @@ async function runEngine() {
       playbookPerf = Object.fromEntries(bt.byPlaybook.map(p => [p.playbookId, p]));
     } catch (_) {}
 
-    const execResult = await autoExecuteIdeas(tickets, ctx, playbookPerf);
+    const execResult = await autoExecuteIdeas(keptTickets, ctx, playbookPerf);
 
     if (execResult.enabled) {
       console.log(`[scheduler] Auto-execution: ${execResult.orders.length} executed, ${execResult.skipped.length} skipped.`);

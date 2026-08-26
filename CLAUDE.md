@@ -267,6 +267,48 @@ top setups. No API calls.
 
 ---
 
+## Institutional Research — five-agent pipeline + interrogation
+
+### Architecture (`server/research/`)
+```
+orchestrator.js        Pipeline: draft → extract → parallel(auditor, redTeam, PM) → chair → gate → bounded revision
+llm.js                 Role-based Anthropic adapter (budget-gated, per-role model env vars, optional web_search)
+claimLedger.js         Claim normalization, audit merge, hard-fail detection (CLM-xxx ids)
+sourceRegistry.js      Source validation/dedup/tier inference (SRC-xxx ids) — never invents URLs
+qualityGate.js         15-dimension weighted score + deterministic hard fails (prob sums, unsupported claims, dangling sources)
+reportStore.js         Versioned report persistence (data/research_reports/, gitignored; memory-only in tests)
+interrogator.js        Truth-over-agreement chat pinned to a reportId; corrections append with audit trail
+agents/                leadAnalyst (draft reuses fetchResearchReport + extraction + revision), dataAuditor,
+                       redTeam, portfolioTranslator, icChair
+```
+
+### Key behaviours
+- **Report types**: macro, fx, rates, thematic, equity, commodities + **sector** (new).
+- **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
+  QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
+- Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
+  All calls pass through `budget.checkAndIncrement()` — raise `ANTHROPIC_DAILY_CAP` (e.g. 15+) for regular use.
+- Reviewer failure → verdict `NOT_RUN`, disclosed in QA; never fake a passed review (seeded fallback ⇒ `QA: NOT_RUN`).
+- Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).
+- Interrogation conversations are pinned to their reportId — a newer report sets `newerReportAvailable: true` but never swaps context.
+- Corrections: `store.addCorrection()` appends `COR-xxx` entries + marks claims `CORRECTED` — history is never silently mutated.
+
+### Endpoints
+- `GET  /api/research/report?type=` (cached 24h) · `POST /api/research/report/refresh` (auth)
+- `GET  /api/research/report/progress?type=` — live stage labels during generation
+- `GET  /api/research/report/versions?type=`
+- `GET  /api/research/report/:reportId/qa` · `GET /api/research/report/:reportId/sources`
+- `POST /api/research/interrogate` `{reportId, question ≤2000ch, conversationId?}` (auth; 503 + `aiStatus: UNAVAILABLE` when AI off)
+
+### Env vars
+`RESEARCH_MULTI_AGENT` (default true), `RESEARCH_MIN_QA_SCORE` (85), `RESEARCH_MAX_VALIDATION_ROUNDS` (2),
+`RESEARCH_MAX_AGENT_CALLS` (8), per-role models: `RESEARCH_{LEAD,EXTRACT,AUDITOR,REDTEAM,PORTFOLIO,CHAIR,CHAT}_MODEL`.
+
+### Frontend (client/index.html)
+QA strip (score/status/claims/sources) + expandable QA panel (agent verdicts, disagreements, claim ledger,
+corrections log) + source registry viewer + interrogation chat (`.interro-*`, `.qa-*`, `.claim-*`, `.src-*` CSS).
+Progress polling replaces time-guessed phase messages when the orchestrator reports a real stage.
+
 ## Scheduled task
 A daily prefetch task (`dispatch-daily-price-prefetch`) runs at 09:37 AM on weekdays and
 calls `POST /api/snapshot/prefetch` to warm the cache before market opens. This uses

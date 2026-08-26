@@ -7,11 +7,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600&family=IBM+Plex+Mono:wght@300;400;500;600&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
 <!-- Load order: React → ReactDOM → PropTypes → D3 → Recharts -->
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
-<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" integrity="sha384-tMH8h3BGESGckSAVGZ82T9n90ztNXxvdwvdM6UoR56cYcf+0iGXBliJ29D+wZ/x8"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" integrity="sha384-bm7MnzvK++ykSwVJ2tynSE5TRdN+xL418osEVF2DE/L/gfWHj91J2Sphe582B1Bh"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js" integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js" integrity="sha384-TRYH/YWi2ytN9lydJdE9y40mI/nRmd0K1lNM3l2YGvSp0zlJb/NfWROALrugcMy5"></script>
 
 <style>
 /* ── THE DISPATCH — Swiss Editorial ─────────────────────────────────────────
@@ -210,6 +210,10 @@ body {
   line-height: 1;
 }
 .theme-toggle:hover { background: var(--gold-dim); border-color: var(--gold); }
+[data-density="comfortable"] #root { zoom: 1.18; }
+@supports not (zoom: 1) {
+  [data-density="comfortable"] #root { transform: scale(1.18); transform-origin: top left; width: 84.7%; }
+}
 .sb-footer {
   padding: 12px 10px 14px;
   border-top: 1px solid rgba(255,255,255,.055);
@@ -548,6 +552,8 @@ tbody tr:hover td { background: var(--bg-alt); }
 .bt-month-lbl { font-size: 8px; color: var(--ink-low); margin-right: 4px; }
 .bt-executed-badge { font-size: 8px; padding: 1px 6px; border-radius: 3px; background: rgba(62,207,142,.1); color: var(--green); border: 1px solid rgba(62,207,142,.22); }
 .bt-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-top: 10px; }
+.backtest-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px,1fr)); gap: 8px; padding: 12px 0; }
+.backtest-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px,1fr)); gap: 8px; padding: 10px 0; }
 .bt-metric-cell { background: rgba(255,255,255,.025); border: 1px solid var(--border); padding: 8px 12px; border-radius: var(--radius-sm); }
 .bt-metric-lbl  { font-size: 8px; letter-spacing: .1em; color: var(--ink-low); text-transform: uppercase; }
 .bt-metric-val  { font-size: 14px; font-weight: 600; color: var(--ink); margin-top: 2px; }
@@ -579,10 +585,53 @@ tbody tr:hover td { background: var(--bg-alt); }
 .research-risk-channel, .research-risk-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .research-risk-text  { color: var(--ink-mid); }
 .research-risk-mag   { color: var(--red); font-size: 9px; letter-spacing: .08em; }
-.research-market-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(130px,1fr)); gap: 8px; margin-bottom: 12px; }
-.research-mkt-item   { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
-.research-mkt-label  { font-size: 8px; letter-spacing: .12em; color: var(--ink-low); text-transform: uppercase; margin-bottom: 4px; }
-.research-mkt-text   { font-size: 12px; color: var(--ink); font-weight: 500; }
+.research-market-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 8px; margin-bottom: 12px; }
+.research-mkt-item   { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; }
+.research-mkt-label  { font-size: clamp(9px,0.75vw,10.5px); letter-spacing: .12em; color: var(--ink-low); text-transform: uppercase; margin-bottom: 4px; }
+.research-mkt-text   { font-size: clamp(12px,1.1vw,14px); color: var(--ink); font-weight: 500; }
+
+/* ── INSTITUTIONAL QA ── */
+.qa-strip            { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; background: var(--bg-card); }
+.qa-score            { font-family: var(--mono); font-size: 20px; font-weight: 700; }
+.qa-score-approved   { color: var(--green); }
+.qa-score-caveats    { color: var(--gold); }
+.qa-score-fail       { color: var(--red); }
+.qa-status-badge     { font-size: 9px; letter-spacing: .12em; padding: 3px 10px; border-radius: 3px; border: 1px solid var(--border-med); text-transform: uppercase; font-weight: 600; }
+.qa-strip-stat       { font-size: clamp(10px,0.85vw,11.5px); color: var(--ink-mid); font-family: var(--mono); }
+.qa-strip-stat b     { color: var(--ink); }
+.qa-panel            { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; background: var(--bg-card); }
+.qa-section-lbl      { font-size: 9px; letter-spacing: .16em; color: var(--ink-low); text-transform: uppercase; margin: 12px 0 6px; }
+.qa-verdict-row      { display: grid; grid-template-columns: 150px 90px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: clamp(11px,0.9vw,12.5px); align-items: start; }
+.qa-verdict-agent    { color: var(--ink); font-weight: 600; }
+.qa-verdict-verdict  { font-family: var(--mono); font-size: clamp(9px,0.78vw,10.5px); letter-spacing: .06em; }
+.qa-verdict-detail   { color: var(--ink-mid); line-height: 1.55; }
+.qa-item             { font-size: clamp(11px,0.9vw,12.5px); color: var(--ink-mid); padding: 5px 0; border-bottom: 1px solid var(--border); line-height: 1.55; }
+.qa-item::before     { content: '◆ '; color: var(--gold); font-size: 8px; }
+.claim-row           { display: grid; grid-template-columns: 62px 88px 1fr 110px; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: clamp(10px,0.85vw,11.5px); align-items: start; }
+.claim-id            { font-family: var(--mono); color: var(--ink-low); font-size: clamp(9px,0.75vw,10px); }
+.claim-class         { font-family: var(--mono); font-size: clamp(8.5px,0.72vw,9.5px); letter-spacing: .06em; color: var(--steel); }
+.claim-statement     { color: var(--ink-mid); line-height: 1.5; }
+.claim-status        { font-family: var(--mono); font-size: clamp(8.5px,0.72vw,9.5px); letter-spacing: .05em; text-align: right; }
+.src-row             { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: clamp(10.5px,0.88vw,12px); }
+.src-title           { color: var(--ink); font-weight: 500; }
+.src-meta            { font-family: var(--mono); font-size: clamp(8.5px,0.72vw,9.5px); color: var(--ink-low); margin-top: 2px; letter-spacing: .04em; }
+.src-tier            { display: inline-block; padding: 1px 6px; border: 1px solid var(--border-med); border-radius: 3px; margin-right: 6px; }
+
+/* ── RESEARCH INTERROGATION ── */
+.interro-wrap        { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); margin-bottom: 18px; overflow: hidden; }
+.interro-head        { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.interro-title       { font-size: 9px; letter-spacing: .18em; color: var(--ink-low); text-transform: uppercase; font-weight: 600; }
+.interro-messages    { max-height: 480px; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.interro-msg-user    { align-self: flex-end; max-width: 82%; background: var(--gold-dim); border: 1px solid var(--gold-border); border-radius: var(--radius) var(--radius) 3px var(--radius); padding: 9px 13px; font-size: clamp(11.5px,0.95vw,13px); color: var(--ink); line-height: 1.6; }
+.interro-msg-analyst { align-self: flex-start; max-width: 88%; border: 1px solid var(--border); border-radius: var(--radius) var(--radius) var(--radius) 3px; padding: 11px 14px; font-size: clamp(11.5px,0.95vw,13px); color: var(--ink-mid); line-height: 1.65; white-space: pre-wrap; }
+.interro-msg-meta    { font-family: var(--mono); font-size: clamp(8.5px,0.72vw,9.5px); color: var(--ink-low); letter-spacing: .06em; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; }
+.interro-correction  { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--red); background: rgba(240,107,107,.06); font-size: clamp(10.5px,0.85vw,12px); line-height: 1.55; }
+.interro-input-row   { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+.interro-input       { flex: 1; padding: 9px 13px; font-family: var(--mono); font-size: clamp(10px,0.85vw,11.5px); border: 1px solid var(--border); background: transparent; color: var(--ink); border-radius: var(--radius-sm); }
+.interro-suggested   { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 16px 14px; }
+.interro-chip        { font-size: clamp(9px,0.78vw,10.5px); font-family: var(--mono); padding: 4px 10px; border: 1px solid var(--border); border-radius: 12px; color: var(--ink-mid); cursor: pointer; transition: all .15s; }
+.interro-chip:hover  { border-color: var(--gold-border); color: var(--gold); }
+.interro-stance      { padding: 1px 7px; border-radius: 3px; border: 1px solid var(--border-med); }
 
 /* ── REPORT COMPONENTS (rp-*) ── */
 .rp-wrap         { animation: fadeUp .24s var(--ease) both; }
@@ -621,7 +670,7 @@ tbody tr:hover td { background: var(--bg-alt); }
 .rp-da-win { color: var(--green); } .rp-da-lose { color: var(--red); }
 .rp-da-wl        { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .rp-dispatch-angle { font-size: 12px; color: var(--ink-mid); line-height: 1.65; }
-.rp-watchpoint   { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--ink-mid); }
+.rp-watchpoint   { padding: 9px 0; border-bottom: 1px solid var(--border); font-size: clamp(12px,1.1vw,14px); color: var(--ink-mid); line-height: 1.6; }
 .rp-watchpoints  { list-style: none; }
 .rp-client-matrix { width: 100%; border-collapse: collapse; }
 .rp-cm-head      { background: rgba(255,255,255,.04); }
@@ -680,39 +729,39 @@ tbody tr:hover td { background: var(--bg-alt); }
 .client-talking     { font-size: clamp(12px,1.1vw,14px); color: var(--green); line-height: 1.7; }
 
 /* ── THEMATIC ── */
-.thematic-themes-grid   { display: grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr)); gap: 12px; }
-.thematic-theme-card    { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; transition: border-color .15s; }
+.thematic-themes-grid   { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
+.thematic-theme-card    { background: var(--bg-card); border: 1px solid var(--border); border-top-width: 3px; border-radius: var(--radius); padding: 18px; transition: border-color .15s; }
 .thematic-theme-card:hover { border-color: var(--border-med); }
-.thematic-theme-name    { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
-.thematic-theme-desc    { font-size: 11px; color: var(--ink-mid); line-height: 1.55; }
-.thematic-theme-stock   { font-size: 10px; color: var(--blue); margin-top: 6px; }
+.thematic-theme-name    { font-size: clamp(13px,1.1vw,15px); font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.thematic-theme-desc    { font-size: clamp(11px,0.9vw,13px); color: var(--ink-mid); line-height: 1.6; }
+.thematic-theme-stock   { font-size: clamp(10px,0.85vw,11.5px); color: var(--blue); margin-top: 6px; }
 .thematic-debate        { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 14px; }
 .thematic-debate-title  { font-size: 13px; font-weight: 600; color: var(--ink); padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .thematic-debate-cols   { display: grid; grid-template-columns: 1fr 1fr; }
-.thematic-debate-col-head { padding: 8px 14px; font-size: 9px; letter-spacing: .14em; font-weight: 600; text-transform: uppercase; }
+.thematic-debate-col-head { padding: 8px 14px; font-size: clamp(9px,0.75vw,10.5px); letter-spacing: .14em; font-weight: 600; text-transform: uppercase; }
 .thematic-debate-bull   { background: rgba(62,207,142,.06); color: var(--green); }
 .thematic-debate-bear   { background: rgba(240,107,107,.06); color: var(--red); }
-.thematic-debate-view   { padding: 10px 14px; font-size: 11.5px; color: var(--ink-mid); line-height: 1.65; border-top: 1px solid var(--border); }
-.thematic-pred-theme    { font-size: 9px; letter-spacing: .12em; color: var(--gold); text-transform: uppercase; }
-.thematic-pred-text     { font-size: 12px; color: var(--ink-mid); line-height: 1.6; }
-.thematic-pred-body     { padding: 10px 14px; }
-.thematic-pred-impl     { font-size: 11px; color: var(--blue); margin-top: 6px; }
-.thematic-pred-n        { font-size: 9px; color: var(--ink-low); }
+.thematic-debate-view   { padding: 10px 14px; font-size: clamp(11.5px,0.95vw,13px); color: var(--ink-mid); line-height: 1.65; border-top: 1px solid var(--border); }
+.thematic-pred-theme    { font-size: clamp(9px,0.75vw,10.5px); letter-spacing: .12em; color: var(--gold); text-transform: uppercase; }
+.thematic-pred-text     { font-size: clamp(12px,1.1vw,14px); color: var(--ink-mid); line-height: 1.65; }
+.thematic-pred-body     { padding: 12px 16px; }
+.thematic-pred-impl     { font-size: clamp(11px,0.9vw,12.5px); color: var(--blue); margin-top: 6px; }
+.thematic-pred-n        { font-size: clamp(9px,0.75vw,10.5px); color: var(--ink-low); }
 .thematic-predictions   { list-style: none; }
 
 /* ── FX ── */
 .fx-pair-table { width: 100%; border-collapse: collapse; }
 .fx-type-badge { font-size: 8px; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border); color: var(--ink-mid); letter-spacing: .08em; }
 .fx-barbell      { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.fx-barbell-head { font-size: 9px; letter-spacing: .14em; color: var(--ink-low); text-transform: uppercase; margin-bottom: 8px; }
-.fx-barbell-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--ink-mid); }
+.fx-barbell-head { font-size: clamp(9px,0.75vw,10.5px); letter-spacing: .14em; color: var(--ink-low); text-transform: uppercase; margin-bottom: 8px; }
+.fx-barbell-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: clamp(11px,0.9vw,13px); color: var(--ink-mid); line-height: 1.6; }
 
 /* ── RATES ── */
-.rates-catalyst-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap: 10px; }
-.rates-catalyst      { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
-.rates-catalyst-name { font-size: 10px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
-.rates-catalyst-n    { font-size: 8px; color: var(--ink-low); }
-.rates-catalyst-text { font-size: 11px; color: var(--ink-mid); line-height: 1.55; }
+.rates-catalyst-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; }
+.rates-catalyst      { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; }
+.rates-catalyst-name { font-size: clamp(13px,1.1vw,15px); font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.rates-catalyst-n    { font-size: clamp(9px,0.75vw,10.5px); color: var(--ink-low); }
+.rates-catalyst-text { font-size: clamp(11px,0.9vw,13px); color: var(--ink-mid); line-height: 1.6; }
 .rates-levels-table  { width: 100%; border-collapse: collapse; }
 .rates-client-box    { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 8px; }
 .rates-puzzle-box    { background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; }
@@ -829,6 +878,12 @@ tbody tr:hover td { background: var(--bg-alt); }
 .iv-card-a blockquote { margin: 0 0 0 2px; padding: 10px 16px; border-left: 2px solid var(--gold); background: var(--gold-dim); font-style: italic; color: var(--ink); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .iv-card-tips { padding-top: 12px; border-top: 1px dashed var(--border); font-size: 9px; line-height: 1.65; color: var(--ink-low); }
 .iv-card-tips strong { color: var(--ink); font-weight: 600; }
+.iv-srs-row { display: flex; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.iv-srs-btn { flex: 1; font-size: 8.5px; letter-spacing: .08em; padding: 8px 10px; border: 1px solid; cursor: pointer; transition: all .15s; background: none; border-radius: var(--radius-sm); }
+.iv-srs-again { border-color: rgba(239,90,90,.4); color: var(--neg); }
+.iv-srs-again:hover { background: rgba(239,90,90,.12); border-color: var(--neg); }
+.iv-srs-good { border-color: rgba(62,207,142,.4); color: var(--pos); }
+.iv-srs-good:hover { background: rgba(62,207,142,.12); border-color: var(--pos); }
 .iv-controls { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .iv-nav-btn   { font-size: 9px; letter-spacing: .08em; padding: 7px 16px; border: 1px solid var(--border); background: none; color: var(--ink); cursor: pointer; transition: all .15s; border-radius: var(--radius-sm); }
 .iv-nav-btn:hover:not(:disabled) { background: rgba(255,255,255,.08); border-color: var(--border-med); }
@@ -992,6 +1047,16 @@ function App() {
     setThemeMode(m => m === 'day' ? 'night' : 'day');
   }
 
+  // ── Density toggle (compact terminal vs. comfortable reading) ────────────
+  const [density, setDensity] = useState(() => localStorage.getItem('dispatch-density') || 'compact');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-density', density);
+    localStorage.setItem('dispatch-density', density);
+  }, [density]);
+  function toggleDensity() {
+    setDensity(d => d === 'compact' ? 'comfortable' : 'compact');
+  }
+
   // ── Data state ─────────────────────────────────────────────────────────────
   const [snapshot, setSnapshot]       = useState(null);
   const [snapshotMeta, setSnapshotMeta] = useState(null);
@@ -1009,6 +1074,12 @@ function App() {
   const [openExplainer, setOpenExplainer] = useState(null);
   const [explainData, setExplainData] = useState({});
   const [explainLoading, setExplainLoading] = useState({});
+
+  const [pitchTicker, setPitchTicker]   = useState(null); // ticker currently shown in pitch modal, or null
+  const [pitchData, setPitchData]       = useState({});   // { TICKER: pitchPayload }
+  const [pitchMeta, setPitchMeta]       = useState({});   // { TICKER: { source, fetchedAt, stale } }
+  const [pitchLoading, setPitchLoading] = useState({});   // { TICKER: bool }
+  const [pitchConfirm, setPitchConfirm] = useState(null); // ticker pending cost confirmation, or null
 
   // ── Phase 1 — DESK state ───────────────────────────────────────────────────
   const [brief, setBrief]               = useState(null);
@@ -1090,6 +1161,16 @@ function App() {
   const [savedLoaded, setSavedLoaded]         = useState(false);
   const [customNarrative, setCustomNarrative] = useState(null);
   const [customNarrLoading, setCustomNarrLoading] = useState(false);
+  // ── BACKTEST STRATEGY (technical signal backtester) state ─────────────────
+  const [stratOpen, setStratOpen]         = useState(false);
+  const [stratTicker, setStratTicker]     = useState('AMD');
+  const [stratStrategy, setStratStrategy] = useState('sma_crossover');
+  const [stratDays, setStratDays]         = useState(252);
+  const [stratParams, setStratParams]     = useState({ fast_period: 20, slow_period: 50 });
+  const [stratResult, setStratResult]     = useState(null);
+  const [stratRunning, setStratRunning]   = useState(false);
+  const [stratError, setStratError]       = useState(null);
+  const [stratDefaults, setStratDefaults] = useState(null);
   // ── RESEARCH (sell-side report) state ─────────────────────────────────────
   const [research, setResearch]           = useState(null);
   const [researchSource, setResearchSource] = useState(null);
@@ -1112,9 +1193,24 @@ function App() {
   const [ivTimerSecs, setIvTimerSecs]   = useState(120);
   const [ivTimerActive, setIvTimerActive] = useState(false);
   const [ivShowDos, setIvShowDos]       = useState(true);
+  const [ivSrs, setIvSrs]               = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dispatch_iv_srs') || '{}'); } catch(e) { return {}; }
+  });
+  const [ivDueOnly, setIvDueOnly]       = useState(false);
 
   // ── Budget / cost transparency ─────────────────────────────────────────────
   const [budgetStatus, setBudgetStatus]   = useState(null);
+
+  // ── Research: institutional QA + interrogation ─────────────────────────────
+  const [qaPanelOpen, setQaPanelOpen]         = useState(false);
+  const [srcPanelOpen, setSrcPanelOpen]       = useState(false);
+  const [qaDetail, setQaDetail]               = useState(null);   // /qa response for current report
+  const [srcDetail, setSrcDetail]             = useState(null);   // /sources response
+  const [interroMessages, setInterroMessages] = useState([]);     // {role, text, stance, confidence, corrections, evidenceUsed, usedWebSearch}
+  const [interroInput, setInterroInput]       = useState('');
+  const [interroLoading, setInterroLoading]   = useState(false);
+  const [interroConvId, setInterroConvId]     = useState(null);
+  const [researchProgress, setResearchProgress] = useState(null); // {stage, label, detail}
 
   // ── Toast ──────────────────────────────────────────────────────────────────
   function showToast(msg, type = 'info') {
@@ -1131,6 +1227,27 @@ function App() {
     const id = setInterval(() => setResearchElapsed(s => s + 1), 1000);
     return () => clearInterval(id);
   }, [researchLoading]);
+
+  // ── Research pipeline progress — poll stage labels while generating ─────────
+  useEffect(() => {
+    if (!researchLoading) { setResearchProgress(null); return; }
+    const poll = async () => {
+      try {
+        const resp = await apiFetch('/api/research/report/progress?type=' + researchType);
+        if (resp.progress) setResearchProgress(resp.progress);
+      } catch (_) {}
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, [researchLoading, researchType]);
+
+  // ── Reset QA/interrogation state whenever the displayed report changes ──────
+  useEffect(() => {
+    setQaPanelOpen(false); setSrcPanelOpen(false);
+    setQaDetail(null); setSrcDetail(null);
+    setInterroMessages([]); setInterroConvId(null); setInterroInput('');
+  }, [research && research.reportId]);
 
   // ── Fetch snapshot on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -1222,6 +1339,41 @@ function App() {
       setExplainData(prev => ({ ...prev, [key]: { ticker, what: 'Unavailable', now: err.message, portfolio: '', confidence: 0 } }));
     }
     setExplainLoading(prev => ({ ...prev, [key]: false }));
+  }
+
+  // ── PITCH: manual, on-demand single-stock pitch ─────────────────────────────
+  // Uses 1 Anthropic (Sonnet) call, cached 24h per ticker. Strictly user-triggered
+  // — never called automatically. See pitchConfirm for the cost-confirmation step.
+  async function generatePitchFor(ticker, { force = false } = {}) {
+    setPitchLoading(prev => ({ ...prev, [ticker]: true }));
+    setPitchTicker(ticker);
+    try {
+      const url  = `/api/pitch/${encodeURIComponent(ticker)}${force ? '?force=true' : ''}`;
+      const resp = await apiFetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+      setPitchData(prev => ({ ...prev, [ticker]: resp.data }));
+      setPitchMeta(prev => ({ ...prev, [ticker]: { source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale } }));
+      if (resp.source === 'error') {
+        showToast(resp._note || resp._error || 'Pitch unavailable', 'error');
+      }
+    } catch (err) {
+      showToast('Pitch generation failed: ' + err.message, 'error');
+    }
+    setPitchLoading(prev => ({ ...prev, [ticker]: false }));
+  }
+
+  // Opens modal immediately if a cached pitch exists; otherwise asks for cost confirmation.
+  function requestPitch(ticker) {
+    if (pitchData[ticker]) {
+      setPitchTicker(ticker);
+      return;
+    }
+    setPitchConfirm(ticker);
+  }
+
+  function confirmPitch() {
+    const ticker = pitchConfirm;
+    setPitchConfirm(null);
+    if (ticker) generatePitchFor(ticker);
   }
 
   // ── DESK: load brief ──────────────────────────────────────────────────────
@@ -1462,6 +1614,62 @@ function App() {
     }
   }
 
+  // ── BACKTEST STRATEGY: ticker quick-picks + strategy default params ──────
+  const STRAT_TICKERS = [
+    'AMD','NVDA','MSFT','TSLA','MU','AMAT','LRCX',
+    'TSM','SONY','NOW',
+    'EWY','EWT','EWJ','MCHI',
+    '005930.KS','000660.KS','2330.TW','6758.T',
+  ];
+
+  const STRAT_DEFAULTS = {
+    sma_crossover:   { fast_period: 20, slow_period: 50 },
+    ema_crossover:   { fast_period: 12, slow_period: 26 },
+    rsi_reversal:    { period: 14, oversold: 30, overbought: 70 },
+    macd:            { fast: 12, slow: 26, signal: 9 },
+    bollinger_bands: { period: 20, std_dev: 2.0 },
+    mean_reversion:  { period: 20, z_threshold: 2.0 },
+    momentum:        { period: 14, threshold: 5.0 },
+  };
+
+  function applyStratStrategy(id) {
+    setStratStrategy(id);
+    setStratParams((stratDefaults && stratDefaults[id]) || STRAT_DEFAULTS[id] || {});
+  }
+
+  async function loadStratDefaults() {
+    if (stratDefaults) return;
+    try {
+      const resp = await apiFetch('/api/analytics/strategy-backtest/strategies');
+      const map = {};
+      (resp.data || []).forEach(s => { map[s.id] = s.defaultParams; });
+      setStratDefaults(map);
+    } catch (_) { /* fall back to local STRAT_DEFAULTS */ }
+  }
+
+  async function runTechnicalBacktest() {
+    const ticker = (stratTicker || '').trim().toUpperCase();
+    if (!ticker) { showToast('Enter a ticker', 'info'); return; }
+    setStratRunning(true);
+    setStratResult(null);
+    setStratError(null);
+    try {
+      const qs = new URLSearchParams({
+        ticker,
+        strategy: stratStrategy,
+        days: String(stratDays),
+        params: JSON.stringify(stratParams),
+      });
+      const resp = await apiFetch(`/api/analytics/strategy-backtest?${qs.toString()}`);
+      setStratResult(resp.data);
+    } catch (err) {
+      setStratError(err.message);
+      showToast('Backtest error: ' + err.message, 'error');
+    } finally {
+      setStratRunning(false);
+    }
+  }
+
   async function loadSavedModels() {
     setSavedLoaded(false);
     try {
@@ -1537,6 +1745,59 @@ function App() {
       showToast('Research error: ' + err.message, 'error');
     }
     setResearchLoading(false);
+  }
+
+  // ── RESEARCH: institutional QA + sources viewers ──────────────────────────
+  async function toggleQaPanel() {
+    const next = !qaPanelOpen;
+    setQaPanelOpen(next);
+    if (next && !qaDetail && research && research.reportId) {
+      try {
+        const resp = await apiFetch('/api/research/report/' + research.reportId + '/qa');
+        setQaDetail(resp);
+      } catch (err) { showToast('QA detail error: ' + err.message, 'error'); }
+    }
+  }
+
+  async function toggleSrcPanel() {
+    const next = !srcPanelOpen;
+    setSrcPanelOpen(next);
+    if (next && !srcDetail && research && research.reportId) {
+      try {
+        const resp = await apiFetch('/api/research/report/' + research.reportId + '/sources');
+        setSrcDetail(resp);
+      } catch (err) { showToast('Sources error: ' + err.message, 'error'); }
+    }
+  }
+
+  // ── RESEARCH: interrogation chat ──────────────────────────────────────────
+  async function askResearch(questionText) {
+    const question = (questionText || interroInput).trim();
+    if (!question || interroLoading || !research || !research.reportId) return;
+    setInterroInput('');
+    setInterroMessages(prev => [...prev, { role: 'user', text: question }]);
+    setInterroLoading(true);
+    try {
+      const resp = await apiFetch('/api/research/interrogate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportId: research.reportId, question, conversationId: interroConvId || undefined }),
+      });
+      setInterroConvId(resp.conversationId);
+      setInterroMessages(prev => [...prev, {
+        role: 'analyst', text: resp.answer, stance: resp.stance, confidence: resp.confidence,
+        corrections: resp.corrections || [], evidenceUsed: resp.evidenceUsed || [],
+        usedWebSearch: resp.usedWebSearch, newerReportAvailable: resp.newerReportAvailable,
+      }]);
+      if ((resp.corrections || []).length) {
+        setQaDetail(null); // corrections change the QA record — refetch on next open
+        showToast('Report correction recorded (' + resp.corrections.length + ')', 'info');
+      }
+      loadBudgetStatus();
+    } catch (err) {
+      setInterroMessages(prev => [...prev, { role: 'analyst', text: '⚠ ' + err.message, stance: 'UNAVAILABLE', confidence: null, corrections: [] }]);
+    }
+    setInterroLoading(false);
   }
 
   // ── SALES: load macro view ────────────────────────────────────────────────
@@ -1759,6 +2020,137 @@ function App() {
     );
   }
 
+  // ── PITCH: button, cost-confirmation dialog, and result modal ──────────────
+  // Manual-only — clicking PITCH always prompts a cost confirmation before any
+  // AI call is made (unless a cached pitch already exists for this ticker).
+  function PitchButton(ticker) {
+    return React.createElement('button', {
+      className: 'btn',
+      style: { fontSize:9, padding:'2px 8px' },
+      onClick: e => { e.stopPropagation(); requestPitch(ticker); },
+      title: `Generate a single-stock pitch for ${ticker}`,
+    }, 'PITCH');
+  }
+
+  function PitchConfirmDialog() {
+    if (!pitchConfirm) return null;
+    const ticker = pitchConfirm;
+    return React.createElement('div', {
+      className: 'overlay',
+      onClick: e => { if (e.target === e.currentTarget) setPitchConfirm(null); },
+    },
+      React.createElement('div', { className: 'overlay-box' },
+        React.createElement('div', { className: 'card-title', style:{ marginBottom:12 } }, `GENERATE PITCH — ${ticker}`),
+        React.createElement('div', { style:{ color:'var(--steel)', fontSize:12, marginBottom:14, lineHeight:1.5 } },
+          'This calls Claude (Sonnet) with live web search to produce a 5-section equity pitch — ',
+          'conclusion, business overview, thesis, catalyst, and risks/hedge.'
+        ),
+        React.createElement(AICostBadge, { calls: 1, cached: '24h' }),
+        React.createElement('div', { style:{ color:'var(--steel)', fontSize:11, marginTop:10, marginBottom:18 } },
+          'Estimated cost: ~$0.05–0.15. Counts against your daily Anthropic call cap. Result is cached for 24h.'
+        ),
+        React.createElement('div', { style:{ display:'flex', gap:10 } },
+          React.createElement('button', { className:'btn btn-primary', onClick: confirmPitch }, 'GENERATE'),
+          React.createElement('button', { className:'btn', onClick: () => setPitchConfirm(null) }, 'CANCEL')
+        )
+      )
+    );
+  }
+
+  function PitchModal() {
+    if (!pitchTicker) return null;
+    const ticker  = pitchTicker;
+    const loading = pitchLoading[ticker];
+    const data    = pitchData[ticker];
+    const meta    = pitchMeta[ticker];
+
+    return React.createElement('div', {
+      className: 'overlay',
+      onClick: e => { if (e.target === e.currentTarget) setPitchTicker(null); },
+    },
+      React.createElement('div', { className: 'overlay-box', style:{ maxWidth:680, maxHeight:'85vh', overflowY:'auto' } },
+        React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 } },
+          React.createElement('div', { className: 'card-title' }, `PITCH — ${ticker}${data?.companyName ? ' · ' + data.companyName : ''}`),
+          React.createElement('button', { className:'btn', onClick: () => setPitchTicker(null) }, 'CLOSE')
+        ),
+
+        loading && React.createElement('div', { style:{ color:'var(--steel)', textAlign:'center', padding:'30px' } },
+          React.createElement('span', { className:'spin' }, '↻'), ' Generating pitch — running web search…'
+        ),
+
+        !loading && data && React.createElement(React.Fragment, null,
+          meta && React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement(SourceBadge, meta)
+          ),
+
+          // 1. Conclusion
+          React.createElement('div', { style:{
+            fontFamily:'var(--serif)', fontSize:16, fontWeight:700, lineHeight:1.5,
+            padding:'12px 14px', marginBottom:16,
+            background: data.direction === 'OVERWEIGHT' ? 'rgba(63,185,80,.08)' : 'rgba(200,57,43,.08)',
+            border: `1px solid ${data.direction === 'OVERWEIGHT' ? 'rgba(63,185,80,.2)' : 'rgba(200,57,43,.2)'}`,
+          } },
+            React.createElement('span', { className:`badge ${data.direction === 'OVERWEIGHT' ? 'badge-low' : 'badge-high'}`, style:{ marginRight:8 } }, data.direction),
+            data.conclusion
+          ),
+
+          // Setting the scene
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('div', { className:'explainer-row-label', style:{ color:'var(--gold)' } }, '▸ SETTING THE SCENE'),
+            React.createElement('div', { style:{ color:'var(--ink)', fontSize:12.5, lineHeight:1.6, marginTop:4 } }, data.scene)
+          ),
+
+          // Investment thesis
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('div', { className:'explainer-row-label', style:{ color:'var(--blue)' } }, '▸ INVESTMENT THESIS'),
+            React.createElement('div', { style:{ color:'var(--ink)', fontSize:12.5, lineHeight:1.6, marginTop:4 } }, data.thesis)
+          ),
+
+          // Catalyst
+          React.createElement('div', { style:{ marginBottom:14 } },
+            React.createElement('div', { className:'explainer-row-label', style:{ color:'var(--green)' } }, '▸ CATALYST'),
+            React.createElement('div', { style:{ color:'var(--ink)', fontSize:12.5, lineHeight:1.6, marginTop:4 } }, data.catalyst)
+          ),
+
+          // Risks + hedge
+          React.createElement('div', { style:{ marginBottom:6 } },
+            React.createElement('div', { className:'explainer-row-label', style:{ color:'var(--red, #c8392b)' } }, '▸ RISKS & HEDGE'),
+            React.createElement('div', { style:{ marginTop:6 } },
+              (data.risks || []).map((r, i) => React.createElement('div', { key:i, style:{ marginBottom:6, fontSize:12, lineHeight:1.5 } },
+                React.createElement('div', { style:{ color:'var(--ink)' } }, `${i+1}. ${r.risk}`),
+                r.mitigation && React.createElement('div', { style:{ color:'var(--steel)', paddingLeft:14 } }, `→ ${r.mitigation}`)
+              ))
+            ),
+            data.hedge && React.createElement('div', { style:{ marginTop:8, fontSize:12, lineHeight:1.6, color:'var(--ink)' } },
+              React.createElement('strong', null, 'Hedge: '), data.hedge
+            )
+          ),
+
+          // Footer stats
+          React.createElement('div', { style:{ fontFamily:'var(--mono)', fontSize:9, color:'var(--steel)', marginTop:16, display:'flex', gap:14, flexWrap:'wrap' } },
+            data.priceTarget != null && React.createElement('span', null, `TARGET: $${data.priceTarget}`),
+            data.currentPrice != null && React.createElement('span', null, `CURRENT: $${data.currentPrice}`),
+            data.upsidePct != null && React.createElement('span', null, `${data.upsidePct > 0 ? '+' : ''}${data.upsidePct}% ${data.upsidePct >= 0 ? 'UPSIDE' : 'DOWNSIDE'}`),
+            data.timeframe && React.createElement('span', null, `HORIZON: ${data.timeframe}`),
+            React.createElement('span', null, `CONFIDENCE: ${data.confidence}%`)
+          ),
+
+          React.createElement('div', { style:{ display:'flex', gap:10, marginTop:18 } },
+            React.createElement('button', {
+              className:'btn',
+              disabled: loading,
+              onClick: () => generatePitchFor(ticker, { force: true }),
+            }, 'REGENERATE (NEW AI CALL)')
+          )
+        ),
+
+        !loading && !data && React.createElement('div', { style:{ color:'var(--steel)', textAlign:'center', padding:'30px' } },
+          'Pitch unavailable.'
+        )
+      )
+    );
+  }
+
   // ── MARKET TAB ─────────────────────────────────────────────────────────────
   function renderMarket() {
     const rates = snapshot?.rates || {};
@@ -1870,6 +2262,7 @@ function App() {
             React.createElement('div', null,
               React.createElement('div', { className:'ticker' }, w.sym),
               React.createElement('div', { style:{fontSize:10,color:'var(--steel)'} }, w.note),
+              React.createElement('div', { style:{marginTop:4} }, PitchButton(w.sym)),
             ),
             React.createElement('div', { style:{textAlign:'right'} },
               React.createElement('div', { className:`wl-price ${w.chg < 0 ? 'neg' : 'pos'}` },
@@ -2744,13 +3137,388 @@ function App() {
           onClick: () => { setBuilderOpen(v => !v); if (!savedLoaded) loadSavedModels(); },
           style:{ borderColor: builderOpen ? 'var(--gold)' : undefined, color: builderOpen ? 'var(--gold)' : undefined },
           title: 'Build and save your own custom cross-asset backtest model',
-        }, builderOpen ? 'CLOSE BUILDER' : 'BUILD MODEL')
+        }, builderOpen ? 'CLOSE BUILDER' : 'BUILD MODEL'),
+        React.createElement('button', {
+          className:'btn',
+          onClick: () => { setStratOpen(v => !v); loadStratDefaults(); },
+          style:{ borderColor: stratOpen ? 'var(--gold)' : undefined, color: stratOpen ? 'var(--gold)' : undefined },
+          title: 'Backtest a technical signal strategy (SMA, RSI, MACD, etc.) on any ticker — US, ADR, ETF, or Asian listing',
+        }, stratOpen ? 'CLOSE STRATEGY' : 'BACKTEST STRATEGY')
       )
     );
 
+    const selectStyle = { background:'var(--bg-alt)',border:'1px solid rgba(255,255,255,.08)',borderRadius:'var(--radius)',color:'var(--ink)',fontFamily:'var(--mono)',fontSize:10,padding:'6px 8px',width:'100%' };
+    const labelStyle  = { fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',letterSpacing:'0.08em',marginBottom:4,display:'block' };
+    const periodBtnStyle = (active) => ({ fontFamily:'var(--mono)',fontSize:9,padding:'4px 10px',borderRadius:'var(--radius)',border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',background: active ? 'var(--gold)' : 'var(--bg-alt)',color: active ? '#000' : 'var(--ink)',fontWeight: active ? 700 : 400 });
+
+    const builderPanel = builderOpen && React.createElement('div', { className:'card', style:{marginBottom:20,borderTop:'2px solid var(--gold)'} },
+      React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,fontWeight:700,color:'var(--gold)',letterSpacing:'0.12em',marginBottom:16} }, '⊕ MODEL BUILDER'),
+
+      // Row 1: series selectors
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 40px 1fr',gap:8,alignItems:'end',marginBottom:14} },
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'DRIVER SERIES (independent variable)'),
+          React.createElement('select', { style:selectStyle, value:builderDriver, onChange:e => setBuilderDriver(e.target.value) },
+            BUILDER_SERIES.map(s => React.createElement('option', { key:s.id, value:s.id }, s.name))
+          )
+        ),
+        React.createElement('div', { style:{textAlign:'center',paddingBottom:8,color:'var(--steel)',fontFamily:'var(--mono)',fontSize:12} }, '→'),
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'TARGET SERIES (dependent variable)'),
+          React.createElement('select', { style:selectStyle, value:builderTarget, onChange:e => setBuilderTarget(e.target.value) },
+            BUILDER_SERIES.map(s => React.createElement('option', { key:s.id, value:s.id }, s.name))
+          )
+        )
+      ),
+
+      // Row 2: direction + strategy
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:14} },
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'CORRELATION DIRECTION'),
+          React.createElement('div', { style:{display:'flex',gap:8} },
+            React.createElement('button', { style:periodBtnStyle(builderDirection === 1), onClick:() => setBuilderDirection(1) }, '+1 Positive'),
+            React.createElement('button', { style:periodBtnStyle(builderDirection === -1), onClick:() => setBuilderDirection(-1) }, '−1 Negative')
+          ),
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
+            builderDirection === 1 ? 'Driver rises → target rises (e.g. HY spreads → VIX)' : 'Driver rises → target falls (e.g. real yield → gold)'
+          )
+        ),
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'STRATEGY'),
+          React.createElement('div', { style:{display:'flex',gap:8} },
+            React.createElement('button', { style:periodBtnStyle(builderStrategy === 'ma-crossover'), onClick:() => setBuilderStrategy('ma-crossover') }, 'Trend Following'),
+            React.createElement('button', { style:periodBtnStyle(builderStrategy === 'zscore-reversion'), onClick:() => setBuilderStrategy('zscore-reversion') }, 'Mean Reversion')
+          ),
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
+            builderStrategy === 'ma-crossover'
+              ? 'MA crossover on driver → follow the trend in target. Auto-optimises fast/slow params by Sharpe.'
+              : 'Z-score on driver → when extreme, fade it. Enter when driver is 1.5σ above/below its 12M mean.'
+          )
+        )
+      ),
+
+      // Row 3: period presets
+      React.createElement('div', { style:{marginBottom:14} },
+        React.createElement('span', { style:labelStyle }, 'SAMPLE PERIOD'),
+        React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10} },
+          [['full','Full History (2014–now)'],['pre-covid','Pre-COVID (2014–2019)'],['rate-cycle','Rate Cycle (2020–now)'],['post-hike','Post-Hike (2022–now)'],['custom','Custom']].map(([key,lbl]) =>
+            React.createElement('button', { key, style:periodBtnStyle(builderPeriod === key), onClick:() => applyBuilderPreset(key) }, lbl)
+          )
+        ),
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8} },
+          ...[
+            ['IS START', builderISStart, setBuilderISStart],
+            ['IS END',   builderISEnd,   setBuilderISEnd],
+            ['OOS START',builderOOSStart,setBuilderOOSStart],
+            ['OOS END',  builderOOSEnd,  setBuilderOOSEnd],
+          ].map(([lbl, val, setter]) =>
+            React.createElement('div', { key:lbl },
+              React.createElement('span', { style:labelStyle }, lbl),
+              React.createElement('input', {
+                type:'date', value:val,
+                onChange: e => { setter(e.target.value); setBuilderPeriod('custom'); },
+                style:{ ...selectStyle, width:'calc(100% - 18px)' },
+              })
+            )
+          )
+        ),
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
+          'IS = in-sample (parameter optimisation). OOS = out-of-sample (walk-forward test, no re-optimisation). Leave OOS END blank for present.'
+        )
+      ),
+
+      // Row 4: name + run buttons
+      React.createElement('div', { style:{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'} },
+        React.createElement('div', { style:{flex:1,minWidth:160} },
+          React.createElement('span', { style:labelStyle }, 'MODEL NAME (optional for save)'),
+          React.createElement('input', {
+            type:'text', value:builderName, placeholder:`${builderDriver} → ${builderTarget}`,
+            onChange: e => setBuilderName(e.target.value),
+            style:{ ...selectStyle, width:'calc(100% - 18px)' },
+          })
+        ),
+        React.createElement('button', {
+          className:'btn', style:{ whiteSpace:'nowrap' },
+          disabled: builderRunning || builderDriver === builderTarget,
+          onClick: () => runBuilderBacktest(false),
+        }, builderRunning ? 'RUNNING…' : 'RUN'),
+        React.createElement('button', {
+          className:'btn', style:{ whiteSpace:'nowrap', borderColor:'var(--gold)', color:'var(--gold)' },
+          disabled: builderRunning || builderDriver === builderTarget,
+          onClick: () => runBuilderBacktest(true),
+          title: 'Run backtest and save to model library',
+        }, builderRunning ? 'SAVING…' : 'SAVE & RUN'),
+      )
+    );
+
+    // ── Custom result card ────────────────────────────────────────────────────
+    const br = builderResult?.result;
+    const brRegime = builderResult?.regime;
+    const customResultCard = br && React.createElement('div', { className:'card', style:{marginBottom:20,borderLeft:'2px solid var(--gold)'} },
+      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,flexWrap:'wrap',gap:8} },
+        React.createElement('div', null,
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:700,color:'var(--ink)'} }, br.name || 'Custom Model'),
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginTop:2} },
+            `${br.driverSeriesId} → ${br.targetSeriesId}  ·  ${br.strategy === 'zscore-reversion' ? 'Mean Reversion' : 'Trend Following'}  ·  Direction ${br.direction > 0 ? '+1' : '−1'}`
+          )
+        ),
+        React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center'} },
+          React.createElement('span', { className:`signal-badge-${br.currentSignal === 1 ? 'long' : br.currentSignal === -1 ? 'short' : 'flat'}` },
+            br.currentSignal === 1 ? '▲ LONG' : br.currentSignal === -1 ? '▼ SHORT' : '— FLAT'
+          ),
+          React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, `r = ${br.fullCorrelation?.toFixed(3) ?? '—'}`)
+        )
+      ),
+      br.error ? React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,color:'var(--red)',padding:'8px 0'} }, '⚠ ' + br.error) :
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },
+        ...[['IN-SAMPLE', br.backtest?.inSample], ['OUT-OF-SAMPLE', br.backtest?.outSample]].map(([label, m]) =>
+          React.createElement('div', { key:label, style:{background:'var(--bg-alt)',borderRadius:'var(--radius)',padding:12} },
+            React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:'var(--steel)',letterSpacing:'0.1em',marginBottom:8} }, label + (m?.n ? ` (${m.n}mo)` : '')),
+            React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4} },
+              ...([
+                ['SHARPE', m?.sharpe != null ? m.sharpe + '×' : '—', m?.sharpe > 1 ? 'var(--green)' : m?.sharpe < 0 ? 'var(--red)' : 'var(--ink)'],
+                ['RETURN', m?.totalReturn != null ? (m.totalReturn >= 0 ? '+' : '') + m.totalReturn + '%' : '—', m?.totalReturn > 0 ? 'var(--green)' : m?.totalReturn < 0 ? 'var(--red)' : 'var(--ink)'],
+                ['MAX DD', m?.maxDD != null ? m.maxDD + '%' : '—', 'var(--red)'],
+                ['HIT RATE', m?.hitRate != null ? m.hitRate + '%' : '—', 'var(--ink)'],
+              ].map(([k,v,c]) =>
+                React.createElement('div', { key:k },
+                  React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:7,color:'var(--steel)'} }, k),
+                  React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:700,color:c} }, v)
+                )
+              ))
+            )
+          )
+        )
+      ),
+      // OOS degradation warning
+      br.backtest?.inSample?.sharpe != null && br.backtest?.outSample?.sharpe != null &&
+        br.backtest.outSample.sharpe < br.backtest.inSample.sharpe * 0.5 &&
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'#F59E0B',background:'rgba(245,158,11,.07)',borderRadius:'var(--radius)',padding:'6px 10px',marginBottom:10} },
+          '⚠ OOS Sharpe is less than half of IS Sharpe — significant out-of-sample degradation. Treat this signal with caution in a client context.'
+        ),
+      // Action row
+      !br.error && React.createElement('div', { style:{display:'flex',gap:8,flexWrap:'wrap'} },
+        !builderResult?.model && React.createElement('button', {
+          className:'btn', style:{ borderColor:'var(--gold)', color:'var(--gold)' },
+          onClick: () => runBuilderBacktest(true),
+          title: 'Save this model to your library',
+        }, 'SAVE MODEL'),
+        builderResult?.model && React.createElement('button', {
+          className:'btn',
+          onClick: () => { setCustomNarrative(null); narrateCustomModel(builderResult.model.id); },
+          disabled: customNarrLoading,
+          style:{ opacity: customNarrLoading ? 0.6 : 1 },
+          title: 'Generate AI talking points for this model (Haiku — low cost)',
+        }, customNarrLoading ? 'GENERATING…' : customNarrative ? 'RE-NARRATE' : 'NARRATE')
+      ),
+
+      // Custom narrative panel
+      customNarrative && React.createElement('div', { style:{marginTop:14,borderTop:'1px solid rgba(255,255,255,.06)',paddingTop:14} },
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,fontWeight:700,color:'var(--gold)',letterSpacing:'0.1em',marginBottom:10} }, 'MODEL NARRATIVE'),
+        customNarrative.signal_thesis && React.createElement('div', { style:{fontFamily:'var(--serif)',fontSize:13,color:'var(--ink)',marginBottom:10,lineHeight:1.5} }, customNarrative.signal_thesis),
+        customNarrative.mechanism && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginBottom:10} }, 'MECHANISM — ' + customNarrative.mechanism),
+        customNarrative.model_quality && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginBottom:12} }, 'MODEL QUALITY — ' + customNarrative.model_quality),
+        customNarrative.sales_talking_points?.length && React.createElement('div', { style:{marginBottom:12} },
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:'var(--steel)',letterSpacing:'0.1em',marginBottom:8} }, 'SALES TALKING POINTS'),
+          customNarrative.sales_talking_points.map((pt, i) =>
+            React.createElement('div', { key:i, style:{fontFamily:'var(--mono)',fontSize:10,padding:'8px 12px',background:'var(--bg-alt)',borderRadius:'var(--radius)',marginBottom:4,borderLeft:'2px solid var(--gold)'} },
+              React.createElement('span', { style:{color:'var(--gold)',fontWeight:700,marginRight:6} }, (i+1) + '.'),
+              pt
+            )
+          )
+        ),
+        customNarrative.risks && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--red)',marginBottom:8} }, '⚠ RISKS — ' + customNarrative.risks),
+        customNarrative.watch_list?.length && React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap'} },
+          customNarrative.watch_list.map((w,i) =>
+            React.createElement('span', { key:i, style:{fontFamily:'var(--mono)',fontSize:8,background:'rgba(245,158,11,.1)',color:'var(--gold)',padding:'3px 8px',borderRadius:3} }, w)
+          )
+        )
+      )
+    );
+
+    // Metric cell helper (local copy — pairDetail's MetricCell is block-scoped)
+    function StratMetricCell({ val, lbl, color }) {
+      return React.createElement('div', { className:'bt-metric-cell' },
+        React.createElement('div', { className:'bt-metric-val', style:{color: color || 'var(--ink)'} }, val),
+        React.createElement('div', { className:'bt-metric-lbl' }, lbl)
+      );
+    }
+
+    // ── BACKTEST STRATEGY panel ───────────────────────────────────────────────
+    const stratPanel = stratOpen && React.createElement('div', { className:'card', style:{marginBottom:20,borderTop:'2px solid var(--gold)'} },
+      React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,fontWeight:700,color:'var(--gold)',letterSpacing:'0.12em',marginBottom:16} }, '⊕ TECHNICAL STRATEGY BACKTESTER'),
+
+      // Row 1: ticker + days
+      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'2fr 1fr',gap:8,alignItems:'end',marginBottom:14} },
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'TICKER (any symbol — US, ADR, ETF, or Asian listing e.g. 005930.KS)'),
+          React.createElement('input', {
+            type:'text', list:'strat-ticker-suggestions', value:stratTicker,
+            placeholder: 'e.g. AMD, TSM, 2330.TW',
+            onChange: e => setStratTicker(e.target.value.toUpperCase()),
+            style:{ ...selectStyle, width:'calc(100% - 18px)', textTransform:'uppercase' },
+          }),
+          React.createElement('datalist', { id:'strat-ticker-suggestions' },
+            STRAT_TICKERS.map(t => React.createElement('option', { key:t, value:t }))
+          )
+        ),
+        React.createElement('div', null,
+          React.createElement('span', { style:labelStyle }, 'LOOKBACK (days)'),
+          React.createElement('input', {
+            type:'number', min:50, max:1825, value:stratDays,
+            onChange: e => setStratDays(Math.min(Math.max(parseInt(e.target.value, 10) || 252, 50), 1825)),
+            style:{ ...selectStyle, width:'calc(100% - 18px)' },
+          })
+        )
+      ),
+
+      // Quick-pick ticker buttons
+      React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:14} },
+        STRAT_TICKERS.map(t =>
+          React.createElement('button', { key:t, style:periodBtnStyle(stratTicker === t), onClick:() => setStratTicker(t) }, t)
+        )
+      ),
+
+      // Row 2: strategy selector
+      React.createElement('div', { style:{marginBottom:14} },
+        React.createElement('span', { style:labelStyle }, 'STRATEGY'),
+        React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap'} },
+          Object.keys(STRAT_DEFAULTS).map(id =>
+            React.createElement('button', { key:id, style:periodBtnStyle(stratStrategy === id), onClick:() => applyStratStrategy(id) }, id.replace(/_/g,' '))
+          )
+        )
+      ),
+
+      // Row 3: dynamic params
+      Object.keys(stratParams).length > 0 && React.createElement('div', { style:{marginBottom:14} },
+        React.createElement('span', { style:labelStyle }, 'PARAMETERS'),
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:`repeat(${Object.keys(stratParams).length},1fr)`,gap:8} },
+          Object.entries(stratParams).map(([k,v]) =>
+            React.createElement('div', { key:k },
+              React.createElement('span', { style:{...labelStyle,fontSize:8} }, k.replace(/_/g,' ')),
+              React.createElement('input', {
+                type:'number', value:v, step: v < 1 ? 0.1 : 1,
+                onChange: e => setStratParams(p => ({ ...p, [k]: parseFloat(e.target.value) })),
+                style:{ ...selectStyle, width:'calc(100% - 18px)' },
+              })
+            )
+          )
+        )
+      ),
+
+      // Run button
+      React.createElement('div', { style:{display:'flex',gap:8} },
+        React.createElement('button', {
+          className:'btn', style:{ whiteSpace:'nowrap' },
+          disabled: stratRunning,
+          onClick: runTechnicalBacktest,
+        }, stratRunning ? 'RUNNING…' : 'RUN BACKTEST')
+      ),
+
+      stratError && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,color:'var(--red)',marginTop:10} }, '⚠ ' + stratError),
+
+      // Results
+      stratResult && React.createElement('div', { style:{marginTop:16,borderTop:'1px solid rgba(255,255,255,.06)',paddingTop:14} },
+        React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:10} },
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:700,color:'var(--ink)'} },
+            `${stratResult.ticker} · ${stratResult.strategy.replace(/_/g,' ')}`
+          ),
+          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} },
+            `${stratResult.provider} · ${stratResult.bars} bars · ${stratResult.range.start} → ${stratResult.range.end}`
+          )
+        ),
+        React.createElement('div', { className:'backtest-metrics' },
+          React.createElement(StratMetricCell, { val: stratResult.metrics.totalReturn + '%', lbl:'TOTAL RETURN', color: stratResult.metrics.totalReturn > 0 ? 'var(--green)' : stratResult.metrics.totalReturn < 0 ? 'var(--red)' : 'var(--ink)' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.cagr + '%', lbl:'CAGR' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.sharpe + 'x', lbl:'SHARPE', color: stratResult.metrics.sharpe > 1 ? 'var(--green)' : stratResult.metrics.sharpe > 0 ? 'var(--gold)' : 'var(--red)' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.sortino != null ? stratResult.metrics.sortino + 'x' : '—', lbl:'SORTINO' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.calmar + 'x', lbl:'CALMAR' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.maxDrawdown + '%', lbl:'MAX DRAWDOWN', color:'var(--red)' })
+        ),
+        React.createElement('div', { className:'backtest-metrics', style:{borderTop:'2px solid var(--gold)'} },
+          React.createElement(StratMetricCell, { val: stratResult.metrics.volatility + '%', lbl:'VOLATILITY' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.var95 + '%', lbl:'VAR 95%' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.ulcerIndex, lbl:'ULCER INDEX' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.totalTrades, lbl:'TRADES' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.winRate + '%', lbl:'WIN RATE' }),
+          React.createElement(StratMetricCell, { val: stratResult.metrics.profitFactor != null ? stratResult.metrics.profitFactor + 'x' : '—', lbl:'PROFIT FACTOR' })
+        ),
+
+        // Buy & hold benchmark comparison
+        stratResult.buyHold && React.createElement('div', { style:{marginTop:14} },
+          React.createElement('div', { className:'card-title', style:{marginBottom:4} }, 'VS. BUY & HOLD'),
+          React.createElement('div', { className:'backtest-metrics', style:{borderTop:'2px solid var(--steel)'} },
+            React.createElement(StratMetricCell, {
+              val: stratResult.buyHold.totalReturn + '%', lbl:'B&H RETURN',
+              color: stratResult.buyHold.totalReturn > 0 ? 'var(--green)' : stratResult.buyHold.totalReturn < 0 ? 'var(--red)' : 'var(--ink)'
+            }),
+            React.createElement(StratMetricCell, { val: stratResult.buyHold.cagr + '%', lbl:'B&H CAGR' }),
+            React.createElement(StratMetricCell, { val: stratResult.buyHold.sharpe + 'x', lbl:'B&H SHARPE' }),
+            React.createElement(StratMetricCell, { val: stratResult.buyHold.maxDrawdown + '%', lbl:'B&H MAX DD', color:'var(--red)' }),
+            React.createElement(StratMetricCell, {
+              val: (stratResult.metrics.totalReturn > stratResult.buyHold.totalReturn ? '+' : '') +
+                   (stratResult.metrics.totalReturn - stratResult.buyHold.totalReturn).toFixed(1) + '%',
+              lbl:'EDGE VS B&H',
+              color: stratResult.metrics.totalReturn > stratResult.buyHold.totalReturn ? 'var(--green)' : 'var(--red)'
+            })
+          )
+        ),
+
+        // Walk-forward (in-sample / out-of-sample) split
+        stratResult.walkForward && React.createElement('div', { style:{marginTop:14} },
+          React.createElement('div', { className:'card-title', style:{marginBottom:4} }, 'WALK-FORWARD SPLIT',
+            React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',fontWeight:400,marginLeft:8} },
+              `70% in-sample / 30% out-of-sample · split at ${stratResult.walkForward.splitDate}`
+            )
+          ),
+          React.createElement('div', { className:'backtest-metrics', style:{borderTop:'2px solid var(--blue)'} },
+            React.createElement(StratMetricCell, { val: stratResult.walkForward.inSample.totalReturn + '%', lbl:'IN-SAMPLE RTN' }),
+            React.createElement(StratMetricCell, { val: stratResult.walkForward.inSample.sharpe + 'x', lbl:'IN-SAMPLE SHARPE' }),
+            React.createElement(StratMetricCell, { val: stratResult.walkForward.outOfSample.totalReturn + '%', lbl:'OUT-OF-SAMPLE RTN',
+              color: stratResult.walkForward.outOfSample.totalReturn >= stratResult.walkForward.inSample.totalReturn - 5 ? 'var(--green)' : 'var(--red)' }),
+            React.createElement(StratMetricCell, { val: stratResult.walkForward.outOfSample.sharpe + 'x', lbl:'OUT-OF-SAMPLE SHARPE' })
+          )
+        ),
+
+        // Plain-language explainer
+        stratResult.explainer && React.createElement('div', { style:{marginTop:14,padding:'10px 12px',background:'rgba(245,158,11,.04)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)'} },
+          React.createElement('div', { className:'card-title', style:{marginBottom:6} }, 'WHAT THIS MEANS'),
+          React.createElement('div', { style:{fontFamily:'var(--serif)',fontSize:12,lineHeight:1.6,color:'var(--ink)'} }, stratResult.explainer)
+        ),
+
+        stratResult.equityCurve.length > 1 && React.createElement('div', { style:{marginTop:16} },
+          React.createElement('div', { className:'card-title', style:{marginBottom:4} }, 'EQUITY CURVE',
+            React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',fontWeight:400,marginLeft:8} },
+              `Initial capital $10,000 · long-only · 0.1% commission`
+            )
+          ),
+          React.createElement(Recharts.ResponsiveContainer, { width:'100%', height:200 },
+            React.createElement(Recharts.LineChart, { data: stratResult.equityCurve, margin:{top:5,right:10,bottom:5,left:0} },
+              React.createElement(Recharts.CartesianGrid, { strokeDasharray:'3 3', stroke:'rgba(13,13,15,.08)' }),
+              React.createElement(Recharts.XAxis, {
+                dataKey:'date',
+                tick:{fontSize:8,fontFamily:'monospace'},
+                tickFormatter: d => d ? d.slice(0,7) : '',
+                interval: Math.floor(stratResult.equityCurve.length / 8),
+              }),
+              React.createElement(Recharts.YAxis, { tick:{fontSize:8,fontFamily:'monospace'}, domain:['auto','auto'], tickFormatter: v => v.toFixed(0) }),
+              React.createElement(Recharts.Tooltip, {
+                formatter: (v, name) => [v?.toFixed(2), name],
+                labelFormatter: d => d,
+                contentStyle:{fontFamily:'monospace',fontSize:10},
+              }),
+              React.createElement(Recharts.Legend, { wrapperStyle:{fontSize:9,fontFamily:'monospace'} }),
+              React.createElement(Recharts.Line, { type:'monotone', dataKey:'equity', stroke:'var(--gold)', dot:false, name:'Strategy', strokeWidth:1.5 }),
+              React.createElement(Recharts.Line, { type:'monotone', dataKey:'buyHold', stroke:'var(--steel)', dot:false, name:'Buy & Hold', strokeWidth:1, strokeDasharray:'4 3' })
+            )
+          )
+        )
+      )
+    );
     if (!cd && !corrLoading) {
       return React.createElement('div', null,
         header,
+        stratPanel,
         React.createElement('div', { className:'engine-empty' },
           React.createElement('div', { style:{marginBottom:8} }, 'CORRELATION ANALYSIS NOT LOADED'),
           React.createElement('div', { style:{fontSize:10,marginTop:4} }, 'Click LOAD to fetch 10 years of FRED data and compute cross-asset correlations + backtests. No AI cost — entirely FRED-based.')
@@ -2760,6 +3528,7 @@ function App() {
     if (corrLoading) {
       return React.createElement('div', null,
         header,
+        stratPanel,
         React.createElement('div', { style:{padding:40,textAlign:'center',fontFamily:'var(--mono)',fontSize:11,color:'var(--steel)'} },
           'Fetching 9 FRED series and computing correlation matrix + backtests…'
         )
@@ -3134,194 +3903,6 @@ function App() {
     );
 
     // ── MODEL BUILDER panel ──────────────────────────────────────────────────
-    const selectStyle = { background:'var(--bg-alt)',border:'1px solid rgba(255,255,255,.08)',borderRadius:'var(--radius)',color:'var(--ink)',fontFamily:'var(--mono)',fontSize:10,padding:'6px 8px',width:'100%' };
-    const labelStyle  = { fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',letterSpacing:'0.08em',marginBottom:4,display:'block' };
-    const periodBtnStyle = (active) => ({ fontFamily:'var(--mono)',fontSize:9,padding:'4px 10px',borderRadius:'var(--radius)',border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',background: active ? 'var(--gold)' : 'var(--bg-alt)',color: active ? '#000' : 'var(--ink)',fontWeight: active ? 700 : 400 });
-
-    const builderPanel = builderOpen && React.createElement('div', { className:'card', style:{marginBottom:20,borderTop:'2px solid var(--gold)'} },
-      React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,fontWeight:700,color:'var(--gold)',letterSpacing:'0.12em',marginBottom:16} }, '⊕ MODEL BUILDER'),
-
-      // Row 1: series selectors
-      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 40px 1fr',gap:8,alignItems:'end',marginBottom:14} },
-        React.createElement('div', null,
-          React.createElement('span', { style:labelStyle }, 'DRIVER SERIES (independent variable)'),
-          React.createElement('select', { style:selectStyle, value:builderDriver, onChange:e => setBuilderDriver(e.target.value) },
-            BUILDER_SERIES.map(s => React.createElement('option', { key:s.id, value:s.id }, s.name))
-          )
-        ),
-        React.createElement('div', { style:{textAlign:'center',paddingBottom:8,color:'var(--steel)',fontFamily:'var(--mono)',fontSize:12} }, '→'),
-        React.createElement('div', null,
-          React.createElement('span', { style:labelStyle }, 'TARGET SERIES (dependent variable)'),
-          React.createElement('select', { style:selectStyle, value:builderTarget, onChange:e => setBuilderTarget(e.target.value) },
-            BUILDER_SERIES.map(s => React.createElement('option', { key:s.id, value:s.id }, s.name))
-          )
-        )
-      ),
-
-      // Row 2: direction + strategy
-      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16,marginBottom:14} },
-        React.createElement('div', null,
-          React.createElement('span', { style:labelStyle }, 'CORRELATION DIRECTION'),
-          React.createElement('div', { style:{display:'flex',gap:8} },
-            React.createElement('button', { style:periodBtnStyle(builderDirection === 1), onClick:() => setBuilderDirection(1) }, '+1 Positive'),
-            React.createElement('button', { style:periodBtnStyle(builderDirection === -1), onClick:() => setBuilderDirection(-1) }, '−1 Negative')
-          ),
-          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
-            builderDirection === 1 ? 'Driver rises → target rises (e.g. HY spreads → VIX)' : 'Driver rises → target falls (e.g. real yield → gold)'
-          )
-        ),
-        React.createElement('div', null,
-          React.createElement('span', { style:labelStyle }, 'STRATEGY'),
-          React.createElement('div', { style:{display:'flex',gap:8} },
-            React.createElement('button', { style:periodBtnStyle(builderStrategy === 'ma-crossover'), onClick:() => setBuilderStrategy('ma-crossover') }, 'Trend Following'),
-            React.createElement('button', { style:periodBtnStyle(builderStrategy === 'zscore-reversion'), onClick:() => setBuilderStrategy('zscore-reversion') }, 'Mean Reversion')
-          ),
-          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
-            builderStrategy === 'ma-crossover'
-              ? 'MA crossover on driver → follow the trend in target. Auto-optimises fast/slow params by Sharpe.'
-              : 'Z-score on driver → when extreme, fade it. Enter when driver is 1.5σ above/below its 12M mean.'
-          )
-        )
-      ),
-
-      // Row 3: period presets
-      React.createElement('div', { style:{marginBottom:14} },
-        React.createElement('span', { style:labelStyle }, 'SAMPLE PERIOD'),
-        React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10} },
-          [['full','Full History (2014–now)'],['pre-covid','Pre-COVID (2014–2019)'],['rate-cycle','Rate Cycle (2020–now)'],['post-hike','Post-Hike (2022–now)'],['custom','Custom']].map(([key,lbl]) =>
-            React.createElement('button', { key, style:periodBtnStyle(builderPeriod === key), onClick:() => applyBuilderPreset(key) }, lbl)
-          )
-        ),
-        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8} },
-          ...[
-            ['IS START', builderISStart, setBuilderISStart],
-            ['IS END',   builderISEnd,   setBuilderISEnd],
-            ['OOS START',builderOOSStart,setBuilderOOSStart],
-            ['OOS END',  builderOOSEnd,  setBuilderOOSEnd],
-          ].map(([lbl, val, setter]) =>
-            React.createElement('div', { key:lbl },
-              React.createElement('span', { style:labelStyle }, lbl),
-              React.createElement('input', {
-                type:'date', value:val,
-                onChange: e => { setter(e.target.value); setBuilderPeriod('custom'); },
-                style:{ ...selectStyle, width:'calc(100% - 18px)' },
-              })
-            )
-          )
-        ),
-        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,color:'var(--steel)',marginTop:4} },
-          'IS = in-sample (parameter optimisation). OOS = out-of-sample (walk-forward test, no re-optimisation). Leave OOS END blank for present.'
-        )
-      ),
-
-      // Row 4: name + run buttons
-      React.createElement('div', { style:{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'} },
-        React.createElement('div', { style:{flex:1,minWidth:160} },
-          React.createElement('span', { style:labelStyle }, 'MODEL NAME (optional for save)'),
-          React.createElement('input', {
-            type:'text', value:builderName, placeholder:`${builderDriver} → ${builderTarget}`,
-            onChange: e => setBuilderName(e.target.value),
-            style:{ ...selectStyle, width:'calc(100% - 18px)' },
-          })
-        ),
-        React.createElement('button', {
-          className:'btn', style:{ whiteSpace:'nowrap' },
-          disabled: builderRunning || builderDriver === builderTarget,
-          onClick: () => runBuilderBacktest(false),
-        }, builderRunning ? 'RUNNING…' : 'RUN'),
-        React.createElement('button', {
-          className:'btn', style:{ whiteSpace:'nowrap', borderColor:'var(--gold)', color:'var(--gold)' },
-          disabled: builderRunning || builderDriver === builderTarget,
-          onClick: () => runBuilderBacktest(true),
-          title: 'Run backtest and save to model library',
-        }, builderRunning ? 'SAVING…' : 'SAVE & RUN'),
-      )
-    );
-
-    // ── Custom result card ────────────────────────────────────────────────────
-    const br = builderResult?.result;
-    const brRegime = builderResult?.regime;
-    const customResultCard = br && React.createElement('div', { className:'card', style:{marginBottom:20,borderLeft:'2px solid var(--gold)'} },
-      React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14,flexWrap:'wrap',gap:8} },
-        React.createElement('div', null,
-          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:700,color:'var(--ink)'} }, br.name || 'Custom Model'),
-          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginTop:2} },
-            `${br.driverSeriesId} → ${br.targetSeriesId}  ·  ${br.strategy === 'zscore-reversion' ? 'Mean Reversion' : 'Trend Following'}  ·  Direction ${br.direction > 0 ? '+1' : '−1'}`
-          )
-        ),
-        React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center'} },
-          React.createElement('span', { className:`signal-badge-${br.currentSignal === 1 ? 'long' : br.currentSignal === -1 ? 'short' : 'flat'}` },
-            br.currentSignal === 1 ? '▲ LONG' : br.currentSignal === -1 ? '▼ SHORT' : '— FLAT'
-          ),
-          React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, `r = ${br.fullCorrelation?.toFixed(3) ?? '—'}`)
-        )
-      ),
-      br.error ? React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,color:'var(--red)',padding:'8px 0'} }, '⚠ ' + br.error) :
-      React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14} },
-        ...[['IN-SAMPLE', br.backtest?.inSample], ['OUT-OF-SAMPLE', br.backtest?.outSample]].map(([label, m]) =>
-          React.createElement('div', { key:label, style:{background:'var(--bg-alt)',borderRadius:'var(--radius)',padding:12} },
-            React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:'var(--steel)',letterSpacing:'0.1em',marginBottom:8} }, label + (m?.n ? ` (${m.n}mo)` : '')),
-            React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4} },
-              ...([
-                ['SHARPE', m?.sharpe != null ? m.sharpe + '×' : '—', m?.sharpe > 1 ? 'var(--green)' : m?.sharpe < 0 ? 'var(--red)' : 'var(--ink)'],
-                ['RETURN', m?.totalReturn != null ? (m.totalReturn >= 0 ? '+' : '') + m.totalReturn + '%' : '—', m?.totalReturn > 0 ? 'var(--green)' : m?.totalReturn < 0 ? 'var(--red)' : 'var(--ink)'],
-                ['MAX DD', m?.maxDD != null ? m.maxDD + '%' : '—', 'var(--red)'],
-                ['HIT RATE', m?.hitRate != null ? m.hitRate + '%' : '—', 'var(--ink)'],
-              ].map(([k,v,c]) =>
-                React.createElement('div', { key:k },
-                  React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:7,color:'var(--steel)'} }, k),
-                  React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,fontWeight:700,color:c} }, v)
-                )
-              ))
-            )
-          )
-        )
-      ),
-      // OOS degradation warning
-      br.backtest?.inSample?.sharpe != null && br.backtest?.outSample?.sharpe != null &&
-        br.backtest.outSample.sharpe < br.backtest.inSample.sharpe * 0.5 &&
-        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'#F59E0B',background:'rgba(245,158,11,.07)',borderRadius:'var(--radius)',padding:'6px 10px',marginBottom:10} },
-          '⚠ OOS Sharpe is less than half of IS Sharpe — significant out-of-sample degradation. Treat this signal with caution in a client context.'
-        ),
-      // Action row
-      !br.error && React.createElement('div', { style:{display:'flex',gap:8,flexWrap:'wrap'} },
-        !builderResult?.model && React.createElement('button', {
-          className:'btn', style:{ borderColor:'var(--gold)', color:'var(--gold)' },
-          onClick: () => runBuilderBacktest(true),
-          title: 'Save this model to your library',
-        }, 'SAVE MODEL'),
-        builderResult?.model && React.createElement('button', {
-          className:'btn',
-          onClick: () => { setCustomNarrative(null); narrateCustomModel(builderResult.model.id); },
-          disabled: customNarrLoading,
-          style:{ opacity: customNarrLoading ? 0.6 : 1 },
-          title: 'Generate AI talking points for this model (Haiku — low cost)',
-        }, customNarrLoading ? 'GENERATING…' : customNarrative ? 'RE-NARRATE' : 'NARRATE')
-      ),
-
-      // Custom narrative panel
-      customNarrative && React.createElement('div', { style:{marginTop:14,borderTop:'1px solid rgba(255,255,255,.06)',paddingTop:14} },
-        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,fontWeight:700,color:'var(--gold)',letterSpacing:'0.1em',marginBottom:10} }, 'MODEL NARRATIVE'),
-        customNarrative.signal_thesis && React.createElement('div', { style:{fontFamily:'var(--serif)',fontSize:13,color:'var(--ink)',marginBottom:10,lineHeight:1.5} }, customNarrative.signal_thesis),
-        customNarrative.mechanism && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginBottom:10} }, 'MECHANISM — ' + customNarrative.mechanism),
-        customNarrative.model_quality && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginBottom:12} }, 'MODEL QUALITY — ' + customNarrative.model_quality),
-        customNarrative.sales_talking_points?.length && React.createElement('div', { style:{marginBottom:12} },
-          React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:'var(--steel)',letterSpacing:'0.1em',marginBottom:8} }, 'SALES TALKING POINTS'),
-          customNarrative.sales_talking_points.map((pt, i) =>
-            React.createElement('div', { key:i, style:{fontFamily:'var(--mono)',fontSize:10,padding:'8px 12px',background:'var(--bg-alt)',borderRadius:'var(--radius)',marginBottom:4,borderLeft:'2px solid var(--gold)'} },
-              React.createElement('span', { style:{color:'var(--gold)',fontWeight:700,marginRight:6} }, (i+1) + '.'),
-              pt
-            )
-          )
-        ),
-        customNarrative.risks && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--red)',marginBottom:8} }, '⚠ RISKS — ' + customNarrative.risks),
-        customNarrative.watch_list?.length && React.createElement('div', { style:{display:'flex',gap:6,flexWrap:'wrap'} },
-          customNarrative.watch_list.map((w,i) =>
-            React.createElement('span', { key:i, style:{fontFamily:'var(--mono)',fontSize:8,background:'rgba(245,158,11,.1)',color:'var(--gold)',padding:'3px 8px',borderRadius:3} }, w)
-          )
-        )
-      )
-    );
 
     // ── Saved models panel ────────────────────────────────────────────────────
     const savedPanel = React.createElement('div', { className:'card', style:{marginTop:20} },
@@ -3382,6 +3963,7 @@ function App() {
       pairDetail,
       builderPanel,
       customResultCard,
+      stratPanel,
       methodology,
       momentumPanel,
       savedPanel
@@ -3958,6 +4540,320 @@ function App() {
     );
   }
 
+  // ── SECTOR DEEP-DIVE RENDERER ─────────────────────────────────────────────
+  function renderSectorReport(r, sourceLabel, sourceClass) {
+    const roleColor = role => role === 'LEADER' ? 'var(--green)' : 'var(--red)';
+    return React.createElement('div', { className:'card' },
+      React.createElement('div', { className:'research-masthead' },
+        React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'} },
+          React.createElement('div', null,
+            React.createElement('div', { className:'research-firm' }, 'THE DISPATCH · SECTOR DEEP-DIVE',
+              React.createElement('span', { className:'research-source-badge', style:{marginLeft:10} }, sourceLabel)),
+            React.createElement('div', { className:'research-title' }, r.title || 'Sector Deep-Dive'),
+            React.createElement('div', { className:'research-subtitle' }, r.subtitle || ''),
+            React.createElement('div', { className:'research-meta' }, (r.date || '') + (r.sectorName ? ' · ' + r.sectorName.toUpperCase() : ''))
+          )
+        )
+      ),
+      Array.isArray(r.keyTakeaways) && r.keyTakeaways.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'KEY TAKEAWAYS'),
+        React.createElement('ul', { className:'research-abstract' },
+          r.keyTakeaways.map((t, i) => React.createElement('li', { key:i, className:'research-abstract-item' }, t))
+        )
+      ),
+      r.industryStructure && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'INDUSTRY STRUCTURE'),
+        React.createElement('div', { className:'research-body' }, r.industryStructure)
+      ),
+      r.growthAndMargins && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'GROWTH · MARGINS · PRICING POWER'),
+        React.createElement('div', { className:'research-market-grid' },
+          [['Revenue Growth', r.growthAndMargins.revenueGrowth], ['Margins', r.growthAndMargins.margins], ['Pricing Power', r.growthAndMargins.pricingPower]]
+            .filter(([,v]) => v)
+            .map(([lbl, v]) => React.createElement('div', { key:lbl, className:'research-mkt-item' },
+              React.createElement('div', { className:'research-mkt-label' }, lbl),
+              React.createElement('div', { className:'research-mkt-text', style:{fontWeight:400,lineHeight:1.6} }, v)
+            ))
+        )
+      ),
+      r.competitiveDynamics && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'COMPETITIVE DYNAMICS'),
+        React.createElement('div', { className:'research-body' }, r.competitiveDynamics)
+      ),
+      (r.capexAndRegulation || r.balanceSheets) && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'CAPEX · REGULATION · BALANCE SHEETS'),
+        r.capexAndRegulation && React.createElement('div', { className:'research-body', style:{marginBottom:8} }, r.capexAndRegulation),
+        r.balanceSheets && React.createElement('div', { className:'research-body' }, r.balanceSheets)
+      ),
+      r.valuation && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'VALUATION'),
+        React.createElement('div', { className:'research-market-grid' },
+          [['Current', r.valuation.current], ['vs History', r.valuation.vsHistory], ['vs Market', r.valuation.vsMarket]]
+            .filter(([,v]) => v)
+            .map(([lbl, v]) => React.createElement('div', { key:lbl, className:'research-mkt-item' },
+              React.createElement('div', { className:'research-mkt-label' }, lbl),
+              React.createElement('div', { className:'research-mkt-text', style:{fontWeight:400,lineHeight:1.6} }, v)
+            ))
+        )
+      ),
+      (r.earningsRevisions || r.macroSensitivities) && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'REVISIONS & MACRO SENSITIVITIES'),
+        r.earningsRevisions && React.createElement('div', { className:'research-body', style:{marginBottom:8} }, r.earningsRevisions),
+        r.macroSensitivities && React.createElement('div', { className:'research-body' }, r.macroSensitivities)
+      ),
+      Array.isArray(r.leadersLaggards) && r.leadersLaggards.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'LEADERS & LAGGARDS'),
+        r.leadersLaggards.map((x, i) => React.createElement('div', { key:i, className:'research-risk-item' },
+          React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:'clamp(9px,0.78vw,10.5px)',fontWeight:700,color:roleColor(x.role),marginRight:8,letterSpacing:'0.08em'} }, (x.role || '') + ' · ' + (x.name || '')),
+          React.createElement('span', { className:'research-risk-text' }, x.rationale || '')
+        ))
+      ),
+      (r.consensusView || r.variantPerception) && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'CONSENSUS VS. OUR VIEW'),
+        r.consensusView && React.createElement('div', { className:'research-body', style:{marginBottom:8} },
+          React.createElement('b', { style:{color:'var(--ink)'} }, 'Consensus: '), r.consensusView),
+        r.variantPerception && React.createElement('div', { className:'research-body' },
+          React.createElement('b', { style:{color:'var(--gold)'} }, 'Variant perception: '), r.variantPerception)
+      ),
+      r.scenarios && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'SCENARIOS'),
+        ['bear','base','bull'].map(k => r.scenarios[k] && React.createElement('div', { key:k, className:'research-impact-box', style:{borderLeft:'3px solid ' + (k==='bear'?'var(--red)':k==='bull'?'var(--green)':'var(--gold)')} },
+          React.createElement('div', { className:'research-impact-lbl' }, (r.scenarios[k].label || k).toUpperCase() + ' · ' + (r.scenarios[k].probability || '')),
+          React.createElement('div', { className:'research-impact-val', style:{fontWeight:400,fontSize:'clamp(11.5px,0.95vw,13px)',lineHeight:1.6} },
+            (r.scenarios[k].trigger ? 'Trigger: ' + r.scenarios[k].trigger + ' — ' : '') + (r.scenarios[k].outcome || ''),
+            r.scenarios[k].narrative && React.createElement('div', { style:{marginTop:4,color:'var(--ink-mid)'} }, r.scenarios[k].narrative)
+          )
+        ))
+      ),
+      Array.isArray(r.catalysts) && r.catalysts.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'CATALYSTS'),
+        r.catalysts.map((c, i) => React.createElement('div', { key:i, className:'research-risk-item' },
+          React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:'clamp(9px,0.78vw,10.5px)',color:'var(--gold)',marginRight:8} }, c.timing || ''),
+          React.createElement('span', { className:'research-risk-text' }, (c.catalyst || '') + (c.impact ? ' — ' + c.impact : ''))
+        ))
+      ),
+      r.relativeValue && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'RELATIVE VALUE'),
+        React.createElement('div', { className:'research-body' }, r.relativeValue)
+      ),
+      Array.isArray(r.risks) && r.risks.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'RISKS'),
+        r.risks.map((risk, i) => React.createElement('div', { key:i, className:'research-risk-item' },
+          React.createElement('span', { className:'research-risk-text' }, (i+1) + '. ' + risk)
+        ))
+      ),
+      r.invalidation && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'WHAT WOULD CHANGE OUR MIND'),
+        React.createElement('div', { className:'research-body', style:{color:'var(--ink)'} }, r.invalidation)
+      ),
+      React.createElement('div', { className:'research-disclaimer' },
+        'The Dispatch Research — educational sector analysis, not investment advice.')
+    );
+  }
+
+  // ── INSTITUTIONAL QA STRIP + PANEL ────────────────────────────────────────
+  function qaStatusColor(status) {
+    if (status === 'APPROVED') return 'var(--green)';
+    if (status === 'APPROVED_WITH_CAVEATS') return 'var(--gold)';
+    if (status === 'NOT_RUN') return 'var(--ink-low)';
+    return 'var(--red)';
+  }
+  function claimStatusColor(s) {
+    if (s === 'VERIFIED') return 'var(--green)';
+    if (s === 'PARTIALLY_VERIFIED' || s === 'ESTIMATE' || s === 'FORECAST' || s === 'OPINION') return 'var(--gold)';
+    if (s === 'NOT_CHECKED') return 'var(--ink-low)';
+    return 'var(--red)';
+  }
+
+  function renderQAStrip(r) {
+    const qa = r.institutionalQA;
+    if (!qa) return null;
+    const cs = qa.claimSummary;
+    if (qa.status === 'NOT_RUN') {
+      return React.createElement('div', { className:'qa-strip' },
+        React.createElement('span', { className:'qa-status-badge', style:{color:'var(--ink-low)',borderColor:'var(--border)'} }, 'QA STATUS: NOT RUN'),
+        React.createElement('span', { className:'qa-strip-stat' }, qa.reason || 'Institutional review unavailable')
+      );
+    }
+    const scoreClass = qa.status === 'APPROVED' ? 'qa-score-approved' : qa.status === 'APPROVED_WITH_CAVEATS' ? 'qa-score-caveats' : 'qa-score-fail';
+    const redteamChallenges = qa.agentVerdicts && qa.agentVerdicts.redTeam && Array.isArray(qa.agentVerdicts.redTeam.challenges)
+      ? qa.agentVerdicts.redTeam.challenges.filter(c => c && c.severity === 'HIGH').length : 0;
+    return React.createElement('div', { className:'qa-strip' },
+      React.createElement('span', { className:'qa-score ' + scoreClass }, (qa.score != null ? qa.score : '—') + '/100'),
+      React.createElement('span', { className:'qa-status-badge', style:{color:qaStatusColor(qa.status),borderColor:qaStatusColor(qa.status)} }, String(qa.status).replace(/_/g, ' ')),
+      cs && React.createElement('span', { className:'qa-strip-stat' }, 'Claims verified ', React.createElement('b', null, cs.verified + '/' + cs.total)),
+      React.createElement('span', { className:'qa-strip-stat' }, 'Sources ', React.createElement('b', null, r.sourcesCount || 0)),
+      redteamChallenges > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--red)'} }, redteamChallenges + ' material challenge' + (redteamChallenges > 1 ? 's' : '')),
+      qa.revisionRounds > 0 && React.createElement('span', { className:'qa-strip-stat' }, 'Revised ×' + qa.revisionRounds),
+      React.createElement('span', { style:{flex:1} }),
+      React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleQaPanel }, qaPanelOpen ? 'HIDE QA' : 'VIEW QA'),
+      React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleSrcPanel }, srcPanelOpen ? 'HIDE SOURCES' : 'VIEW SOURCES')
+    );
+  }
+
+  function renderQAPanel(r) {
+    if (!qaPanelOpen) return null;
+    const qa = (qaDetail && qaDetail.institutionalQA) || r.institutionalQA;
+    if (!qa || qa.status === 'NOT_RUN') return React.createElement('div', { className:'qa-panel' },
+      React.createElement('div', { className:'qa-strip-stat' }, 'Institutional QA was not run for this report.'));
+    const av = qa.agentVerdicts || {};
+    const claims = (qaDetail && qaDetail.claims) || [];
+    const lowConf = qa.claimSummary && qa.claimSummary.lowConfidence || [];
+    const verdictRows = [
+      ['Data Auditor',   av.dataAuditor,  v => v && (v.assessment || v.reason || '')],
+      ['Red Team',       av.redTeam,      v => v && (v.rationale || v.counterThesis || v.reason || '')],
+      ['Cross-Asset PM', av.crossAssetPM, v => v && (v.rationale || (v.thesisVsTrade ? String(v.thesisVsTrade).replace(/_/g, ' ').toLowerCase() : '') || v.reason || '')],
+      ['IC Chair',       av.icChair ? { verdict: av.icChair.status } : null, () => av.icChair && av.icChair.rationale || ''],
+    ];
+    return React.createElement('div', { className:'qa-panel' },
+      React.createElement('div', { className:'qa-section-lbl', style:{marginTop:0} }, 'AGENT VERDICTS'),
+      verdictRows.map(([name, v, detailFn]) => React.createElement('div', { key:name, className:'qa-verdict-row' },
+        React.createElement('div', { className:'qa-verdict-agent' }, name),
+        React.createElement('div', { className:'qa-verdict-verdict', style:{color: v && v.verdict !== 'NOT_RUN' ? 'var(--ink)' : 'var(--ink-low)'} }, v ? String(v.verdict || '—').replace(/_/g, ' ') : 'NOT RUN'),
+        React.createElement('div', { className:'qa-verdict-detail' }, detailFn(v) || '—')
+      )),
+      qa.strongestCounterargument && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'STRONGEST COUNTERARGUMENT'),
+        React.createElement('div', { className:'qa-verdict-detail', style:{fontSize:'clamp(11.5px,0.95vw,13px)',lineHeight:1.65} }, qa.strongestCounterargument)
+      ),
+      Array.isArray(qa.materialDisagreements) && qa.materialDisagreements.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'MATERIAL DISAGREEMENTS (PRESERVED)'),
+        qa.materialDisagreements.map((d, i) => React.createElement('div', { key:i, className:'qa-item' }, d))
+      ),
+      Array.isArray(qa.unresolvedQuestions) && qa.unresolvedQuestions.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'UNRESOLVED QUESTIONS'),
+        qa.unresolvedQuestions.map((d, i) => React.createElement('div', { key:i, className:'qa-item' }, d))
+      ),
+      Array.isArray(qa.invalidationConditions) && qa.invalidationConditions.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'THESIS INVALIDATION CONDITIONS'),
+        qa.invalidationConditions.map((d, i) => React.createElement('div', { key:i, className:'qa-item' }, d))
+      ),
+      Array.isArray(qa.keyAssumptions) && qa.keyAssumptions.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'KEY ASSUMPTIONS'),
+        qa.keyAssumptions.map((d, i) => React.createElement('div', { key:i, className:'qa-item' }, d))
+      ),
+      qa.hardFailures && qa.hardFailures.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl', style:{color:'var(--red)'} }, 'HARD-FAIL FLAGS'),
+        qa.hardFailures.map((f, i) => React.createElement('div', { key:i, className:'qa-item', style:{color:'var(--red)'} }, f.rule + ': ' + f.detail))
+      ),
+      claims.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl' }, 'CLAIM LEDGER (' + claims.length + ')'),
+        React.createElement('div', { style:{maxHeight:300,overflowY:'auto'} },
+          claims.map(c => React.createElement('div', { key:c.claimId, className:'claim-row' },
+            React.createElement('div', { className:'claim-id' }, c.claimId),
+            React.createElement('div', { className:'claim-class' }, c.classification + (c.materiality === 'HIGH' ? ' ·H' : '')),
+            React.createElement('div', { className:'claim-statement' }, c.statement,
+              lowConf.includes(c.claimId) && React.createElement('span', { style:{color:'var(--gold)',marginLeft:6,fontFamily:'var(--mono)',fontSize:'clamp(8px,0.7vw,9px)'} }, 'LOW CONF')),
+            React.createElement('div', { className:'claim-status', style:{color:claimStatusColor(c.verificationStatus)} }, String(c.verificationStatus).replace(/_/g, ' '))
+          ))
+        )
+      ),
+      qaDetail && Array.isArray(qaDetail.corrections) && qaDetail.corrections.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'qa-section-lbl', style:{color:'var(--red)'} }, 'CORRECTIONS LOG'),
+        qaDetail.corrections.map((c, i) => React.createElement('div', { key:i, className:'interro-correction' },
+          React.createElement('b', null, c.correctionId + (c.claimId ? ' → ' + c.claimId : '')), ': ',
+          (c.oldValue ? '"' + c.oldValue + '" → ' : ''), '"' + c.correctedValue + '" — ' + c.reason
+        ))
+      )
+    );
+  }
+
+  function renderSourcesPanel(r) {
+    if (!srcPanelOpen) return null;
+    const sources = (srcDetail && srcDetail.sources) || [];
+    return React.createElement('div', { className:'qa-panel' },
+      React.createElement('div', { className:'qa-section-lbl', style:{marginTop:0} }, 'SOURCE REGISTRY (' + sources.length + ')'),
+      sources.length === 0 && React.createElement('div', { className:'qa-strip-stat' },
+        srcDetail ? 'No sources registered for this report — evidence was model web-search only or QA did not run.' : 'Loading…'),
+      sources.map(s => React.createElement('div', { key:s.sourceId, className:'src-row' },
+        React.createElement('div', { className:'src-title' },
+          s.url
+            ? React.createElement('a', { href:s.url, target:'_blank', rel:'noopener noreferrer', style:{color:'var(--blue)',textDecoration:'none'} }, s.title)
+            : s.title,
+          s.stale && React.createElement('span', { style:{color:'var(--red)',fontFamily:'var(--mono)',fontSize:'clamp(8px,0.7vw,9px)',marginLeft:8} }, 'STALE')
+        ),
+        React.createElement('div', { className:'src-meta' },
+          React.createElement('span', { className:'src-tier' }, 'TIER ' + s.sourceTier),
+          s.sourceId + ' · ' + (s.publisher || '') +
+          (s.publishedAt ? ' · pub ' + s.publishedAt : '') +
+          (s.dataAsOf ? ' · data as of ' + s.dataAsOf : '') +
+          (s.supportsClaims && s.supportsClaims.length ? ' · supports ' + s.supportsClaims.join(', ') : '') +
+          ' · via ' + (s.contributedBy === 'data_auditor' ? 'auditor' : 'lead')
+        )
+      ))
+    );
+  }
+
+  // ── RESEARCH INTERROGATION CHAT ───────────────────────────────────────────
+  const INTERRO_SUGGESTED = [
+    "What's the weakest part of this thesis?",
+    'What is already priced in?',
+    'Make the bearish case.',
+    'What evidence would change your mind?',
+    'Which assumptions have the lowest confidence?',
+    'Which claims are facts and which are forecasts?',
+    'What did the red team disagree with?',
+  ];
+  function stanceColorFor(s) {
+    if (s === 'SUPPORTED' || s === 'MOSTLY_SUPPORTED') return 'var(--green)';
+    if (s === 'PARTIALLY_SUPPORTED' || s === 'UNCERTAIN' || s === 'NOT_A_CLAIM') return 'var(--gold)';
+    if (s === 'UNAVAILABLE') return 'var(--ink-low)';
+    return 'var(--red)';
+  }
+
+  function renderInterrogation(r) {
+    if (!r || !r.reportId) {
+      return React.createElement('div', { className:'interro-wrap' },
+        React.createElement('div', { className:'interro-head' },
+          React.createElement('div', { className:'interro-title' }, 'INTERROGATE THIS RESEARCH')),
+        React.createElement('div', { style:{padding:'14px 16px',fontSize:'clamp(10.5px,0.88vw,12px)',color:'var(--ink-low)',fontFamily:'var(--mono)'} },
+          'Interrogation unavailable — this is a seeded fallback report with no evidence base. Generate a live report to cross-examine it.')
+      );
+    }
+    return React.createElement('div', { className:'interro-wrap' },
+      React.createElement('div', { className:'interro-head' },
+        React.createElement('div', { className:'interro-title' }, 'INTERROGATE THIS RESEARCH'),
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:'clamp(8.5px,0.72vw,9.5px)',color:'var(--ink-low)'} },
+          r.reportId + ' · v' + (r.reportVersion || 1) + ' · 1 AI call per question')
+      ),
+      interroMessages.length > 0 && React.createElement('div', { className:'interro-messages' },
+        interroMessages.map((m, i) => m.role === 'user'
+          ? React.createElement('div', { key:i, className:'interro-msg-user' }, m.text)
+          : React.createElement('div', { key:i, className:'interro-msg-analyst' },
+              m.text,
+              Array.isArray(m.corrections) && m.corrections.map((c, j) =>
+                React.createElement('div', { key:j, className:'interro-correction' },
+                  React.createElement('b', null, 'CORRECTION' + (c.claimId ? ' → ' + c.claimId : '')), ': ',
+                  (c.oldValue ? '"' + c.oldValue + '" → ' : ''), '"' + c.correctedValue + '"',
+                  c.reason ? ' — ' + c.reason : ''
+                )),
+              (m.stance || m.confidence) && React.createElement('div', { className:'interro-msg-meta' },
+                m.stance && React.createElement('span', { className:'interro-stance', style:{color:stanceColorFor(m.stance),borderColor:stanceColorFor(m.stance)} }, String(m.stance).replace(/_/g, ' ')),
+                m.confidence && React.createElement('span', null, 'CONFIDENCE ' + m.confidence),
+                m.usedWebSearch && React.createElement('span', null, '⌕ NEW WEB EVIDENCE'),
+                Array.isArray(m.evidenceUsed) && m.evidenceUsed.length > 0 && React.createElement('span', null, 'EVIDENCE ' + m.evidenceUsed.slice(0, 6).join(' ')),
+                m.newerReportAvailable && React.createElement('span', { style:{color:'var(--gold)'} }, 'NEWER RESEARCH AVAILABLE')
+              )
+            )
+        ),
+        interroLoading && React.createElement('div', { className:'interro-msg-analyst', style:{color:'var(--ink-low)'} }, 'Analysing…')
+      ),
+      React.createElement('div', { className:'interro-input-row' },
+        React.createElement('input', {
+          className:'interro-input', type:'text', value:interroInput,
+          onChange: e => setInterroInput(e.target.value),
+          onKeyDown: e => { if (e.key === 'Enter') askResearch(); },
+          placeholder: 'Ask a question about this report — challenge it, probe the evidence, test the thesis…',
+          disabled: interroLoading,
+        }),
+        React.createElement('button', { className:'btn', onClick: () => askResearch(), disabled: interroLoading || !interroInput.trim() }, interroLoading ? '…' : 'ASK')
+      ),
+      interroMessages.length === 0 && React.createElement('div', { className:'interro-suggested' },
+        INTERRO_SUGGESTED.map((q, i) => React.createElement('div', { key:i, className:'interro-chip', onClick: () => askResearch(q) }, q))
+      )
+    );
+  }
+
   // ── MAIN renderResearch DISPATCHER ────────────────────────────────────────
   function renderResearch() {
     const r = research;
@@ -3970,6 +4866,7 @@ function App() {
       { id:'fx',          label:'FX',          desc:'G10 FX Viewpoint — pair views, CB reaction functions, trade barbell' },
       { id:'rates',       label:'RATES',       desc:'Rates & Carry deep-dive — the puzzle, CFTC flows, catalysts, level targets' },
       { id:'thematic',    label:'THEMATIC',    desc:'Thematic Lens — 4 structural themes, 8 predictions, key debates, stock focus list' },
+      { id:'sector',      label:'SECTOR',      desc:'Sector Deep-Dive — industry structure, margins, valuation, leaders/laggards, relative value' },
     ];
 
     const typeTabs = React.createElement('div', { className:'research-type-tabs' },
@@ -4028,8 +4925,15 @@ function App() {
         { at:110, msg: 'Finalising scenario charts and formatting JSON…' },
         { at:150, msg: 'Large report — still working, no timeout applied…' },
       ];
-      const phase = [...phases].reverse().find(p => secs >= p.at) || phases[0];
-      const barPct = Math.min(100, Math.round((secs / 180) * 100));
+      // Prefer the real pipeline stage from the orchestrator over the
+      // time-estimated phase message — labels only, no fake percentages.
+      const liveStage = researchProgress && researchProgress.label
+        ? (researchProgress.label + (researchProgress.detail ? ' — ' + researchProgress.detail : ''))
+        : null;
+      const phase = liveStage
+        ? { msg: liveStage }
+        : ([...phases].reverse().find(p => secs >= p.at) || phases[0]);
+      const barPct = Math.min(100, Math.round((secs / 300) * 100));
       return React.createElement('div', null,
         typeTabs, controls,
         React.createElement('div', { style:{padding:'36px 32px',textAlign:'center',fontFamily:'var(--mono)'} },
@@ -4055,26 +4959,24 @@ function App() {
 
     // Dispatch to sub-renderer based on type stored in data or current selector
     const rType = r.reportType || researchType;
-    if (rType === 'macro') {
-      return React.createElement('div', null, typeTabs, controls, renderMacroReport(r, src));
-    }
-    if (rType === 'commodities') {
-      return React.createElement('div', null, typeTabs, controls, renderCommoditiesReport(r, src));
-    }
-    if (rType === 'fx') {
-      return React.createElement('div', null, typeTabs, controls, renderFxReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'rates') {
-      return React.createElement('div', null, typeTabs, controls, renderRatesReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'thematic') {
-      return React.createElement('div', null, typeTabs, controls, renderThematicReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'equity') {
-      return React.createElement('div', null, typeTabs, controls, renderEquityReport(r, sourceLabel, sourceClass));
-    }
-    // Fallback — treat as macro
-    return React.createElement('div', null, typeTabs, controls, renderMacroReport(r, src));
+    let content;
+    if      (rType === 'commodities') content = renderCommoditiesReport(r, src);
+    else if (rType === 'fx')          content = renderFxReport(r, sourceLabel, sourceClass);
+    else if (rType === 'rates')       content = renderRatesReport(r, sourceLabel, sourceClass);
+    else if (rType === 'thematic')    content = renderThematicReport(r, sourceLabel, sourceClass);
+    else if (rType === 'equity')      content = renderEquityReport(r, sourceLabel, sourceClass);
+    else if (rType === 'sector')      content = renderSectorReport(r, sourceLabel, sourceClass);
+    else                              content = renderMacroReport(r, src);
+
+    // Every report type gets the institutional QA layer + interrogation chat
+    return React.createElement('div', null,
+      typeTabs, controls,
+      renderQAStrip(r),
+      renderQAPanel(r),
+      renderSourcesPanel(r),
+      content,
+      renderInterrogation(r)
+    );
   }
 
   // ── EQUITY VIEWS RENDERER ─────────────────────────────────────────────────
@@ -4172,15 +5074,15 @@ function App() {
       // Sector Views
       r.sectorViews && r.sectorViews.length > 0 && React.createElement('div', null,
         React.createElement('div', { className:'research-section-head' }, 'SECTOR VIEWS'),
-        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:10,marginBottom:16} },
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:10,marginBottom:16} },
           r.sectorViews.map((s, i) =>
-            React.createElement('div', { key:i, style:{padding:'10px 12px',border:'1px solid var(--rule)',background:'var(--paper)'} },
+            React.createElement('div', { key:i, style:{padding:'14px 16px',border:'1px solid var(--rule)',background:'var(--paper)'} },
               React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5} },
-                React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,fontWeight:700,color:'var(--ink)'} }, s.sector),
-                React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:stanceColor(s.stance),letterSpacing:'0.08em'} }, s.stance)
+                React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:'clamp(9px,0.78vw,10.5px)',fontWeight:700,color:'var(--ink)'} }, s.sector),
+                React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:'clamp(8px,0.7vw,9.5px)',fontWeight:700,color:stanceColor(s.stance),letterSpacing:'0.08em'} }, s.stance)
               ),
-              React.createElement('div', { style:{fontSize:10.5,lineHeight:1.55,color:'var(--steel)',marginBottom:4} }, s.rationale),
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--red)',borderTop:'1px solid var(--rule)',paddingTop:4} }, '⚠ ' + s.keyRisk)
+              React.createElement('div', { style:{fontSize:'clamp(10.5px,0.88vw,12px)',lineHeight:1.6,color:'var(--steel)',marginBottom:4} }, s.rationale),
+              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:'clamp(8.5px,0.72vw,10px)',color:'var(--red)',borderTop:'1px solid var(--rule)',paddingTop:4} }, '⚠ ' + s.keyRisk)
             )
           )
         )
@@ -4321,12 +5223,12 @@ function App() {
       // CB Reaction Functions
       r.cbReactionFunctions && React.createElement('div', null,
         React.createElement('div', { className:'research-section-head' }, 'CENTRAL BANK REACTION FUNCTIONS'),
-        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:12,marginBottom:16} },
+        React.createElement('div', { style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12,marginBottom:16} },
           r.cbReactionFunctions.map((cb, i) =>
-            React.createElement('div', { key:i, style:{padding:'10px 12px',background:'var(--paper)',border:'1px solid var(--rule)'} },
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,letterSpacing:'0.1em',color:'var(--blue)',marginBottom:5,textTransform:'uppercase'} }, cb.bank),
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,fontWeight:600,marginBottom:5} }, cb.stance),
-              React.createElement('div', { style:{fontSize:10.5,lineHeight:1.55,color:'var(--steel)'} }, cb.rationale)
+            React.createElement('div', { key:i, style:{padding:'14px 16px',background:'var(--paper)',border:'1px solid var(--rule)'} },
+              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:'clamp(8.5px,0.72vw,10px)',letterSpacing:'0.1em',color:'var(--blue)',marginBottom:5,textTransform:'uppercase'} }, cb.bank),
+              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:'clamp(10px,0.85vw,11.5px)',fontWeight:600,marginBottom:5} }, cb.stance),
+              React.createElement('div', { style:{fontSize:'clamp(10.5px,0.88vw,12px)',lineHeight:1.6,color:'var(--steel)'} }, cb.rationale)
             )
           )
         )
@@ -5568,12 +6470,41 @@ function App() {
     try { localStorage.setItem('dispatch_iv_progress', JSON.stringify(newProg)); } catch(e) {}
   }
 
+  // ── Spaced repetition (Leitner system) ──────────────────────────────────────
+  // Box intervals in days: box 0 = due immediately, box 5 = mature (~1 month).
+  const IV_BOX_INTERVALS = [0, 1, 3, 7, 16, 30];
+
+  function ivSaveSrs(newSrs) {
+    setIvSrs(newSrs);
+    try { localStorage.setItem('dispatch_iv_srs', JSON.stringify(newSrs)); } catch(e) {}
+  }
+
+  function ivIsDue(cardId) {
+    const s = ivSrs[cardId];
+    if (!s) return true;
+    return new Date(s.due).getTime() <= Date.now();
+  }
+
+  // grade: 'again' (forgot — reset to box 0, due now) or 'good' (advance a box)
+  function ivReviewCard(cardId, grade) {
+    const prev = ivSrs[cardId] || { box: 0 };
+    const box = grade === 'again' ? 0 : Math.min(prev.box + 1, IV_BOX_INTERVALS.length - 1);
+    const dueInDays = IV_BOX_INTERVALS[box];
+    const due = new Date(Date.now() + dueInDays * 24 * 60 * 60 * 1000).toISOString();
+    ivSaveSrs({ ...ivSrs, [cardId]: { box, due, lastReview: new Date().toISOString() } });
+  }
+
+  function ivCountDue(qs) {
+    return qs.filter(q => ivIsDue(q.id)).length;
+  }
+
   function ivGetFiltered() {
     const cat = IV_CATEGORIES.find(c => c.id === ivCat);
     if (!cat) return [];
     const qs = IV_QUESTIONS[ivCat] || [];
     const term = ivSearch.trim().toLowerCase();
-    const filtered = term ? qs.filter(q => q.q.toLowerCase().includes(term) || q.a.toLowerCase().includes(term)) : qs;
+    let filtered = term ? qs.filter(q => q.q.toLowerCase().includes(term) || q.a.toLowerCase().includes(term)) : qs;
+    if (ivDueOnly) filtered = filtered.filter(q => ivIsDue(q.id));
     if (ivShuffle && ivShuffled.length === filtered.length) {
       return ivShuffled.map(i => filtered[i]).filter(Boolean);
     }
@@ -5626,6 +6557,9 @@ function App() {
     const card     = filtered[safeIdx] || null;
     const stats    = ivComputeStats();
     const catInfo  = IV_CATEGORIES.find(c => c.id === ivCat) || IV_CATEGORIES[0];
+    const dueThisCat = ivCountDue(IV_QUESTIONS[ivCat] || []);
+    const dueTotal   = Object.values(IV_QUESTIONS).reduce((a, qs) => a + ivCountDue(qs), 0);
+    const srsInfo    = card ? ivSrs[card.id] : null;
 
     // Timer display
     const timerAbs = Math.abs(ivTimerSecs);
@@ -5743,7 +6677,12 @@ function App() {
         React.createElement('button', {
           className: 'iv-toggle' + (ivShowDos ? ' iv-on' : ''),
           onClick: () => setIvShowDos(!ivShowDos)
-        }, ivShowDos ? '✕ HIDE DO\'S & DON\'TS' : '+ DO\'S & DON\'TS')
+        }, ivShowDos ? '✕ HIDE DO\'S & DON\'TS' : '+ DO\'S & DON\'TS'),
+        React.createElement('button', {
+          className: 'iv-toggle' + (ivDueOnly ? ' iv-on' : ''),
+          title: 'Spaced repetition — show only cards due for review',
+          onClick: () => { setIvDueOnly(!ivDueOnly); setIvCardIdx(0); setIvFlipped(false); setIvShuffled([]); }
+        }, '⏱ DUE FOR REVIEW (' + dueThisCat + (dueTotal !== dueThisCat ? ' / ' + dueTotal + ' total' : '') + ')')
       ),
 
       // ── Do's & Don'ts panel ───────────────────────────────────────────────
@@ -5801,6 +6740,22 @@ function App() {
                   card && card.tips && React.createElement('div', { className:'iv-card-tips' },
                     React.createElement('strong', null, '◈ INTERVIEW TIP: '),
                     card.tips
+                  ),
+                  card && React.createElement('div', { className:'iv-srs-row', onClick: e => e.stopPropagation() },
+                    React.createElement('button', {
+                      className: 'iv-srs-btn iv-srs-again',
+                      onClick: () => {
+                        ivReviewCard(card.id, 'again');
+                        if (safeIdx < filtered.length - 1) { setIvCardIdx(safeIdx + 1); setIvFlipped(false); }
+                      }
+                    }, '✕ FORGOT — REVIEW TOMORROW'),
+                    React.createElement('button', {
+                      className: 'iv-srs-btn iv-srs-good',
+                      onClick: () => {
+                        ivReviewCard(card.id, 'good');
+                        if (safeIdx < filtered.length - 1) { setIvCardIdx(safeIdx + 1); setIvFlipped(false); }
+                      }
+                    }, '✓ GOT IT — ' + (srsInfo ? 'NEXT IN ' + IV_BOX_INTERVALS[Math.min((srsInfo.box||0)+1, IV_BOX_INTERVALS.length-1)] + 'D' : 'NEXT IN 1D'))
                   )
                 )
               )
@@ -5991,7 +6946,12 @@ function App() {
             className: 'theme-toggle',
             onClick: toggleTheme,
             title: themeMode === 'day' ? 'Switch to night mode' : 'Switch to day mode'
-          }, themeMode === 'day' ? '☽' : '☀')
+          }, themeMode === 'day' ? '☽' : '☀'),
+          React.createElement('button', {
+            className: 'theme-toggle',
+            onClick: toggleDensity,
+            title: density === 'compact' ? 'Switch to comfortable reading size' : 'Switch to compact terminal density'
+          }, density === 'compact' ? 'A' : 'A⁺')
         )
       ),
 
@@ -6002,7 +6962,11 @@ function App() {
     // Toast
     React.createElement('div', { className:'toast-wrap' },
       toasts.map(t => React.createElement('div', { key:t.id, className:'toast toast-'+t.type+' show' }, t.msg))
-    )
+    ),
+
+    // Pitch tool overlays
+    PitchConfirmDialog(),
+    PitchModal()
   );
 }
 

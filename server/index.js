@@ -30,6 +30,7 @@ const snapshotRouter  = require("./routes/snapshot");
 const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
+const pitchRouter     = require("./routes/pitch");
 const ideasRouter     = require("./routes/ideas");
 const briefRouter     = require("./routes/brief");
 const newsRouter      = require("./routes/news");
@@ -39,6 +40,7 @@ const correlationsRouter       = require("./routes/correlations");
 const analyticsNarrativeRouter = require("./routes/analyticsNarrative");
 const correlationsCustomRouter = require("./routes/correlationsCustom");
 const momentumRouter           = require("./routes/momentum");
+const strategyBacktestRouter   = require("./routes/strategyBacktest");
 const researchRouter           = require("./routes/research");
 const bulletinRouter           = require("./routes/bulletin");
 
@@ -61,6 +63,7 @@ app.use("/api/snapshot",  snapshotRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
+app.use("/api/pitch",     pitchRouter);
 app.use("/api/ideas",     ideasRouter);
 app.use("/api/brief",     briefRouter);
 app.use("/api/news",      newsRouter);
@@ -70,6 +73,7 @@ app.use("/api/correlations",  correlationsRouter);
 app.use("/api/correlations",  analyticsNarrativeRouter);
 app.use("/api/correlations",  correlationsCustomRouter);
 app.use("/api/analytics",    momentumRouter);
+app.use("/api/analytics",    strategyBacktestRouter);
 app.use("/api/research",      researchRouter);
 app.use("/api/bulletin",      bulletinRouter);
 
@@ -136,6 +140,9 @@ if (require.main === module) {
     console.log(`  GET  /api/events`);
     console.log(`  POST /api/events/refresh`);
     console.log(`  GET  /api/explain/:ticker`);
+    console.log(`  POST /api/pitch/:ticker`);
+    console.log(`  GET  /api/analytics/strategy-backtest`);
+    console.log(`  GET  /api/analytics/strategy-backtest/strategies`);
     console.log(`  GET  /api/brief`);
     console.log(`  GET  /api/ideas`);
     console.log(`  POST /api/ideas`);
@@ -156,7 +163,14 @@ if (require.main === module) {
     console.log(`  GET  /api/news/:ticker`);
     console.log(`  GET  /api/glossary`);
     console.log(`  GET  /api/glossary/term-of-the-day`);
-    console.log(`  GET  /api/glossary/:slug\n`);
+    console.log(`  GET  /api/glossary/:slug`);
+    console.log(`  GET  /api/research/report?type=`);
+    console.log(`  POST /api/research/report/refresh`);
+    console.log(`  GET  /api/research/report/progress?type=`);
+    console.log(`  GET  /api/research/report/versions?type=`);
+    console.log(`  GET  /api/research/report/:reportId/qa`);
+    console.log(`  GET  /api/research/report/:reportId/sources`);
+    console.log(`  POST /api/research/interrogate\n`);
 
     const missing = [];
     if (!process.env.ANTHROPIC_API_KEY)    missing.push("ANTHROPIC_API_KEY");

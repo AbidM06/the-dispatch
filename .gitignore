@@ -16,6 +16,7 @@ data/trade_ideas.json
 data/bulletin_log.jsonl
 data/saved_models.json
 data/saved_ideas.json
+data/research_reports/
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 node_modules/
@@ -33,3 +34,4 @@ design-preview.html
 
 # ── Reports (generated, not source) ───────────────────────────────────────────
 reports/
+.venv/

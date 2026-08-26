@@ -10,13 +10,13 @@ Live macro rates, AI-powered analysis, watchlist prices, trading ideas, correlat
 
 | Tab | What it does |
 |-----|-------------|
-| **Snapshot** | Live FRED rates (10Y, real yield, breakeven, HY spread, curve), USD/GBP FX, US + international watchlist prices, RSI, interactive charts |
+| **Snapshot** | Live FRED rates (10Y, real yield, breakeven, HY spread, curve), USD/GBP FX, US + international watchlist prices, RSI, interactive charts, on-demand AI equity pitch (conclusion-first, Sonnet + web_search) per watchlist ticker |
 | **Risk** | AI-scored risk monitor across 7 channels, refreshable with live news via Claude |
-| **Analytics** | Cross-asset correlation engine, MA crossover backtester, momentum scanner, model builder with IS/OOS split, AI narrative |
+| **Analytics** | Cross-asset correlation engine, MA crossover backtester, momentum scanner, model builder with IS/OOS split, a 7-strategy technical backtester (SMA/EMA crossover, RSI reversal, MACD, Bollinger Bands, mean-reversion, momentum) with walk-forward validation and buy-and-hold benchmarking, AI narrative |
 | **Desk** | Trade idea tracker with risk/reward checks, AI idea generation, position sizing |
 | **Sales** | S&T macro view — morning note, scenario grid, cross-asset matrix, central bank reaction functions, institutional client impact map |
 | **News** | Live Finnhub headlines, economic + earnings calendar, company news + sentiment, AI morning bulletin with 1-min pitch script (optionally cross-checked against verified live X/Twitter sentiment — see [Provider Notes](#provider-notes)) |
-| **Research** | AI sell-side report generator (macro note, sector deep-dive, thematic, rates, FX) |
+| **Research** | Institutional research platform — a five-agent pipeline (Lead Analyst → independent Data Auditor + Red Team + Cross-Asset PM → IC Chair) produces evidence-backed reports (macro, commodities, equity, FX, rates, thematic, sector) with a QA score, claim ledger, source registry, and a non-sycophantic interrogation chat for cross-examining any report |
 | **Glossary** | 80+ S&T / AM terms with definitions, interview angles, and term-of-the-day |
 | **Engine** | Automated idea engine with playbooks, Shariah universe scanner, backtester, execution log |
 | **Interview** | Flashcard system for S&T / AM interview prep — behavioural, markets, investment, product |
@@ -35,6 +35,10 @@ server/analytics/          Execution policy, narrative fallback, risk checks
 server/importers/          Persistent log readers/writers (ideas, bulletin, models)
 server/jobs/               Scheduled background tasks (AI refresh, bulletin, weekly review)
 server/middleware/         Write-auth guard
+server/research/           Five-agent research pipeline (orchestrator, agents, claim ledger,
+                           source registry, quality gate, report store, interrogator)
+server/engine/tradingStrategies.js  7 technical strategies + long-only backtest runner
+server/engine/metrics.js  Sharpe/Sortino/Calmar/drawdown/VaR/CVaR + trade stats
 server/schemas/            Zod validation
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry, fetchWithTimeout, isRetryable
@@ -91,7 +95,7 @@ npm start
 
 ```bash
 npm run dev    # auto-restart on file changes
-npm test       # Jest test suite (227 tests)
+npm test       # Jest test suite (315 tests)
 ```
 
 ---
@@ -103,8 +107,9 @@ npm test       # Jest test suite (227 tests)
 | `ANTHROPIC_API_KEY` | Yes* | — | Claude API — events, risk, research, bulletin |
 | `ALPHA_VANTAGE_API_KEY` | Yes | `demo` | AMD quote + USD/GBP FX (2 calls/refresh) |
 | `FRED_API_KEY` | Yes | — | Rates: DGS10, DFII10, T10YIE, HY spread, curve |
-| `POLYGON_API_KEY` | Yes | — | Watchlist peers via `/v2/aggs` |
+| `POLYGON_API_KEY` | Yes | — | Watchlist peers via `/v2/aggs`; primary price history for the strategy backtester |
 | `FINNHUB_API_KEY` | Yes | — | News, earnings calendar, sentiment |
+| — (Yahoo Finance) | No | — | No key required — strategy backtester falls back to Yahoo for native Asian listings (`.KS`/`.KQ`/`.T`/`.TW`/`.HK`/`.SS`/`.SZ`/`.NS`/`.BO`) |
 | `EIA_API_KEY` | No | — | WTI, Brent, Henry Hub price history for commodities report |
 | `OPENAI_API_KEY` | No | — | Fallback when Claude is overloaded or fails to parse JSON |
 | `PORT` | No | `3001` | HTTP port |
@@ -182,7 +187,8 @@ the_dispatch/
 │   │   └── index.js                ← Zod validation schemas
 │   ├── providers/
 │   │   ├── alphaVantage.js         ← AMD quote + USD/GBP FX (2 calls/refresh)
-│   │   ├── polygon.js              ← 6 watchlist peers via /v2/aggs
+│   │   ├── polygon.js              ← 6 watchlist peers + history via /v2/aggs
+│   │   ├── yahoo.js                ← Price history/quotes for tickers outside Polygon (no key)
 │   │   ├── fred.js                 ← Macro rates (DGS10, DFII10, T10YIE, etc.)
 │   │   ├── fredSeries.js           ← Extended FRED series fetcher
 │   │   ├── finnhub.js              ← News, calendars, sentiment
@@ -197,6 +203,8 @@ the_dispatch/
 │   │   ├── events.js               ← GET /api/events + POST /api/events/refresh
 │   │   ├── risk.js                 ← GET /api/risk + POST /api/risk/refresh
 │   │   ├── explain.js              ← GET /api/explain/:ticker
+│   │   ├── pitch.js                ← POST /api/pitch/:ticker (on-demand AI equity pitch)
+│   │   ├── strategyBacktest.js     ← GET /api/analytics/strategy-backtest(/strategies)
 │   │   ├── bulletin.js             ← GET /api/bulletin
 │   │   ├── brief.js                ← GET /api/brief (macro brief)
 │   │   ├── news.js                 ← GET /api/news + calendar + sentiment
@@ -219,6 +227,8 @@ the_dispatch/
 │   │   ├── shariahFilter.js        ← Shariah compliance filter
 │   │   ├── learningLayer.js        ← Playbook performance tracking
 │   │   ├── strategies.js           ← Strategy definitions
+│   │   ├── tradingStrategies.js    ← 7 technical strategies + backtest runner
+│   │   ├── metrics.js              ← Sharpe/Sortino/Calmar/drawdown/VaR/CVaR + trade stats
 │   │   ├── glossary.js             ← 80+ trading terms with definitions
 │   │   ├── playbooks.js            ← Entry + exit playbook definitions
 │   │   └── universeScanner.js      ← Shariah universe macro regime scan

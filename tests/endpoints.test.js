@@ -52,6 +52,8 @@ jest.mock("../server/providers/anthropic", () => ({
   fetchWatchlistPrices: jest.fn(),
   // Still used by explain route
   fetchTickerExplain:  jest.fn(),
+  // Used by pitch route
+  generatePitch:       jest.fn(),
 }));
 // Finnhub — mocked so news routes don't make real HTTP calls
 jest.mock("../server/providers/finnhub", () => ({
@@ -615,6 +617,120 @@ describe("GET /api/explain/:ticker", () => {
     await request(app).get("/api/explain/HIES");
 
     expect(anthropicMock.fetchTickerExplain).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/pitch/:ticker
+// ─────────────────────────────────────────────────────────────────────────────
+describe("POST /api/pitch/:ticker", () => {
+  const samplePitch = (ticker = "AMD") => ({
+    ticker,
+    companyName:  "Advanced Micro Devices, Inc.",
+    direction:    "OVERWEIGHT",
+    priceTarget:  220,
+    currentPrice: 192,
+    timeframe:    "Dec-27",
+    upsidePct:    14.6,
+    conclusion:   `We are pitching ${ticker} as overweight with a Dec-27 price target of $220 at 14.6% upside.`,
+    scene:        "AMD designs CPUs and GPUs across client, datacenter, and gaming segments…",
+    thesis:       "We see upside to consensus EPS through above-street datacenter GPU growth…",
+    catalyst:     "AMD reports Q1 earnings on Apr 22; guidance above $9.8B would validate the thesis.",
+    risks: [
+      { risk: "NVDA maintains share lead in AI accelerators.", mitigation: "Size position modestly." },
+      { risk: "Macro slowdown hits PC/datacenter capex.", mitigation: "Pair with a defensive hedge." },
+    ],
+    hedge:      "Hedge with a small SOXS position or NVDA pairs trade.",
+    confidence: 72,
+  });
+
+  test("returns AI pitch for valid ticker", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("live");
+    expect(res.body.data.ticker).toBe("AMD");
+    expect(res.body.data.direction).toBe("OVERWEIGHT");
+    expect(res.body.data.risks.length).toBe(2);
+    expect(anthropicMock.generatePitch).toHaveBeenCalledWith("AMD", "");
+  });
+
+  test("returns graceful error payload when AI fails — no 500", async () => {
+    anthropicMock.generatePitch.mockRejectedValue(new Error("AI unavailable"));
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body.data.ticker).toBe("AMD");
+    expect(res.body.data.confidence).toBe(0);
+    expect(res.body._error).toBeDefined();
+  });
+
+  test("second request for same ticker is served from cache (AI called only once)", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("NVDA"));
+
+    await request(app).post("/api/pitch/NVDA").send({});
+    const res2 = await request(app).post("/api/pitch/NVDA").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(1);
+    expect(res2.body.source).toBe("cache");
+  });
+
+  test("ticker is uppercased regardless of URL casing", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    const res = await request(app).post("/api/pitch/amd").send({});
+    expect(res.status).toBe(200);
+    expect(anthropicMock.generatePitch).toHaveBeenCalledWith("AMD", "");
+  });
+
+  test("different tickers are cached independently", async () => {
+    anthropicMock.generatePitch.mockImplementation((ticker) => Promise.resolve(samplePitch(ticker)));
+
+    await request(app).post("/api/pitch/AMD").send({});
+    await request(app).post("/api/pitch/NVDA").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+  });
+
+  test("context-bearing requests always go live, bypassing cache", async () => {
+    anthropicMock.generatePitch.mockImplementation((ticker, ctx) => Promise.resolve(samplePitch(ticker)));
+
+    await request(app).post("/api/pitch/AMD").send({});                                  // populates cache
+    await request(app).post("/api/pitch/AMD").send({ context: "focus on datacenter GPUs" }); // bypasses cache
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+    expect(anthropicMock.generatePitch).toHaveBeenLastCalledWith("AMD", "focus on datacenter GPUs");
+  });
+
+  test("force=true bypasses cache for a fresh call", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    await request(app).post("/api/pitch/AMD").send({});
+    await request(app).post("/api/pitch/AMD?force=true").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+  });
+
+  test("LOW_COST_MODE=true returns source: error without calling AI", async () => {
+    process.env.LOW_COST_MODE = "true";
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body._note).toMatch(/LOW_COST_MODE/);
+    expect(anthropicMock.generatePitch).not.toHaveBeenCalled();
+  });
+
+  test("active API fallback returns source: error without calling AI", async () => {
+    budget.setApiFallback(60_000 * 60);
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body._note).toMatch(/fallback/i);
+    expect(anthropicMock.generatePitch).not.toHaveBeenCalled();
   });
 });
 

@@ -11,14 +11,19 @@
 "use strict";
 
 const { Router }  = require("express");
+const { z }       = require("zod");
 const cache       = require("../cache");
 const anthropic   = require("../providers/anthropic");
 const fred        = require("../providers/fred");
 const eia         = require("../providers/eia");
+const requireWriteAuth = require("../middleware/auth");
+const orchestrator = require("../research/orchestrator");
+const reportStore  = require("../research/reportStore");
+const interrogator = require("../research/interrogator");
 
 const router    = Router();
 const TTL_24H   = 24 * 60 * 60 * 1000;
-const VALID_TYPES = new Set(["macro", "fx", "rates", "thematic", "equity", "commodities"]);
+const VALID_TYPES = new Set(["macro", "fx", "rates", "thematic", "equity", "commodities", "sector"]);
 
 /** Extract numeric value from FRED observation object or pass through numbers.
  *  Handles both shapes:
@@ -123,7 +128,7 @@ function buildRatesFallback(rates = {}) {
     executiveSummary: `G10 rates markets are defined by a key tension: US real yields at ${dfii10}% are restrictive by any historical measure, yet risk assets remain resilient. The resolution is carry: with FX volatility suppressed, investors continue to fund in low-rate currencies (JPY, CHF) and deploy into high-real-yield assets (USD, EM carry). This dynamic is self-reinforcing until a volatility catalyst disrupts it. We identify three scenarios for an unwind and assign rough probability weights.`,
     thePuzzle: `JPY should strengthen as BoJ hikes and US-Japan rate differentials narrow — but it has not. USD/JPY is rising alongside JGB yields, which is the opposite of the conventional capital-flow model. The resolution: domestic Japanese investors are not repatriating, while foreign speculative accounts are driving JPY short positioning. Rising JGB yields reflect inflation expectations — not rate convergence — which is dollar-positive not dollar-negative.`,
     flowAnalysis: `CFTC data shows leveraged funds hold elevated JPY short positions, consistent with carry trade activity during London and New York afternoon hours. Domestic Japanese investor flows are mixed: investment trusts continue capital export (NISA-driven household equity demand); life insurers are reducing bond exposure in favour of outward direct investment; only pension funds show modest JGB reallocation. Net: repatriation flow is marginal — speculative carry is the dominant driver. This creates a non-linear unwind risk.`,
-    clientConversations: `In our conversations with clients, the dominant themes are fiscal dominance risk, carry sustainability, and whether BoJ is behind the curve. Clients note that rising JGB yields alongside JPY weakness aligns with 'fiscal dominance' narratives they have been tracking since the UK gilt crisis of 2022. They are watching Japan's bond market for signs of a Truss-style confidence shock.`,
+    clientConversations: `The dominant debates visible in public positioning data and market commentary are fiscal dominance risk, carry sustainability, and whether the BoJ is behind the curve. Rising JGB yields alongside JPY weakness aligns with the 'fiscal dominance' narrative investors have tracked since the UK gilt crisis of 2022, with Japan's bond market watched for signs of a confidence shock.`,
     catalysts: [
       { catalyst: "Rising geopolitical risk (Middle East, Taiwan)", impact: "POSITIVE", detail: "Risk-off reduces carry demand, triggers JPY short covering. USD/JPY could fall toward 145 (rough fair value) in an acute scenario." },
       { catalyst: "US recession signals (NFP < 100k, ISM < 48)", impact: "POSITIVE", detail: "Weakening US economy reduces USD rate advantage, encourages Fed dovish pivot — both negative for USD/JPY carry." },
@@ -413,12 +418,75 @@ function buildCommoditiesFallback(rates = {}) {
   };
 }
 
+// ── Sector Deep-Dive fallback ─────────────────────────────────────────────────
+function buildSectorFallback(rates = {}) {
+  const { dgs10 = 4.21, dfii10 = 1.85 } = rates;
+  const isoDate = new Date().toISOString().slice(0, 10);
+  return {
+    reportType: "sector",
+    title: "Semiconductors: Capex Supercycle Meets Valuation Discipline",
+    subtitle: "AI accelerator demand remains the dominant driver; we assess industry structure, margin durability and where the relative value sits.",
+    date: isoDate,
+    sectorName: "Semiconductors",
+    keyTakeaways: [
+      "AI accelerator demand continues to outrun supply, supporting pricing power for the leading-edge ecosystem (foundry, HBM memory, advanced packaging). Hyperscaler capex guidance remains a structural tailwind into 2027.",
+      "Margin dispersion is widening: leading-edge logic and AI-exposed names sustain gross margins above 50%, while trailing-edge and consumer-exposed names face pricing pressure from capacity normalisation.",
+      `Valuations embed high expectations: the sector trades at a premium to its 10-year average forward P/E, which is defensible only if AI capex durability holds. With real yields at ${dfii10}%, multiple compression risk is non-trivial.`,
+      "Key risk: a hyperscaler capex digestion phase in late 2026 — order patterns are lumpy and the sector historically overshoots in both directions.",
+    ],
+    industryStructure: "The industry is a layered oligopoly: one dominant leading-edge foundry, two advanced memory suppliers with HBM leadership, a concentrated equipment complex, and a fragmented design layer. Economic profit pools sit disproportionately at the leading edge, where entry barriers (capex, process knowledge, ecosystem lock-in) are highest.",
+    growthAndMargins: {
+      revenueGrowth: "Sector revenue growth is concentrated in AI data centre exposure; ex-AI, end markets (PC, mobile, industrial, auto) are recovering only gradually from the 2024-2025 inventory cycle.",
+      margins: "Gross margins are bifurcating — AI-levered names hold or expand margins on mix, while commodity segments see normalisation as capacity additions land.",
+      pricingPower: "Pricing power sits with capacity bottleneck owners: leading-edge foundry, HBM, and advanced packaging. Trailing-edge pricing is deteriorating.",
+    },
+    competitiveDynamics: "Custom silicon (hyperscaler ASICs) is the key structural share-shift risk to merchant GPU vendors. Equipment vendors benefit from both merchant and custom roadmaps, making them a lower-dispersion way to express AI capex.",
+    capexAndRegulation: "The sector is mid-way through a historic capex cycle; export controls on advanced chips to China remain the dominant regulatory overhang and cap the addressable market for leading-edge products.",
+    balanceSheets: "Balance sheets are broadly strong; the capital-intensity burden sits with foundries and memory, funded by record operating cash flows and government incentives.",
+    valuation: {
+      current: "The sector trades at a premium to both its own history and the broad market on forward earnings — the premium is the price of AI optionality.",
+      vsHistory: "Above 10-year average forward multiples across most sub-segments.",
+      vsMarket: "Meaningful premium to the S&P 500, justified only under sustained AI capex assumptions.",
+    },
+    earningsRevisions: "Consensus revisions remain positive but decelerating — estimate momentum is now concentrated in a handful of AI-exposed names rather than broad-based.",
+    macroSensitivities: `Long-duration growth exposure makes the sector sensitive to real yields (currently ${dfii10}%); a 50bp real-yield rise historically pressures sector multiples by 8-12%.`,
+    leadersLaggards: [
+      { name: "Leading-edge foundry & HBM complex", role: "LEADER",  rationale: "Bottleneck ownership converts AI demand into pricing power and margin durability." },
+      { name: "Semi-cap equipment",                 role: "LEADER",  rationale: "Benefits from both merchant and custom-silicon capex without picking a winner." },
+      { name: "Consumer/mobile-exposed analog",     role: "LAGGARD", rationale: "End-market recovery is slow and pricing pressure persists post inventory correction." },
+      { name: "Trailing-edge foundry",              role: "LAGGARD", rationale: "Capacity additions are landing into normalising demand — utilisation and pricing risk." },
+    ],
+    consensusView: "Consensus is structurally bullish on AI semis, expecting the capex cycle to extend through 2027 with only shallow digestion phases.",
+    variantPerception: "We think the risk is timing, not thesis: a visible capex digestion window in H2 2026 is more likely than consensus assumes, creating a better entry point for the same structural story.",
+    scenarios: {
+      bear: { label: "Bear", probability: "25%", trigger: "Hyperscaler capex digestion + macro slowdown", outcome: "Sector de-rates 20-30% as estimates reset", narrative: "AI monetisation lags spending, prompting a visible pause in orders. Multiple compression is amplified by elevated starting valuations." },
+      base: { label: "Base", probability: "50%", trigger: "Capex grows but decelerates; export controls stable", outcome: "Mid-teens earnings growth, flat-to-modest multiple compression", narrative: "AI demand remains solid but growth rates normalise. Stock selection matters more than beta as dispersion widens." },
+      bull: { label: "Bull", probability: "25%", trigger: "Inference demand inflects; enterprise adoption broadens", outcome: "Sector re-rates further on structurally higher TAM", narrative: "Compute demand exceeds supply through 2027, extending pricing power and driving upward estimate revisions across the ecosystem." },
+    },
+    catalysts: [
+      { catalyst: "Hyperscaler capex guidance updates", timing: "Quarterly earnings", impact: "The single most important read on demand durability." },
+      { catalyst: "HBM supply agreements and pricing", timing: "Ongoing", impact: "Direct read on the tightest bottleneck in the AI supply chain." },
+      { catalyst: "Export control policy changes", timing: "Event-driven", impact: "Binary addressable-market impact for leading-edge products." },
+    ],
+    relativeValue: "We prefer bottleneck owners (foundry, HBM, equipment) over merchant accelerator vendors on risk-reward — same demand exposure, less share-shift risk from custom silicon.",
+    risks: [
+      "Hyperscaler capex digestion arriving earlier or deeper than expected",
+      "Custom silicon share shift compressing merchant GPU economics faster than modelled",
+      "Real yield rise compressing long-duration growth multiples sector-wide",
+    ],
+    invalidation: "Two consecutive quarters of declining hyperscaler capex guidance, or clear evidence that AI inference demand is being met with existing installed capacity, would invalidate the structural tightness thesis.",
+    generatedAt: new Date().toISOString(),
+    source: "seeded",
+  };
+}
+
 function buildFallbackForType(type, rates) {
   if (type === "fx")          return buildFxFallback(rates);
   if (type === "rates")       return buildRatesFallback(rates);
   if (type === "thematic")    return buildThematicFallback(rates);
   if (type === "equity")      return buildEquityFallback(rates);
   if (type === "commodities") return buildCommoditiesFallback(rates);
+  if (type === "sector")      return buildSectorFallback(rates);
   return buildFallbackReport(rates);
 }
 
@@ -509,16 +577,27 @@ function injectChartData(report, type, { eiaLiveData, priceHistory, ratesHistory
   return report;
 }
 
-// ── GET /api/research/report ──────────────────────────────────────────────────
-router.get("/report", async (req, res) => {
-  const type   = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
-  const key    = cacheKey(type);
-  const cached = cache.getWithMeta(key);
-  if (cached && !cached.stale) {
-    return res.json(envelope(cached.value, "cache", false));
-  }
+// ── Shared generation flow (GET first-load and POST refresh) ─────────────────
+/**
+ * Attach QA metadata to the research body so the existing frontend contract
+ * (`data` = research object) is preserved while new consumers read
+ * data.reportId / data.institutionalQA / data.claimsCount / data.sourcesCount.
+ */
+function attachQA(research, reportRecord) {
+  return {
+    ...research,
+    reportId:        reportRecord ? reportRecord.reportId : null,
+    reportVersion:   reportRecord ? reportRecord.version : null,
+    dataAsOf:        reportRecord ? reportRecord.dataAsOf : null,
+    institutionalQA: reportRecord ? reportRecord.institutionalQA : orchestrator.notRunQA("Report predates institutional QA or AI unavailable"),
+    claimsCount:     reportRecord ? (reportRecord.claims || []).length : 0,
+    sourcesCount:    reportRecord ? (reportRecord.sources || []).length : 0,
+  };
+}
 
-  // Fetch rates context for AI prompt (always)
+async function generateReport(type, topic, res) {
+  const key = cacheKey(type);
+
   let rates = {};
   let ratesStr = "";
   try {
@@ -527,63 +606,161 @@ router.get("/report", async (req, res) => {
     ratesStr = `10Y: ${rates.dgs10}%, real yield: ${rates.dfii10}%, HY OAS: ${rates.hy_spread}%, BEI: ${rates.t10y_ie}%, curve: ${rates.t10y2y}%`;
   } catch (_) {}
 
-  // Fetch EIA/FRED chart data in parallel with AI generation
   const chartDataPromise = fetchChartData(type);
 
-  let report;
+  let payload;
   let source = "live";
   try {
     if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
     const { priceContext } = await chartDataPromise;
     const contextStr = [ratesStr, priceContext].filter(Boolean).join(" | ");
-    report = await anthropic.fetchResearchReport(contextStr, "", type);
+
+    if (orchestrator.multiAgentEnabled()) {
+      // Five-agent pipeline (draft → extract → parallel reviews → chair → gate)
+      const record = await orchestrator.runPipeline({
+        type, topic: topic || "", ratesContext: contextStr,
+        draftFn: () => anthropic.fetchResearchReport(contextStr, topic || "", type),
+      });
+      const chartData = await chartDataPromise.catch(() => ({}));
+      injectChartData(record.research, type, chartData);
+      payload = attachQA(record.research, record);
+    } else {
+      // Legacy single-call path — QA honestly labelled NOT RUN, but the
+      // report is still versioned + stored so interrogation works.
+      const research = await anthropic.fetchResearchReport(contextStr, topic || "", type);
+      const chartData = await chartDataPromise.catch(() => ({}));
+      injectChartData(research, type, chartData);
+      const version  = reportStore.nextVersion(type);
+      const record = reportStore.save({
+        reportId: reportStore.makeReportId(type, version),
+        version, reportType: type,
+        generatedAt: research.generatedAt || new Date().toISOString(),
+        dataAsOf: new Date().toISOString().slice(0, 10),
+        topic: topic || null, research, thesisFrame: null,
+        institutionalQA: orchestrator.notRunQA("Multi-agent QA disabled via RESEARCH_MULTI_AGENT=false"),
+        claims: [], sources: [], corrections: [],
+        meta: { pipeline: "single-agent" },
+      });
+      payload = attachQA(research, record);
+    }
   } catch (err) {
     console.warn(`[research:${type}] AI unavailable, using deterministic fallback:`, err.message);
-    report = buildFallbackForType(type, rates);
+    orchestrator.setStage(type, "failed", err.message);
+    const research = buildFallbackForType(type, rates);
+    const chartData = await chartDataPromise.catch(() => ({}));
+    injectChartData(research, type, chartData);
+    payload = {
+      ...research,
+      reportId: null, reportVersion: null,
+      institutionalQA: orchestrator.notRunQA(`QA NOT RUN — AI unavailable (${err.code || err.message})`),
+      claimsCount: 0, sourcesCount: 0,
+    };
     source = "seeded";
   }
 
-  const chartData = await chartDataPromise.catch(() => ({}));
-  injectChartData(report, type, chartData);
+  cache.set(key, payload, TTL_24H);
+  res.json(envelope(payload, source, false));
+}
 
-  cache.set(key, report, TTL_24H);
-  res.json(envelope(report, source, false));
+// ── GET /api/research/report ──────────────────────────────────────────────────
+router.get("/report", async (req, res) => {
+  const type   = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
+  const cached = cache.getWithMeta(cacheKey(type));
+  if (cached && !cached.stale) {
+    return res.json(envelope(cached.value, "cache", false));
+  }
+  await generateReport(type, "", res);
 });
 
 // ── POST /api/research/report/refresh ────────────────────────────────────────
-router.post("/report/refresh", async (req, res) => {
+router.post("/report/refresh", requireWriteAuth, async (req, res) => {
   const { topic, type: bodyType } = req.body || {};
-  const type   = VALID_TYPES.has(bodyType || req.query.type) ? (bodyType || req.query.type) : "macro";
-  const key    = cacheKey(type);
+  const type = VALID_TYPES.has(bodyType || req.query.type) ? (bodyType || req.query.type) : "macro";
+  await generateReport(type, topic || "", res);
+});
 
-  let rates = {};
-  let ratesStr = "";
-  try {
-    const r = await fred.getAllRates();
-    rates    = extractRates(r);
-    ratesStr = `10Y: ${rates.dgs10}%, real yield: ${rates.dfii10}%, HY OAS: ${rates.hy_spread}%, BEI: ${rates.t10y_ie}%`;
-  } catch (_) {}
+// ── GET /api/research/report/progress?type= ──────────────────────────────────
+// Stage labels only — no fictional percentages (§35).
+router.get("/report/progress", (req, res) => {
+  const type = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
+  res.json({ type, progress: orchestrator.getProgress(type) });
+});
 
-  const chartDataPromise = fetchChartData(type);
+// ── GET /api/research/report/versions?type= ──────────────────────────────────
+router.get("/report/versions", (req, res) => {
+  const type = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
+  const latest = reportStore.latestForType(type);
+  res.json({
+    type,
+    latest: latest ? { reportId: latest.reportId, version: latest.version, generatedAt: latest.generatedAt, qaStatus: latest.institutionalQA?.status } : null,
+  });
+});
 
-  let report;
-  let source = "live";
-  try {
-    if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
-    const { priceContext } = await chartDataPromise;
-    const contextStr = [ratesStr, priceContext].filter(Boolean).join(" | ");
-    report = await anthropic.fetchResearchReport(contextStr, topic || "", type);
-  } catch (err) {
-    console.warn(`[research:${type}] AI unavailable, using deterministic fallback:`, err.message);
-    report = buildFallbackForType(type, rates);
-    source = "seeded";
+// ── GET /api/research/report/:reportId/qa ────────────────────────────────────
+router.get("/report/:reportId/qa", (req, res) => {
+  const report = reportStore.get(req.params.reportId);
+  if (!report) return res.status(404).json({ error: "Report not found" });
+  res.json({
+    reportId:        report.reportId,
+    version:         report.version,
+    reportType:      report.reportType,
+    generatedAt:     report.generatedAt,
+    dataAsOf:        report.dataAsOf,
+    institutionalQA: report.institutionalQA,
+    thesisFrame:     report.thesisFrame,
+    claims:          report.claims,
+    corrections:     report.corrections,
+    meta:            { pipeline: report.meta?.pipeline, usage: report.meta?.usage, models: report.meta?.models },
+  });
+});
+
+// ── GET /api/research/report/:reportId/sources ───────────────────────────────
+router.get("/report/:reportId/sources", (req, res) => {
+  const report = reportStore.get(req.params.reportId);
+  if (!report) return res.status(404).json({ error: "Report not found" });
+  res.json({
+    reportId: report.reportId,
+    sources:  report.sources || [],
+    claims:   (report.claims || []).map(c => ({ claimId: c.claimId, statement: c.statement, classification: c.classification, materiality: c.materiality, verificationStatus: c.verificationStatus, confidence: c.confidence, sourceIds: c.sourceIds })),
+  });
+});
+
+// ── POST /api/research/interrogate ───────────────────────────────────────────
+const InterrogateRequest = z.object({
+  reportId:       z.string().min(1).max(120),
+  question:       z.string().min(1).max(2000),
+  conversationId: z.string().max(60).optional(),
+});
+
+router.post("/interrogate", requireWriteAuth, async (req, res) => {
+  const parsed = InterrogateRequest.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      error:   "Invalid interrogation request",
+      details: parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`),
+    });
   }
 
-  const chartData = await chartDataPromise.catch(() => ({}));
-  injectChartData(report, type, chartData);
+  if (process.env.LOW_COST_MODE === "true" || process.env.DISABLE_AI === "true") {
+    return res.status(503).json({
+      error:      "Research interrogation requires AI, which is currently disabled.",
+      aiStatus:   "UNAVAILABLE",
+      reason:     process.env.LOW_COST_MODE === "true" ? "LOW_COST_MODE=true" : "DISABLE_AI=true",
+    });
+  }
 
-  cache.set(key, report, TTL_24H);
-  res.json(envelope(report, source, false));
+  try {
+    const result = await interrogator.interrogate(parsed.data);
+    res.json(result);
+  } catch (err) {
+    if (err.status === 404) return res.status(404).json({ error: err.message });
+    const budgetErr = err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "API_CREDITS_EXHAUSTED";
+    if (budgetErr) {
+      return res.status(503).json({ error: "AI budget exhausted — interrogation unavailable until it resets.", aiStatus: "UNAVAILABLE", reason: err.code });
+    }
+    console.error("[research:interrogate]", err.message);
+    res.status(500).json({ error: "Interrogation failed: " + err.message });
+  }
 });
 
 module.exports = router;
