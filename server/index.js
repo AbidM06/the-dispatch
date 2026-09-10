@@ -175,6 +175,9 @@ if (require.main === module) {
       startAiRefresh();
       const { start: startBulletin } = require("./jobs/bulletinScheduler");
       startBulletin();
+      // Pre-generates all six research reports via the Batch API at 50% cost.
+      const { start: startResearchBatch } = require("./jobs/researchBatchJob");
+      startResearchBatch();
     }
   });
 }
