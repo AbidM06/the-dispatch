@@ -3663,7 +3663,7 @@ function App() {
     );
   }
 
-  function RpUnavailable(payload, onRetry, typeDesc) {
+  function RpUnavailable(payload, onRetry, typeLabel) {
     if (!payload) return null;
     const reasonText = {
       LOW_COST_MODE:   'AI generation is switched off (LOW_COST_MODE=true).',
@@ -3674,7 +3674,7 @@ function App() {
 
     return React.createElement('div', { className:'rp-unavailable' },
       React.createElement('div', { className:'rp-unavail-mark' }, '—'),
-      React.createElement('div', { className:'rp-unavail-hd' }, (typeDesc || 'REPORT').toUpperCase() + ' UNAVAILABLE'),
+      React.createElement('div', { className:'rp-unavail-hd' }, (typeLabel || 'REPORT').toUpperCase() + ' REPORT UNAVAILABLE'),
       React.createElement('div', { className:'rp-unavail-reason' }, reasonText),
       payload.detail && React.createElement('div', { className:'rp-unavail-detail' }, payload.detail),
       React.createElement('div', { className:'rp-unavail-note' },
@@ -4309,7 +4309,7 @@ function App() {
       const td = REPORT_TYPES.find(t => t.id === researchType);
       return React.createElement('div', null,
         typeTabs, controls,
-        RpUnavailable(researchUnavailable, refreshResearch, td && td.desc)
+        RpUnavailable(researchUnavailable, refreshResearch, td && td.label)
       );
     }
 
