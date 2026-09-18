@@ -55,13 +55,17 @@ questions if it asks — several are written to interrogate rather than monologu
 
 Rate limits and fetch failures happen. Fallbacks, in order of preference:
 
-1. Give it the `blob` URL instead of `raw`:
+1. The branch name contains a slash, which makes the short raw URL ambiguous in
+   principle. It resolves correctly today, but the unambiguous form is free
+   insurance:
+   `https://raw.githubusercontent.com/AbidM06/the-dispatch/refs/heads/claude/relaxed-brown-8q5ynd/<path>`
+2. Give it the `blob` URL instead of `raw`:
    `https://github.com/AbidM06/the-dispatch/blob/claude/relaxed-brown-8q5ynd/<path>`
-2. Download the branch as a zip from the GitHub UI and upload that.
-3. Paste the contents of the relevant brief plus the two or three files the
+3. Download the branch as a zip from the GitHub UI and upload that.
+4. Paste the contents of the relevant brief plus the two or three files the
    prompt names as highest priority.
 
-Option 3 is usually enough for personas 1 to 4, which are judging the product
+Option 4 is usually enough for personas 1 to 4, which are judging the product
 rather than the source.
 
 ## Ground rules to hold the reviewer to
