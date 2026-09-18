@@ -17,8 +17,20 @@ const budget   = require("./budget");
 const { callOpenAI } = require("./openai");
 
 const API_URL      = "https://api.anthropic.com/v1/messages";
-const MODEL        = "claude-haiku-4-5-20251001";  // Haiku — events, risk, econ, explains, fx, rates
-const MODEL_SONNET = "claude-sonnet-4-5-20250929";  // Sonnet — macro, commodities, equity, thematic (4-6 too overloaded)
+// Model IDs are complete as written — never append a date suffix.
+const MODEL        = "claude-haiku-4-5";  // Haiku — events, risk, econ, explains, fx, rates
+const MODEL_SONNET = "claude-sonnet-5";   // Sonnet 5 — macro, commodities, equity, thematic
+
+// Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
+// must keep the basic variant. Sending the wrong variant for a model is a 400.
+const WEB_SEARCH_DYNAMIC = "web_search_20260209";
+const WEB_SEARCH_BASIC   = "web_search_20250305";
+const DYNAMIC_SEARCH_MODELS = new Set(["claude-sonnet-5", "claude-opus-5", "claude-opus-4-8"]);
+
+function webSearchTool(model) {
+  const type = DYNAMIC_SEARCH_MODELS.has(model) ? WEB_SEARCH_DYNAMIC : WEB_SEARCH_BASIC;
+  return { type, name: "web_search" };
+}
 
 function apiKey() {
   const k = process.env.ANTHROPIC_API_KEY;
@@ -34,7 +46,7 @@ async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
     model,
     max_tokens: maxTokens,
     system:     systemPrompt,
-    tools:      [{ type: "web_search_20250305", name: "web_search" }],
+    tools:      [webSearchTool(model)],
     tool_choice: { type: "any" },
     messages:   [{ role: "user", content: userPrompt }],
   };
@@ -81,13 +93,51 @@ async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
     }
   );
 
-  return (json.content || [])
-    .filter(b => b.type === "text")
-    .map(b => b.text)
-    .join("\n");
+  return {
+    text:    (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n"),
+    sources: extractSearchSources(json.content || []),
+  };
 }
 
-async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MODEL) {
+/**
+ * extractSearchSources — pull the URLs web_search actually consulted.
+ *
+ * These blocks used to be discarded, which is why a report could assert a price
+ * with no way for the reader to tell whether it was searched or remembered. The
+ * index position matters: cite tags in the model's prose reference results by
+ * position, so the array order here is what makes `(cite index="2-0")` resolvable.
+ *
+ * Server-tool errors arrive as HTTP 200 with `content` set to a single error
+ * OBJECT rather than an array — indexing that without checking yields garbage.
+ */
+function extractSearchSources(content) {
+  const sources = [];
+  const seen    = new Set();
+
+  for (const block of content) {
+    if (block.type !== "web_search_tool_result") continue;
+    if (!Array.isArray(block.content)) continue;  // error object, not results
+
+    for (const result of block.content) {
+      if (result.type !== "web_search_result" || !result.url) continue;
+      if (seen.has(result.url)) continue;
+      seen.add(result.url);
+      sources.push({
+        url:     result.url,
+        title:   result.title || result.url,
+        pageAge: result.page_age || null,
+      });
+    }
+  }
+  return sources;
+}
+
+/**
+ * callClaudeSourced — like callClaude but returns `{ text, sources }`.
+ * Research reports use this so citations survive to the client; every other
+ * caller uses callClaude and gets the text alone.
+ */
+async function callClaudeSourced(systemPrompt, userPrompt, maxTokens = 1500, model = MODEL) {
   if (process.env.DISABLE_AI === "true") throw new Error("AI disabled via DISABLE_AI=true");
   // Budget gate — throws BUDGET_DAILY or BUDGET_MONTHLY if over cap
   budget.checkAndIncrement();
@@ -105,6 +155,11 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MO
   }
 }
 
+async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MODEL) {
+  const { text } = await callClaudeSourced(systemPrompt, userPrompt, maxTokens, model);
+  return text;
+}
+
 /**
  * callWithFallback — three-tier AI fallback for research reports.
  * Order: Claude Sonnet → OpenAI GPT → Claude Haiku → throw
@@ -112,7 +167,7 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MO
  * Bypasses callClaude's automatic Sonnet→Haiku cascade so OpenAI gets a
  * chance before Haiku. Budget check is run independently for each Claude tier.
  */
-async function callWithFallback(systemPrompt, userPrompt, maxTokens) {
+async function callWithFallbackSourced(systemPrompt, userPrompt, maxTokens) {
   if (process.env.DISABLE_AI === "true") throw new Error("AI disabled via DISABLE_AI=true");
 
   // Tier 1: Claude Sonnet
@@ -125,9 +180,13 @@ async function callWithFallback(systemPrompt, userPrompt, maxTokens) {
     console.warn(`[anthropic] Sonnet failed (${err.message}) — trying OpenAI ${process.env.OPENAI_FALLBACK_MODEL || "gpt-4.1"}`);
   }
 
-  // Tier 2: OpenAI GPT
+  // Tier 2: OpenAI GPT.
+  // This tier has NO web_search, so it cannot ground anything in live data — it
+  // works from training data alone. `grounded: false` propagates to the client so
+  // a report built this way is labelled rather than passed off as searched.
   try {
-    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+    const text = await callOpenAI(systemPrompt, userPrompt, maxTokens);
+    return { text, sources: [], grounded: false, tier: "openai" };
   } catch (openaiErr) {
     console.warn(`[anthropic] OpenAI failed (${openaiErr.message}) — trying Haiku`);
   }
@@ -140,6 +199,11 @@ async function callWithFallback(systemPrompt, userPrompt, maxTokens) {
     console.warn(`[anthropic] Haiku also failed: ${haikusErr.message}`);
     throw sonnetErr; // surface the original Sonnet error to the route's catch
   }
+}
+
+async function callWithFallback(systemPrompt, userPrompt, maxTokens) {
+  const { text } = await callWithFallbackSourced(systemPrompt, userPrompt, maxTokens);
+  return text;
 }
 
 /**
@@ -265,15 +329,27 @@ function sliceJSONCandidate(str, type = "array") {
   };
 }
 
-function extractJSON(raw, type = "array") {
+/**
+ * @param {string} raw
+ * @param {"array"|"object"} type
+ * @param {{ preserveCitations?: boolean }} opts
+ *   preserveCitations keeps cite markup intact so a later pass can resolve each
+ *   citation to the source it references. Research reports need this; without it
+ *   the closing `</cite>` is removed here, the opening tag is left orphaned, and
+ *   the citation becomes unresolvable — the report then reads as if nothing was
+ *   ever sourced. Callers that only want clean prose leave it off.
+ */
+function extractJSON(raw, type = "array", { preserveCitations = false } = {}) {
   if (typeof raw !== "string" || raw.trim() === "") return null;
 
   // Step 1 — strip cite tags that web_search injects into text values
-  const cleaned = raw
-    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
-    .replace(/<cite[^>]*>/gi, "")
-    .replace(/<\/cite>/gi, "")
-    .trim();
+  const cleaned = preserveCitations
+    ? raw.trim()
+    : raw
+      .replace(/[<(]cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1")
+      .replace(/[<(]cite[^>]*>/gi, "")
+      .replace(/<\/cite>/gi, "")
+      .trim();
 
   // Step 2 — try direct parse
   try { return JSON.parse(cleaned); } catch (_) {}
@@ -315,11 +391,78 @@ function todayString() {
  */
 function stripCiteTags(str) {
   if (typeof str !== "string") return str;
+  // The opening delimiter appears in the wild as both `<cite ...>` and `(cite ...>`.
+  // Matching only one leaves the other's opening tag visible in the rendered report,
+  // so both are accepted here and in parseCiteTags.
   return str
-    .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1") // <cite ...>text</cite> → text
-    .replace(/<cite[^>]*>/gi, "")                      // orphaned opening tag
-    .replace(/<\/cite>/gi, "")                         // orphaned closing tag
+    .replace(/[<(]cite[^>]*>([\s\S]*?)<\/cite>/gi, "$1") // (cite ...>text</cite> → text
+    .replace(/[<(]cite[^>]*>/gi, "")                       // orphaned opening tag
+    .replace(/<\/cite>/gi, "")                             // orphaned closing tag
     .trim();
+}
+
+/**
+ * parseCiteTags — split a string into clean prose plus the sources it cited.
+ *
+ * web_search emits `(cite index="0-2">text</cite>` inside JSON string values. The
+ * old behaviour deleted these outright, which kept the renderer clean but threw
+ * away the only evidence of which claims were actually searched. We now resolve
+ * the leading index against the search-result list before stripping, so a figure
+ * can be traced back to the page it came from.
+ *
+ * The index is "<resultIndex>-<chunk>"; only the result index identifies a source.
+ * Out-of-range indices are dropped rather than guessed at.
+ */
+function parseCiteTags(str, sources = []) {
+  if (typeof str !== "string") return { text: str, cited: [] };
+
+  const cited = new Set();
+  const CITE  = /[<(]cite[^>]*\bindex\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/cite>/gi;
+
+  const text = str.replace(CITE, (_m, index, inner) => {
+    const resultIdx = parseInt(String(index).split("-")[0], 10);
+    if (Number.isInteger(resultIdx) && sources[resultIdx]) cited.add(resultIdx);
+    return inner;
+  });
+
+  return {
+    text: stripCiteTags(text),           // sweep any malformed or index-less tags
+    cited: [...cited].map(i => sources[i]),
+  };
+}
+
+/**
+ * attachProvenance — walk an AI-generated report, resolve every citation, and
+ * return the cleaned report alongside the sources it actually drew on.
+ *
+ * `sources` is every URL web_search returned; `citedSources` is the subset the
+ * model attributed a claim to. The client renders the latter as footnotes — that
+ * distinction is what lets a reader tell a searched number from a generated one.
+ */
+function attachProvenance(obj, sources = []) {
+  const usedUrls = new Set();
+
+  function walk(node) {
+    if (typeof node === "string") {
+      const { text, cited } = parseCiteTags(node, sources);
+      cited.forEach(src => usedUrls.add(src.url));
+      return text;
+    }
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      const out = {};
+      for (const [k, v] of Object.entries(node)) out[k] = walk(v);
+      return out;
+    }
+    return node;
+  }
+
+  const clean = walk(obj);
+  return {
+    clean,
+    citedSources: sources.filter(s => usedUrls.has(s.url)),
+    allSources:   sources,
+  };
 }
 
 // ── MERGED: fetchAllAnalysis ──────────────────────────────────────────────────
@@ -757,6 +900,74 @@ Be specific. Cite real data. Write as a senior salesperson who knows these clien
   }));
 }
 
+
+
+/**
+ * ACCURACY_RULES — appended to every research system prompt.
+ *
+ * The failure these address is specific: a report would state a spot price with
+ * total confidence and no indication of whether it had been searched, supplied,
+ * or produced from training data. Rule 2 forces every figure into one of three
+ * declared buckets, and rule 3 makes "I could not verify this" an acceptable
+ * output rather than something to paper over with a plausible number.
+ */
+const ACCURACY_RULES = `
+
+ACCURACY RULES — these override style and formatting:
+1. The VERIFIED MARKET DATA block in the user message is authoritative and was fetched server-side. Use those exact figures. Never contradict them, and never substitute a value you remember.
+2. Every figure you state must be either (a) from the verified block, (b) found via web_search this session, or (c) declared as your own estimate. There is no fourth category — do not state a number you cannot place in one of these three.
+3. If you cannot verify something, say so plainly. "Not verifiable as of today" is an acceptable answer. An invented number that looks plausible is not.
+4. Placeholder text in the schema marks the TYPE of a field, not a target value. Do not anchor on any example figure it contains.
+5. Where the context supplies a derived proxy, cite it as a proxy. Never restate a proxy as a market-implied probability.`;
+
+/**
+ * REPORT_VALIDATORS — the minimum shape each report type must have to be usable.
+ *
+ * A batched result and a synchronous result go through the same gate, so a
+ * malformed report cannot reach the cache by taking the cheaper path.
+ */
+const REPORT_VALIDATORS = {
+  fx:          d => Boolean(d && d.title && Array.isArray(d.pairViews)),
+  rates:       d => Boolean(d && d.title && d.thePuzzle),
+  thematic:    d => Boolean(d && d.title && Array.isArray(d.keyThemes) && Array.isArray(d.predictions)),
+  equity:      d => Boolean(d && d.title && d.epsOutlook),
+  commodities: d => Boolean(d && d.title && Array.isArray(d.keyTakeaways)),
+  macro:       d => Boolean(d && d.title && d.scenarios),
+};
+
+/**
+ * buildResearchSpec — the prompt for a report, without calling the API.
+ * Used by the batch job to assemble a submission; the synchronous path builds
+ * the identical prompt through the same code, so the two cannot drift apart.
+ *
+ * Async only because it shares fetchResearchReport's body — spec mode performs
+ * no I/O and resolves immediately.
+ */
+async function buildResearchSpec(ratesContext = "", topic = "", reportType = "macro") {
+  return fetchResearchReport(ratesContext, topic, reportType, { specOnly: true });
+}
+
+/**
+ * finalizeResearchReport — parse, validate and attach provenance to raw model
+ * text. Shared by the synchronous and batched paths.
+ */
+function finalizeResearchReport(reportType, rawText, sources = [], grounded = true) {
+  const data = extractJSON(rawText, "object", { preserveCitations: true });
+  const isValid = REPORT_VALIDATORS[reportType] || REPORT_VALIDATORS.macro;
+  if (!isValid(data)) {
+    throw new Error(`finalizeResearchReport[${reportType}]: could not parse a usable JSON report`);
+  }
+  const { clean, citedSources, allSources } = attachProvenance(data, sources);
+  return {
+    ...clean,
+    reportType,
+    generatedAt: new Date().toISOString(),
+    citedSources,
+    allSources,
+    grounded: grounded !== false,
+  };
+}
+
 /**
  * fetchResearchReport — generates a Goldman Sachs-style economics comment.
  *
@@ -771,13 +982,13 @@ Be specific. Cite real data. Write as a senior salesperson who knows these clien
  * Cached 24h — call is ~$0.015, generated once daily unless force-refreshed.
  * topic: optional focus (e.g. "US tariffs", "Iran geopolitics", "Fed policy")
  */
-async function fetchResearchReport(ratesContext = "", topic = "", reportType = "macro") {
+async function fetchResearchReport(ratesContext = "", topic = "", reportType = "macro", { specOnly = false } = {}) {
   const today   = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
 
   // ── FX Viewpoint (BofA style) ─────────────────────────────────────────────
   if (reportType === "fx") {
-    const system = `Today is ${today}. You are a senior G10 FX strategist at BofA Global Research. You MUST use web_search to ground every FX claim in real, current data. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.`;
+    const system = `Today is ${today}. You are a senior G10 FX strategist at BofA Global Research. You MUST use web_search to ground every FX claim in real, current data. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.` + ACCURACY_RULES;
     const focusInstruction = topic
       ? `Focus this FX Viewpoint on: ${topic}.`
       : `Identify the dominant FX theme of the past 7 days — commodity shock, central bank divergence, carry unwind, or geopolitical risk.`;
@@ -820,27 +1031,19 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
-    const raw  = await callClaude(system, prompt, 4000);
-    const data = extractJSON(raw, "object");
+    if (specOnly) return { reportType: "fx", system, prompt, maxTokens: 4000, tier: "haiku" };
+    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
+    const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.pairViews)) {
       throw new Error("fetchResearchReport[fx]: could not parse JSON response");
     }
-    function stripAll(obj) {
-      if (typeof obj === "string") return stripCiteTags(obj);
-      if (Array.isArray(obj))     return obj.map(stripAll);
-      if (obj && typeof obj === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) out[k] = stripAll(v);
-        return out;
-      }
-      return obj;
-    }
-    return { ...stripAll(data), reportType: "fx", generatedAt: new Date().toISOString() };
+    const { clean, citedSources, allSources } = attachProvenance(data, sources);
+    return { ...clean, reportType: "fx", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
   }
 
   // ── Rates & Carry Deep-Dive (MS G10 FX style) ────────────────────────────
   if (reportType === "rates") {
-    const system = `Today is ${today}. You are a Morgan Stanley rates and G10 FX strategist. You MUST use web_search to find current CFTC positioning, central bank statements, and rate differentials. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.`;
+    const system = `Today is ${today}. You are a Morgan Stanley rates and G10 FX strategist. You MUST use web_search to find current CFTC positioning, central bank statements, and rate differentials. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.` + ACCURACY_RULES;
     const focusInstruction = topic
       ? `Focus this rates deep-dive on: ${topic}.`
       : `Identify the key puzzle in current rates and FX markets — what is not behaving as conventional wisdom predicts?`;
@@ -879,27 +1082,19 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 MS language: "We believe", "In our conversations with clients". Return pure JSON only.`;
 
-    const raw  = await callClaude(system, prompt, 4000);
-    const data = extractJSON(raw, "object");
+    if (specOnly) return { reportType: "rates", system, prompt, maxTokens: 4000, tier: "haiku" };
+    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
+    const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.thePuzzle) {
       throw new Error("fetchResearchReport[rates]: could not parse JSON response");
     }
-    function stripAll(obj) {
-      if (typeof obj === "string") return stripCiteTags(obj);
-      if (Array.isArray(obj))     return obj.map(stripAll);
-      if (obj && typeof obj === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) out[k] = stripAll(v);
-        return out;
-      }
-      return obj;
-    }
-    return { ...stripAll(data), reportType: "rates", generatedAt: new Date().toISOString() };
+    const { clean, citedSources, allSources } = attachProvenance(data, sources);
+    return { ...clean, reportType: "rates", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
   }
 
   // ── Thematic Analysis (MS Thematic Lens style) ────────────────────────────
   if (reportType === "thematic") {
-    const system = `Today is ${today}. You are Morgan Stanley's head of global thematics, producing the annual "World Through a Thematic Lens" report. You MUST use web_search to ground predictions in current data. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.`;
+    const system = `Today is ${today}. You are Morgan Stanley's head of global thematics, producing the annual "World Through a Thematic Lens" report. You MUST use web_search to ground predictions in current data. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.` + ACCURACY_RULES;
     const focusInstruction = topic
       ? `Focus this thematic analysis on: ${topic}.`
       : `Identify the 4 dominant structural themes shaping global markets over the next 12-24 months.`;
@@ -942,109 +1137,148 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Use MS language: "We believe", "Key Theme: X". Return pure JSON only — no extra text outside the JSON object.`;
 
-    const raw  = await callWithFallback(system, prompt, 5000);
-    const data = extractJSON(raw, "object");
+    if (specOnly) return { reportType: "thematic", system, prompt, maxTokens: 5000, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 5000);
+    const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.keyThemes) || !Array.isArray(data.predictions)) {
       throw new Error("fetchResearchReport[thematic]: could not parse JSON response");
     }
-    function stripAll(obj) {
-      if (typeof obj === "string") return stripCiteTags(obj);
-      if (Array.isArray(obj))     return obj.map(stripAll);
-      if (obj && typeof obj === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) out[k] = stripAll(v);
-        return out;
-      }
-      return obj;
-    }
-    return { ...stripAll(data), reportType: "thematic", generatedAt: new Date().toISOString() };
+    const { clean, citedSources, allSources } = attachProvenance(data, sources);
+    return { ...clean, reportType: "thematic", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
   }
 
   // ── Equity Views (GS US Equity Views style) ─────────────────────────────
+  //
+  // This schema carries an explicit cross-asset and scenario section. Earlier
+  // versions had neither: the only risk surface was a one-sentence `keyRisk` per
+  // sector, so the model had nowhere to write a stress test even when the macro
+  // context called for one. Absent fields produce absent analysis.
+  //
+  // Placeholder values are deliberately type descriptors ("<percent>") rather than
+  // worked examples. Concrete examples in a template act as anchors — a template
+  // reading "<e.g. 46% of index EPS growth>" reliably produced reports asserting 46%.
   if (reportType === "equity") {
-    const system = `Today is ${today}. You are a Goldman Sachs portfolio strategy analyst producing a US Equity Views research note. You MUST use web_search to find current S&P 500 EPS estimates, AI capex data, and AMD analyst estimates. Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.`;
+    const system = `Today is ${today}. You are a Goldman Sachs portfolio strategy analyst producing a US Equity Views research note.
+Declare every forecast figure you produce yourself in the "estimates" array.
+Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.` + ACCURACY_RULES;
+
     const focusInstruction = topic
       ? `Focus this equity views report on: ${topic}.`
       : `Produce a current S&P 500 earnings outlook covering 2026–2027 EPS forecasts, AI-driven margin dynamics, and sector rotation implications. Include specific AMD implications given its AI accelerator position.`;
-    const prompt = `${focusInstruction}
-Current macro context: ${ratesContext}
 
-Use web_search to find current S&P 500 EPS consensus, mega-cap tech earnings, AI capex announcements, and AMD's latest estimates.
+    const prompt = `${focusInstruction}
+
+${ratesContext}
+
+Use web_search for figures NOT in the verified block above: S&P 500 EPS consensus, mega-cap tech earnings, AI capex announcements, AMD estimates, and any market-moving developments in the last week.
+
+CROSS-ASSET REASONING IS MANDATORY. Equities do not price in isolation. Work all three transmission channels explicitly, using the verified levels:
+  - ENERGY: crude prices feed input costs and transport costs. Sustained higher oil compresses margins across Consumer Discretionary, Industrials and Transport, and lifts headline inflation, which in turn constrains the policy path. Energy producers gain. Quantify the direction and rough magnitude.
+  - DISCOUNT RATE: the 10Y real yield is the denominator on every future cash flow. Higher real yields compress multiples, and the effect is largest for long-duration growth names — which is where index concentration sits. State what the current real yield implies for a defensible multiple.
+  - POLICY PATH: use the derived proxy supplied above, labelled as a proxy. A tightening bias compresses multiples and raises the hurdle rate on capex; it can also cause capital-intensive programmes to be deferred. Say what the current reading implies.
 
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "S&P 500 Outlook: AI Adoption and Economic Acceleration Should Support Solid EPS Growth in 2026-2027",
-  "subtitle": "<one sentence with key EPS number and thesis>",
+  "title": "<specific to your actual findings — do not reuse a generic template title>",
+  "subtitle": "<one sentence with your key EPS number and thesis>",
   "date": "${isoDate}",
   "keyTakeaways": [
-    "We forecast S&P 500 EPS growth of +X% in 2026 (to $XXX)...",
-    "We estimate...",
-    "We expect...",
-    "We see risks from..."
+    "<takeaway — lead with the number, state the mechanism>",
+    "<takeaway>",
+    "<takeaway>",
+    "<takeaway covering the principal risk>"
   ],
   "epsOutlook": {
-    "year2026": { "epsGrowth": "<e.g. +11%>", "epsLevel": "<e.g. $275>", "revenueGrowth": "<e.g. +6%>", "marginExpansion": "<e.g. +30bp>" },
-    "year2027": { "epsGrowth": "<e.g. +13%>", "epsLevel": "<e.g. $310>", "revenueGrowth": "<e.g. +7%>", "marginExpansion": "<e.g. +40bp>" },
+    "year2026": { "epsGrowth": "<percent>", "epsLevel": "<dollar figure>", "revenueGrowth": "<percent>", "marginExpansion": "<bp>" },
+    "year2027": { "epsGrowth": "<percent>", "epsLevel": "<dollar figure>", "revenueGrowth": "<percent>", "marginExpansion": "<bp>" },
     "narrative": "<max 2 sentences on what drives the forecast>"
   },
+  "crossAssetContext": {
+    "energyChannel":   { "level": "<crude level from verified data>", "equityImpact": "<max 2 sentences: direction and which sectors>", "severity": "HIGH|MEDIUM|LOW" },
+    "rateChannel":     { "level": "<10Y real yield from verified data>", "equityImpact": "<max 2 sentences: multiple implications, duration sensitivity>", "severity": "HIGH|MEDIUM|LOW" },
+    "policyChannel":   { "level": "<derived proxy direction — label it as a proxy>", "equityImpact": "<max 2 sentences>", "severity": "HIGH|MEDIUM|LOW" },
+    "volatilityRegime":{ "level": "<VIX from verified data>", "equityImpact": "<max 1 sentence>", "severity": "HIGH|MEDIUM|LOW" },
+    "synthesis": "<3 sentences: taken together, are cross-asset conditions a tailwind or headwind to the EPS forecast, and does that make you more or less confident than consensus?>"
+  },
+  "rateSensitivity": {
+    "currentForwardPE": "<current index forward P/E>",
+    "historicalAvgPE": "<long-run average forward P/E>",
+    "sensitivityNote": "<1 sentence quantifying the index impact of a 100bp move in the 10Y real yield>",
+    "impliedDownside": "<index impact if the multiple reverts to the historical average, holding EPS flat>"
+  },
+  "scenarios": {
+    "bear":  { "label": "Bear",  "probability": "<percent>", "trigger": "<the specific macro conditions that cause this>", "epsOutcome": "<EPS level>", "indexOutcome": "<index level or percent move>", "narrative": "<3 sentences>" },
+    "base":  { "label": "Base",  "probability": "<percent>", "trigger": "<conditions for base case>", "epsOutcome": "<EPS level>", "indexOutcome": "<index level or percent move>", "narrative": "<3 sentences>" },
+    "bull":  { "label": "Bull",  "probability": "<percent>", "trigger": "<what causes upside>", "epsOutcome": "<EPS level>", "indexOutcome": "<index level or percent move>", "narrative": "<3 sentences>" }
+  },
+  "risks": [
+    { "risk": "<specific risk>", "channel": "energy|rates|policy|earnings|concentration|geopolitical", "probability": "HIGH|MEDIUM|LOW", "epsImpact": "<quantified effect on the EPS forecast>", "narrative": "<max 2 sentences>" }
+  ],
+  "invalidation": {
+    "conditions": ["<observable condition that would prove this thesis wrong>", "<condition>", "<condition>"],
+    "narrative": "<max 2 sentences on what you would watch and what you would change>"
+  },
   "megaCapContribution": {
-    "marketCapShare": "<e.g. 36%>",
-    "earningsShare": "<e.g. 26%>",
-    "epsGrowthContribution2026": "<e.g. 46% of index EPS growth>",
-    "names": ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA"],
+    "marketCapShare": "<percent>",
+    "earningsShare": "<percent>",
+    "epsGrowthContribution2026": "<percent of index EPS growth>",
+    "names": ["<the actual mega-cap names driving this>"],
+    "concentrationRisk": "<max 2 sentences: what breaks if this cohort disappoints>",
     "narrative": "<max 2 sentences>"
   },
   "aiProductivityLift": {
-    "eps2026": "<e.g. +0.4% EPS boost>",
-    "eps2027": "<e.g. +1.5% EPS boost>",
-    "adoptionStatus": "<max 2 sentences>",
+    "eps2026": "<EPS effect>",
+    "eps2027": "<EPS effect>",
+    "adoptionStatus": "<max 2 sentences — cite actual adoption/ROI data, not assertion>",
+    "capexSustainability": "<max 2 sentences: is the current capex run-rate fundable from cash flow, and what happens to it if rates rise? Distinguish hyperscaler profitability from pure-play model developer economics — they are different and conflating them overstates the case.>",
     "mechanism": "<max 1 sentence>"
   },
   "sectorViews": [
-    { "sector": "Technology", "stance": "Overweight", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>" },
-    { "sector": "Financials", "stance": "Overweight", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>" },
-    { "sector": "Energy", "stance": "Neutral", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>" },
-    { "sector": "Consumer Discretionary", "stance": "Neutral", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>" }
+    { "sector": "<sector>", "stance": "Overweight|Neutral|Underweight", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>", "oilSensitivity": "POSITIVE|NEGATIVE|NEUTRAL", "rateSensitivity": "POSITIVE|NEGATIVE|NEUTRAL" }
   ],
   "amdImplications": {
     "currentEps": "<most recent annual EPS>",
-    "epsGrowthForecast": "<e.g. +18% in 2026>",
+    "epsGrowthForecast": "<percent>",
     "aiRevenue": "<share of revenue from AI accelerators>",
     "keyRisk": "<max 2 sentences>",
     "keyOpportunity": "<max 2 sentences>",
     "valuation": "<current P/E vs historical>"
   },
   "consensusComparison": {
-    "vsBottomUp": "<above/below/in-line vs analyst consensus>",
-    "vsTopDown": "<vs strategist consensus>",
+    "vsBottomUp": "<above/below/in-line vs analyst consensus, with the numbers>",
+    "vsTopDown": "<vs strategist consensus, with the numbers>",
     "keyDifference": "<max 1 sentence>"
-  }
+  },
+  "estimates": [
+    { "figure": "<the number you asserted>", "field": "<where it appears in this report>", "basis": "<what it is derived from>", "confidence": "HIGH|MEDIUM|LOW" }
+  ],
+  "unverified": ["<any claim you could not confirm with the verified data or a web search — list it plainly rather than dropping it>"]
 }
 
-Use GS language: "We forecast", "We estimate", "We expect". Return pure JSON only — no extra text outside the JSON object.`;
+Include at least 4 entries in "risks" and cover every channel that the verified data flags as elevated. Populate "estimates" with every forecast figure you produced yourself — that array is what separates your projections from measured data, so an empty array on a report full of forecasts is wrong. Use GS language: "We forecast", "We estimate", "We expect". Return pure JSON only.`;
 
-    const raw  = await callWithFallback(system, prompt, 5000);
-    const data = extractJSON(raw, "object");
+    if (specOnly) return { reportType: "equity", system, prompt, maxTokens: 8000, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
+    const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.epsOutlook) {
       throw new Error("fetchResearchReport[equity]: could not parse JSON response");
     }
-    function stripAll(obj) {
-      if (typeof obj === "string") return stripCiteTags(obj);
-      if (Array.isArray(obj))     return obj.map(stripAll);
-      if (obj && typeof obj === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) out[k] = stripAll(v);
-        return out;
-      }
-      return obj;
-    }
-    return { ...stripAll(data), reportType: "equity", generatedAt: new Date().toISOString() };
+    const { clean, citedSources, allSources } = attachProvenance(data, sources);
+    return {
+      ...clean,
+      reportType:   "equity",
+      generatedAt:  new Date().toISOString(),
+      citedSources,
+      allSources,
+      grounded:     grounded !== false,
+    };
   }
+
 
   // ── Commodities (GS Oil/Gold Comment style) ───────────────────────────────
   if (reportType === "commodities") {
-    const system = `Today is ${today}. You are a senior Goldman Sachs commodities strategist (Daan Struyven / Jeff Currie school). You MUST use web_search for current prices, inventory data, supply disruption data, OPEC statements, and positioning. Return ONLY valid JSON — no markdown fences, no preamble. Every number must be real. Do not fabricate figures.`;
+    const system = `Today is ${today}. You are a senior Goldman Sachs commodities strategist (Daan Struyven / Jeff Currie school). You MUST use web_search for current prices, inventory data, supply disruption data, OPEC statements, and positioning. Return ONLY valid JSON — no markdown fences, no preamble. Every number must be real. Do not fabricate figures.` + ACCURACY_RULES;
     const focusInstruction = topic
       ? `Focus this commodities comment on: ${topic}.`
       : `Identify the single most important commodity market development in the past 7 days — supply shock, demand shift, geopolitical disruption, or structural change. Build around the most actionable story.`;
@@ -1114,26 +1348,18 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Write at graduate level. Every price, volume, and percentage must be real and sourced from your web search. Use web_search to find today's actual spot prices for the live_market_data array — search CME, Bloomberg, or Reuters for current Brent, WTI, and Henry Hub prices as of ${today}. The EIA historical data in context is for trend reference only (it lags ~1 week). Populate live_market_data with today's actual market prices. Return pure JSON only.`;
 
-    const raw  = await callWithFallback(system, prompt, 6000);
-    const data = extractJSON(raw, "object");
+    if (specOnly) return { reportType: "commodities", system, prompt, maxTokens: 6000, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 6000);
+    const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.keyTakeaways)) {
       throw new Error("fetchResearchReport[commodities]: could not parse JSON response");
     }
-    function stripAllComm(obj) {
-      if (typeof obj === "string") return stripCiteTags(obj);
-      if (Array.isArray(obj))     return obj.map(stripAllComm);
-      if (obj && typeof obj === "object") {
-        const out = {};
-        for (const [k, v] of Object.entries(obj)) out[k] = stripAllComm(v);
-        return out;
-      }
-      return obj;
-    }
-    return { ...stripAllComm(data), reportType: "commodities", generatedAt: new Date().toISOString() };
+    const { clean, citedSources, allSources } = attachProvenance(data, sources);
+    return { ...clean, reportType: "commodities", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
   }
 
   // ── Macro (GS Global Economics Comment — default) ─────────────────────────
-  const system = `Today is ${today}. You are a senior Goldman Sachs global economist producing a research note for institutional clients. You MUST use web_search to ground every claim in real, current data. Return ONLY valid JSON — no markdown fences, no preamble. Every number must be sourced from your web search. Do not fabricate figures.`;
+  const system = `Today is ${today}. You are a senior Goldman Sachs global economist producing a research note for institutional clients. You MUST use web_search to ground every claim in real, current data. Return ONLY valid JSON — no markdown fences, no preamble. Every number must be sourced from your web search. Do not fabricate figures.` + ACCURACY_RULES;
 
   const focusInstruction = topic
     ? `Focus this report on: ${topic}.`
@@ -1141,7 +1367,9 @@ Write at graduate level. Every price, volume, and percentage must be real and so
 
   const prompt = `${focusInstruction}
 
-Use web_search extensively to find: current asset prices, central bank statements, economic data releases, geopolitical developments, and analyst consensus as of ${today}.
+${ratesContext}
+
+Use web_search for what is NOT in the verified block above: central bank statements, economic data releases, geopolitical developments, and analyst consensus as of ${today}.
 
 Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON object with EXACTLY these keys:
 
@@ -1231,32 +1459,35 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 Write at graduate level. Every number must be specific and sourced. Use language: "We estimate", "We see incremental risks", "Effects could be larger if", "Under our baseline". Keep each string value under 200 words. Return pure JSON only — no markdown, no preamble, no trailing text.`;
 
-  const raw  = await callWithFallback(system, prompt, 8000);
-  const data = extractJSON(raw, "object");
+  if (specOnly) return { reportType: "macro", system, prompt, maxTokens: 8000, tier: "fallback" };
+  const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
+  const data = extractJSON(raw, "object", { preserveCitations: true });
 
   if (!data || !data.title || !data.scenarios || !Array.isArray(data.abstract)) {
     throw new Error("fetchResearchReport: could not parse JSON response");
   }
 
-  // Strip cite tags from all string fields
-  function stripAll(obj) {
-    if (typeof obj === "string") return stripCiteTags(obj);
-    if (Array.isArray(obj))     return obj.map(stripAll);
-    if (obj && typeof obj === "object") {
-      const out = {};
-      for (const [k, v] of Object.entries(obj)) out[k] = stripAll(v);
-      return out;
-    }
-    return obj;
-  }
+  const { clean, citedSources, allSources } = attachProvenance(data, sources);
 
   return {
-    ...stripAll(data),
+    ...clean,
     generatedAt: new Date().toISOString(),
+    citedSources,
+    allSources,
+    grounded: grounded !== false,
   };
 }
 
 module.exports = {
+  extractJSON,
+  buildResearchSpec,
+  finalizeResearchReport,
+  REPORT_VALIDATORS,
+  callClaudeSourced,
+  callWithFallbackSourced,
+  attachProvenance,
+  parseCiteTags,
+  webSearchTool,
   fetchAllAnalysis,
   fetchMarketEvents,
   fetchRiskScores,
@@ -1269,5 +1500,6 @@ module.exports = {
   fetchClientImpact,
   fetchResearchReport,
   callClaude,
+  MODEL,
   MODEL_SONNET,
 };

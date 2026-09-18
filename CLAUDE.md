@@ -48,6 +48,10 @@ server/routes/
                            GET /api/news/calendar — earnings + economic events
                            GET /api/news/:ticker — company news + sentiment
 server/providers/
+  macroContext.js          Cross-asset fact layer — 11 free FRED series with per-fact
+                           provenance; feeds EVERY research report. Also derives the
+                           labelled Fed policy-path proxy (DGS2 − DFF).
+  anthropicBatch.js        Message Batches API — 50% rate for the daily report run
   alphaVantage.js          AV_SUPPORTED = ["AMD"] only (peers moved to Polygon)
   polygon.js               Free-tier /v2/aggs endpoint — 6 peers, parallel calls
   fred.js                  Rates and history — getAllRates(), getRecentHistory()
@@ -57,6 +61,8 @@ server/providers/
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry(), fetchWithTimeout(), isRetryable()
 server/schemas/index.js    Zod schemas — validate() wrapper
+server/jobs/
+  researchBatchJob.js      Daily batched generation of all six research reports
 server/analytics/
   narrativeEngine.js       Deterministic fallback narrative (no AI)
 server/importers/
@@ -110,6 +116,81 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 
 ---
 
+## Cross-asset context layer — read this before touching research prompts
+
+`server/providers/macroContext.js` is the single fact source for **every** report type.
+
+The failure it fixes: report types used to fetch only their own data. Commodities got
+oil, macro got a rates history, and equity got five spot rates and nothing else. An
+equity report therefore could not see crude or the policy path, so it could not reason
+about the two channels that drive equities hardest — energy costs into margins, and real
+yields into multiples. The model was not ignoring the macro picture; the macro picture
+was never in the request.
+
+`getMacroContext()` fetches 11 free FRED series in parallel — rates, credit, Brent, WTI,
+VIX, EUR/USD — and returns each as a **Fact** carrying its own `source`, `seriesId` and
+`asOf` (the observation date, not the fetch time — a Friday close served on Monday must
+read Friday). Per-series failures are tolerated and named in `missing`, so "not fetched"
+stays distinguishable from "fetched as zero".
+
+Note FRED's daily oil series (`DCOILBRENTEU`, `DCOILWTICO`) is fresher than the EIA weekly
+feed used for the commodities charts, which lags ~1 week.
+
+`toPromptBlock()` renders those facts as a VERIFIED MARKET DATA block and tells the model
+not to search for figures it has already been handed. That is both an accuracy win (no
+fabricated spot prices) and a cost win (fewer web_search calls).
+
+**Fed policy path is a labelled proxy, not a probability.** There is no free, documented
+API for CME FedWatch, so the codebase does not pretend to have one. `derivePolicyPath()`
+computes 2Y UST minus effective fed funds (DGS2 − DFF) and reports a DIRECTION with a
+±25bp neutral band. Every field says it is a proxy and the prompt forbids restating it as
+market-implied odds. Do not relabel this as a probability.
+
+## No fabricated fallbacks — deliberate
+
+`server/routes/research.js` used to carry six hand-written "deterministic" reports served
+whenever AI generation failed. They read exactly like live research and every figure was
+hardcoded; the commodities seed asserted a Strait of Hormuz closure with a 17mb/d supply
+shock that had never happened.
+
+They are gone and must not come back. On failure the route returns HTTP 503 with
+`available: false`, the reason, and the timestamp of the last successful run; the client
+renders an unavailable panel. A report that invents a crisis is worse than no report.
+A test asserts the seed builders stay deleted.
+
+Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
+produces comes from training data — that path sets `grounded: false` and the client shows
+a warning rather than presenting the output as searched.
+
+## Equity report schema — why it has a scenarios block
+
+Every other report type had a risk or scenario container; equity had none. Its only risk
+surface was a one-sentence `keyRisk` per sector, so the model had nowhere to write a
+stress test even when the macro context called for one. Absent fields produce absent
+analysis.
+
+The schema now requires `crossAssetContext` (energy / rate / policy / volatility
+channels, each with a severity), `rateSensitivity`, `scenarios` (bear/base/bull with EPS
+and index outcomes), `risks[]`, `invalidation`, `estimates[]` and `unverified[]`.
+
+Placeholder values in the prompt are type descriptors (`"<percent>"`), never worked
+examples. The old template read `"<e.g. 46% of index EPS growth>"` and reports reliably
+came back asserting exactly 46%. Do not reintroduce concrete example figures.
+
+`estimates[]` is the model declaring which figures are its own forecasts rather than
+measured data; the client renders it as a separate table. `unverified[]` is what it could
+not confirm — surfacing that is the point, not a defect.
+
+## Research batching
+`server/jobs/researchBatchJob.js` pre-generates all six reports daily via the Message
+Batches API at 50% of the synchronous rate (`RESEARCH_BATCH_TIME`, default 06:40).
+Prompts come from `buildResearchSpec()` — the same code the synchronous path uses, so the
+two cannot drift apart. Anything the batch fails to deliver is regenerated synchronously,
+so batching affects cost only, never availability.
+
+Interactive paths (explain, thesis, bulletin) stay synchronous — batch latency is measured
+in minutes and would be visible there.
+
 ## Cache strategy
 All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
 1. Warm cache → serve immediately (no fetch)
@@ -152,15 +233,29 @@ The React renderer in `client/index.html` uses the `applyFactorShocks` field nam
 
 ---
 
-## AI text pipeline — cite-tag stripping
+## AI text pipeline — citations become provenance
 Claude's web_search tool emits `<cite index="0-2">text</cite>` markup into JSON string
-fields. This is stripped server-side before returning to the client.
+fields. Both the `<cite` and `(cite` opening forms are accepted defensively —
+matching only one would leave the other's opening tag visible on screen.
 
-`stripCiteTags(str)` in `server/providers/anthropic.js` is applied to:
+There are two paths, and the difference matters:
+
+**Non-research surfaces** strip the markup outright. `stripCiteTags(str)` is applied to:
 - `fetchAllAnalysis()` — events (headline, detail), risks (title, detail), econ (title, body)
 - `fetchTickerExplain()` — what, now, portfolio fields
 
 Do not remove this — the React renderer uses plain string nodes and would display raw tags.
+
+**Research reports resolve the markup instead of deleting it.** `parseCiteTags()` maps each
+cite index to the URL web_search actually returned, and `attachProvenance()` walks the
+report to produce `citedSources` (pages a claim was attributed to) and `allSources`
+(everything searched). The client renders these as footnotes, so a reader can tell a
+searched figure from a generated one.
+
+`extractJSON(raw, type, { preserveCitations: true })` is REQUIRED on every research branch.
+Without the flag, extractJSON removes the closing `</cite>` unconditionally, which orphans
+the opening tag and makes every citation unresolvable — the report then renders as though
+nothing was ever sourced. There is a regression test for this.
 
 ---
 
@@ -183,7 +278,10 @@ Key conventions:
 - `providers.test.js` Polygon suite: one `mockFetch` call per ticker (parallel calls),
   using `aggsResponse(sym, bars)` helper with `bar(close, epochMs)` shape
 
-Current status: **213/213 tests passing**
+Current status: **260 passing.** `tests/research.test.js` covers the cross-asset layer,
+the policy proxy, provenance, the batch adapter, and the no-fabrication guarantee.
+One pre-existing failure in `tests/phase1.test.js` — a date-dependent event-horizon
+assertion — is unrelated to this work and fails on a clean checkout too.
 
 ---
 
@@ -276,6 +374,10 @@ exactly 2 AV calls (AMD + FX) + 6 Polygon calls.
 
 ## Key decisions already made — do not revisit without good reason
 1. **Polygon free tier** uses `/v2/aggs` not `/v2/snapshot` (403 on free tier)
+1b. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-haiku-4-5`. Sonnet 5 is
+   both cheaper and more capable than the Sonnet 4.5 it replaced. The web_search tool type
+   is model-dependent (`web_search_20260209` for Sonnet 5, `web_search_20250305` for Haiku
+   4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
 2. **AV limited to AMD only** — adding more AV symbols will exhaust the 25 calls/day limit
 3. **`Promise.allSettled`** in `polygon.js` — partial results are better than total failure
 4. **30-min market cache TTL** — short enough for intraday staleness badge, long enough

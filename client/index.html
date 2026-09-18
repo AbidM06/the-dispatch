@@ -575,6 +575,127 @@ tbody tr:hover td { background: var(--bg-alt); }
 .research-impact-val { font-size: 13px; color: var(--ink); font-weight: 500; }
 .research-source-badge, .rp-source-badge { font-size: 8px; letter-spacing: .1em; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border-med); color: var(--ink-mid); }
 .research-disclaimer { font-size: 10px; color: var(--ink-low); border-top: 1px solid var(--border); padding-top: 12px; margin-top: 16px; }
+
+/* ── PROVENANCE & CROSS-ASSET ─────────────────────────────────────────────────
+   Verified data reads as an instrument panel — mono, tabular, quietly authoritative.
+   Model output keeps the editorial serif treatment used elsewhere. The visual
+   split is the point: a reader should be able to tell measured from generated
+   at a glance, without reading a word. */
+
+.rp-verified { border: 1px solid var(--acc-gold); border-radius: var(--radius); padding: 13px 15px; margin-bottom: 16px; background: rgba(184,146,74,.05); }
+.rp-verified-hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 11px; }
+.rp-verified-title { font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; color: var(--acc-gold); font-weight: 700; }
+.rp-verified-sub { font-family: var(--mono); font-size: 8.5px; letter-spacing: .06em; color: var(--ink-low); }
+.rp-verified-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(124px,1fr)); gap: 9px; }
+.rp-verified-cell { border-left: 2px solid var(--acc-gold); padding-left: 8px; }
+.rp-verified-lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .1em; color: var(--ink-low); text-transform: uppercase; margin-bottom: 2px; }
+.rp-verified-val { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.rp-verified-src { font-family: var(--mono); font-size: 7.5px; color: var(--ink-low); letter-spacing: .04em; margin-top: 2px; }
+.rp-verified-foot { font-family: var(--mono); font-size: 8.5px; color: var(--ink-low); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); line-height: 1.5; }
+
+.rp-policy-proxy { border: 1px dashed var(--border-med); border-radius: var(--radius); padding: 12px 15px; margin-bottom: 16px; }
+.rp-pp-tight   { border-left: 3px solid var(--red); }
+.rp-pp-ease    { border-left: 3px solid var(--green, #4A7C59); }
+.rp-pp-neutral { border-left: 3px solid var(--steel); }
+.rp-pp-hd { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 7px; }
+.rp-pp-tag { font-family: var(--mono); font-size: 7.5px; letter-spacing: .14em; padding: 2px 6px; border: 1px solid var(--border-med); border-radius: 3px; color: var(--ink-low); }
+.rp-pp-dir { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--ink); }
+.rp-pp-gap { font-family: var(--mono); font-size: 11px; color: var(--ink-mid); font-variant-numeric: tabular-nums; }
+.rp-pp-reading { font-size: 11.5px; color: var(--ink-mid); line-height: 1.6; margin-bottom: 6px; }
+.rp-pp-method { font-family: var(--mono); font-size: 8.5px; color: var(--ink-low); margin-bottom: 4px; }
+.rp-pp-caveat { font-family: var(--mono); font-size: 8.5px; color: var(--red); line-height: 1.5; }
+
+.rp-ungrounded { border: 1px solid var(--red); border-radius: var(--radius); padding: 12px 15px; margin-bottom: 16px; background: rgba(180,60,50,.05); }
+.rp-ungrounded-hd { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; color: var(--red); font-weight: 700; margin-bottom: 6px; }
+.rp-ungrounded-body { font-size: 11.5px; color: var(--ink-mid); line-height: 1.6; }
+
+.rp-estimates { border: 1px solid var(--border-med); border-radius: var(--radius); padding: 13px 15px; margin-top: 18px; }
+.rp-est-hd { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; color: var(--ink); font-weight: 700; margin-bottom: 4px; }
+.rp-est-note { font-family: var(--mono); font-size: 8.5px; color: var(--ink-low); margin-bottom: 10px; }
+.rp-est-tbl { width: 100%; border-collapse: collapse; }
+.rp-est-th { font-family: var(--mono); font-size: 7.5px; letter-spacing: .12em; color: var(--ink-low); text-align: left; padding: 5px 8px 5px 0; border-bottom: 1px solid var(--border-med); }
+.rp-est-td { font-size: 10.5px; color: var(--ink-mid); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
+.rp-est-fig { font-family: var(--mono); font-weight: 700; color: var(--ink); white-space: nowrap; }
+.rp-est-conf-high   { color: var(--ink); font-family: var(--mono); font-size: 9px; letter-spacing: .06em; }
+.rp-est-conf-medium { color: var(--ink-mid); font-family: var(--mono); font-size: 9px; letter-spacing: .06em; }
+.rp-est-conf-low    { color: var(--red); font-family: var(--mono); font-size: 9px; letter-spacing: .06em; }
+
+.rp-unverified { border-left: 3px solid var(--red); padding: 10px 0 10px 13px; margin-top: 16px; }
+.rp-unver-hd { font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--red); margin-bottom: 6px; }
+.rp-unver-list { list-style: none; margin: 0; padding: 0; }
+.rp-unver-item { font-size: 11px; color: var(--ink-mid); line-height: 1.6; padding: 3px 0; }
+.rp-unver-item::before { content: '· '; color: var(--red); }
+
+.rp-sources { border-top: 1px solid var(--border-med); padding-top: 12px; margin-top: 18px; }
+.rp-src-hd { font-family: var(--mono); font-size: 9px; letter-spacing: .13em; color: var(--ink-low); margin-bottom: 8px; }
+.rp-src-list { margin: 0; padding-left: 18px; }
+.rp-src-item { font-size: 10.5px; color: var(--ink-mid); line-height: 1.65; padding: 2px 0; }
+.rp-src-link { color: var(--ink-mid); text-decoration: none; border-bottom: 1px solid var(--border-med); }
+.rp-src-link:hover { color: var(--acc-gold); border-bottom-color: var(--acc-gold); }
+.rp-src-age { font-family: var(--mono); font-size: 8.5px; color: var(--ink-low); }
+.rp-sources-empty .rp-src-none { font-family: var(--mono); font-size: 9.5px; color: var(--red); line-height: 1.55; }
+
+.rp-unavailable { text-align: center; padding: 46px 32px; }
+.rp-unavail-mark { font-family: var(--mono); font-size: 34px; color: var(--border-med); line-height: 1; margin-bottom: 14px; }
+.rp-unavail-hd { font-family: var(--mono); font-size: 12px; letter-spacing: .16em; color: var(--ink); font-weight: 700; margin-bottom: 10px; }
+.rp-unavail-reason { font-size: 12.5px; color: var(--ink-mid); margin-bottom: 6px; }
+.rp-unavail-detail { font-family: var(--mono); font-size: 9.5px; color: var(--red); margin-bottom: 14px; word-break: break-word; }
+.rp-unavail-note { font-size: 11px; color: var(--ink-low); line-height: 1.65; max-width: 460px; margin: 0 auto 12px; }
+.rp-unavail-last { font-family: var(--mono); font-size: 9px; color: var(--ink-low); letter-spacing: .05em; }
+
+.rp-xa-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 10px; margin-bottom: 12px; }
+.rp-xa-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; }
+.rp-xa-high   { border-left: 3px solid var(--red); }
+.rp-xa-medium { border-left: 3px solid var(--acc-gold); }
+.rp-xa-low    { border-left: 3px solid var(--steel); }
+.rp-xa-hd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.rp-xa-name { font-family: var(--mono); font-size: 8px; letter-spacing: .1em; color: var(--ink-low); }
+.rp-xa-sev { font-family: var(--mono); font-size: 7.5px; letter-spacing: .1em; color: var(--ink-mid); }
+.rp-xa-level { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.rp-xa-impact { font-size: 11px; color: var(--ink-mid); line-height: 1.55; }
+.rp-xa-synth { border-left: 2px solid var(--acc-gold); padding: 9px 0 9px 12px; font-size: 12px; color: var(--ink-mid); line-height: 1.65; }
+.rp-xa-synth-lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .13em; color: var(--acc-gold); margin-bottom: 4px; }
+
+.rp-rs-row { display: grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 10px; margin-bottom: 10px; }
+.rp-rs-cell { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.rp-rs-lbl { font-family: var(--mono); font-size: 8px; letter-spacing: .1em; color: var(--ink-low); margin-bottom: 3px; }
+.rp-rs-val { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.rp-scn-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 10px; }
+.rp-scn-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 13px; }
+.rp-scn-bear { border-top: 2px solid var(--red); }
+.rp-scn-base { border-top: 2px solid var(--steel); }
+.rp-scn-bull { border-top: 2px solid var(--green, #4A7C59); }
+.rp-scn-hd { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+.rp-scn-lbl { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; font-weight: 700; color: var(--ink); }
+.rp-scn-prob { font-family: var(--mono); font-size: 11px; color: var(--ink-mid); font-variant-numeric: tabular-nums; }
+.rp-scn-out { font-family: var(--mono); font-size: 10px; color: var(--ink); margin-bottom: 6px; line-height: 1.5; }
+.rp-scn-trig { font-size: 10.5px; color: var(--ink-low); line-height: 1.5; margin-bottom: 5px; }
+.rp-scn-narr { font-size: 11px; color: var(--ink-mid); line-height: 1.55; }
+
+.rp-risk-item { border-bottom: 1px solid var(--border); padding: 9px 0; }
+.rp-risk-hd { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.rp-risk-ch { font-family: var(--mono); font-size: 7.5px; letter-spacing: .1em; padding: 2px 6px; border: 1px solid var(--border-med); border-radius: 3px; color: var(--ink-low); }
+.rp-risk-prob { font-family: var(--mono); font-size: 8px; letter-spacing: .09em; }
+.rp-risk-high   { color: var(--red); }
+.rp-risk-medium { color: var(--acc-gold); }
+.rp-risk-low    { color: var(--steel); }
+.rp-risk-name { font-size: 12px; color: var(--ink); font-weight: 500; }
+.rp-risk-impact { font-family: var(--mono); font-size: 9.5px; color: var(--ink-mid); margin-bottom: 3px; }
+.rp-risk-narr { font-size: 11px; color: var(--ink-mid); line-height: 1.55; }
+
+.rp-inval { border: 1px dashed var(--border-med); border-radius: var(--radius); padding: 12px 15px; margin-top: 16px; }
+.rp-inval-hd { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; color: var(--ink); font-weight: 700; margin-bottom: 7px; }
+.rp-inval-list { list-style: none; margin: 0 0 7px; padding: 0; }
+.rp-inval-item { font-size: 11.5px; color: var(--ink-mid); line-height: 1.6; padding: 3px 0; }
+.rp-inval-item::before { content: '□ '; color: var(--acc-gold); }
+.rp-inval-narr { font-size: 11px; color: var(--ink-low); line-height: 1.6; }
+
+@media (max-width: 640px) {
+  .rp-verified-grid { grid-template-columns: repeat(auto-fill,minmax(104px,1fr)); }
+  .rp-xa-grid, .rp-scn-grid { grid-template-columns: 1fr; }
+  .rp-est-tbl { display: block; overflow-x: auto; }
+}
 .research-conclusion { font-size: 12px; color: var(--ink-mid); line-height: 1.7; }
 .research-risk-channel, .research-risk-item { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
 .research-risk-text  { color: var(--ink-mid); }
@@ -916,8 +1037,11 @@ const API_BASE = window.location.hostname === 'localhost' ? '' : '';
 async function apiFetch(path, opts) {
   const res = await fetch(`${API_BASE}${path}`, opts);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    const error = new Error(body.error || `HTTP ${res.status}`);
+    error.status  = res.status;
+    error.payload = body;   // e.g. the research "unavailable" envelope
+    throw error;
   }
   return res.json();
 }
@@ -1093,6 +1217,7 @@ function App() {
   // ── RESEARCH (sell-side report) state ─────────────────────────────────────
   const [research, setResearch]           = useState(null);
   const [researchSource, setResearchSource] = useState(null);
+  const [researchUnavailable, setResearchUnavailable] = useState(null);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchTopic, setResearchTopic] = useState('');
   const [researchType, setResearchType]   = useState('macro');
@@ -1513,9 +1638,18 @@ function App() {
     try {
       const resp = await apiFetch('/api/research/report?type=' + researchType);
       setResearch(resp.data);
-      setResearchSource(resp.source || 'seeded');
+      setResearchSource(resp.source || 'live');
+      setResearchUnavailable(null);
     } catch (err) {
-      showToast('Research report error: ' + err.message, 'error');
+      // A 503 means the server refused to fabricate a report. Render why, rather
+      // than leaving the last report on screen as though it were current.
+      const payload = err.payload && err.payload.data;
+      if (payload && payload.available === false) {
+        setResearch(null);
+        setResearchUnavailable(payload);
+      } else {
+        showToast('Research report error: ' + err.message, 'error');
+      }
     }
     setResearchLoading(false);
   }
@@ -1530,11 +1664,19 @@ function App() {
         body: JSON.stringify({ topic: researchTopic, type: researchType }),
       });
       setResearch(resp.data);
-      setResearchSource(resp.source || 'seeded');
+      setResearchSource(resp.source || 'live');
+      setResearchUnavailable(null);
       loadBudgetStatus(); // refresh budget after AI call
       showToast('Research report generated (' + resp.source + ')', 'success');
     } catch (err) {
-      showToast('Research error: ' + err.message, 'error');
+      const payload = err.payload && err.payload.data;
+      if (payload && payload.available === false) {
+        setResearch(null);
+        setResearchUnavailable(payload);
+        showToast('Report unavailable — ' + (payload.reason || 'generation failed'), 'error');
+      } else {
+        showToast('Research error: ' + err.message, 'error');
+      }
     }
     setResearchLoading(false);
   }
@@ -3389,6 +3531,164 @@ function App() {
   }
 
   // ── RESEARCH TAB — Sell-Side Report ───────────────────────────────────────
+  // ── PROVENANCE COMPONENTS ─────────────────────────────────────────────────
+  //
+  // Every figure in a report falls into one of three buckets, and the reader has
+  // to be able to tell which without asking:
+  //   VERIFIED  — fetched server-side from FRED/EIA. RpVerifiedData renders these
+  //               with their series id and observation date.
+  //   SEARCHED  — the model found it on a page this session. RpSources lists the
+  //               pages it actually cited.
+  //   ESTIMATED — the model's own forecast. RpEstimates makes those explicit.
+  // Anything that cannot be placed in a bucket is the thing that used to go wrong.
+
+  function RpVerifiedData(rows, asOf) {
+    if (!rows || !rows.length) return null;
+    return React.createElement('div', { className:'rp-verified' },
+      React.createElement('div', { className:'rp-verified-hd' },
+        React.createElement('span', { className:'rp-verified-title' }, '◆ VERIFIED MARKET DATA'),
+        React.createElement('span', { className:'rp-verified-sub' }, 'Fetched server-side — not model output')
+      ),
+      React.createElement('div', { className:'rp-verified-grid' },
+        rows.map((row, i) =>
+          React.createElement('div', { key:i, className:'rp-verified-cell' },
+            React.createElement('div', { className:'rp-verified-lbl' }, row.label),
+            React.createElement('div', { className:'rp-verified-val' }, row.value),
+            React.createElement('div', { className:'rp-verified-src' },
+              [row.source, row.detail, row.asOf].filter(Boolean).join(' · ')
+            )
+          )
+        )
+      ),
+      asOf && React.createElement('div', { className:'rp-verified-foot' },
+        'Snapshot taken ' + new Date(asOf).toLocaleString() + '. Figures below that do not appear here are model-generated.'
+      )
+    );
+  }
+
+  function RpPolicyProxy(pp) {
+    if (!pp) return null;
+    const cls = pp.direction === 'TIGHTENING BIAS' ? 'rp-pp-tight'
+              : pp.direction === 'EASING BIAS'     ? 'rp-pp-ease'
+              : 'rp-pp-neutral';
+    return React.createElement('div', { className:'rp-policy-proxy ' + cls },
+      React.createElement('div', { className:'rp-pp-hd' },
+        React.createElement('span', { className:'rp-pp-tag' }, 'DERIVED PROXY'),
+        React.createElement('span', { className:'rp-pp-dir' }, pp.direction),
+        React.createElement('span', { className:'rp-pp-gap' }, (pp.gapBp >= 0 ? '+' : '') + pp.gapBp + 'bp')
+      ),
+      React.createElement('div', { className:'rp-pp-reading' }, pp.reading),
+      React.createElement('div', { className:'rp-pp-method' }, 'Method: ' + pp.method),
+      React.createElement('div', { className:'rp-pp-caveat' }, '⚠ ' + pp.caveat)
+    );
+  }
+
+  function RpGroundingWarning(r) {
+    if (!r || r.grounded !== false) return null;
+    return React.createElement('div', { className:'rp-ungrounded' },
+      React.createElement('div', { className:'rp-ungrounded-hd' }, '⚠ NOT GROUNDED IN LIVE SEARCH'),
+      React.createElement('div', { className:'rp-ungrounded-body' },
+        'This report was produced by a fallback model with no web search available, so its figures ' +
+        'come from training data rather than current sources. The verified market data above is still ' +
+        'live. Treat every other number as unconfirmed and regenerate when the primary model is available.'
+      )
+    );
+  }
+
+  function RpEstimates(estimates) {
+    if (!estimates || !estimates.length) return null;
+    return React.createElement('div', { className:'rp-estimates' },
+      React.createElement('div', { className:'rp-est-hd' }, '◈ MODEL ESTIMATES — NOT MEASURED DATA'),
+      React.createElement('div', { className:'rp-est-note' },
+        'Figures the model derived itself. They are forecasts, not observations.'
+      ),
+      React.createElement('table', { className:'rp-est-tbl' },
+        React.createElement('thead', null,
+          React.createElement('tr', null,
+            ['FIGURE','APPEARS IN','BASIS','CONFIDENCE'].map(h =>
+              React.createElement('th', { key:h, className:'rp-est-th' }, h))
+          )
+        ),
+        React.createElement('tbody', null,
+          estimates.map((e, i) =>
+            React.createElement('tr', { key:i },
+              React.createElement('td', { className:'rp-est-td rp-est-fig' }, e.figure || '—'),
+              React.createElement('td', { className:'rp-est-td' }, e.field || '—'),
+              React.createElement('td', { className:'rp-est-td' }, e.basis || '—'),
+              React.createElement('td', { className:'rp-est-td rp-est-conf-' + String(e.confidence || 'medium').toLowerCase() },
+                e.confidence || '—')
+            )
+          )
+        )
+      )
+    );
+  }
+
+  function RpUnverified(items) {
+    if (!items || !items.length) return null;
+    return React.createElement('div', { className:'rp-unverified' },
+      React.createElement('div', { className:'rp-unver-hd' }, '⚠ COULD NOT BE VERIFIED'),
+      React.createElement('ul', { className:'rp-unver-list' },
+        items.map((it, i) => React.createElement('li', { key:i, className:'rp-unver-item' }, it))
+      )
+    );
+  }
+
+  function RpSources(cited, all) {
+    const list = (cited && cited.length) ? cited : [];
+    if (!list.length) {
+      // Distinguish "searched and cited nothing" from "never searched" — the second
+      // is the state that should make a reader suspicious.
+      const searched = all && all.length;
+      return React.createElement('div', { className:'rp-sources rp-sources-empty' },
+        React.createElement('div', { className:'rp-src-hd' }, 'SOURCES'),
+        React.createElement('div', { className:'rp-src-none' },
+          searched
+            ? `Web search returned ${all.length} result(s), but the model attributed no specific claim to any of them. Figures here are unattributed.`
+            : 'No web sources were cited for this report. Every figure outside the verified block above is unattributed.'
+        )
+      );
+    }
+    return React.createElement('div', { className:'rp-sources' },
+      React.createElement('div', { className:'rp-src-hd' }, 'SOURCES CITED (' + list.length + ')'),
+      React.createElement('ol', { className:'rp-src-list' },
+        list.map((sRef, i) =>
+          React.createElement('li', { key:i, className:'rp-src-item' },
+            React.createElement('a', { href:sRef.url, target:'_blank', rel:'noopener noreferrer', className:'rp-src-link' },
+              sRef.title || sRef.url),
+            sRef.pageAge && React.createElement('span', { className:'rp-src-age' }, ' · ' + sRef.pageAge)
+          )
+        )
+      )
+    );
+  }
+
+  function RpUnavailable(payload, onRetry, typeLabel) {
+    if (!payload) return null;
+    const reasonText = {
+      LOW_COST_MODE:   'AI generation is switched off (LOW_COST_MODE=true).',
+      BUDGET_DAILY:    'The daily Anthropic spend cap has been reached.',
+      BUDGET_MONTHLY:  'The monthly Anthropic spend cap has been reached.',
+      AI_UNAVAILABLE:  'Report generation failed.',
+    }[payload.reason] || 'Report generation failed.';
+
+    return React.createElement('div', { className:'rp-unavailable' },
+      React.createElement('div', { className:'rp-unavail-mark' }, '—'),
+      React.createElement('div', { className:'rp-unavail-hd' }, (typeLabel || 'REPORT').toUpperCase() + ' REPORT UNAVAILABLE'),
+      React.createElement('div', { className:'rp-unavail-reason' }, reasonText),
+      payload.detail && React.createElement('div', { className:'rp-unavail-detail' }, payload.detail),
+      React.createElement('div', { className:'rp-unavail-note' },
+        'No report is shown because no live one could be produced. This panel deliberately ' +
+        'has no fallback content — a placeholder report with invented figures would be ' +
+        'indistinguishable from a real one.'
+      ),
+      payload.lastSuccessAt && React.createElement('div', { className:'rp-unavail-last' },
+        'Last successful report: ' + new Date(payload.lastSuccessAt).toLocaleString()
+      ),
+      onRetry && React.createElement('button', { className:'btn', style:{marginTop:14}, onClick:onRetry }, 'RETRY')
+    );
+  }
+
   // ── SHARED RESEARCH COMPONENTS ────────────────────────────────────────────
   function RpSourceBadge(src) {
     const cls = src === 'seeded' ? 'rp-source-seeded' : src === 'cache' ? 'rp-source-cache' : 'rp-source-live';
@@ -4005,6 +4305,14 @@ function App() {
       }, 'LOAD CACHED')
     );
 
+    if (!r && !researchLoading && researchUnavailable) {
+      const td = REPORT_TYPES.find(t => t.id === researchType);
+      return React.createElement('div', null,
+        typeTabs, controls,
+        RpUnavailable(researchUnavailable, refreshResearch, td && td.label)
+      );
+    }
+
     if (!r && !researchLoading) {
       const typeDesc = REPORT_TYPES.find(t => t.id === researchType);
       return React.createElement('div', null,
@@ -4055,26 +4363,28 @@ function App() {
 
     // Dispatch to sub-renderer based on type stored in data or current selector
     const rType = r.reportType || researchType;
-    if (rType === 'macro') {
-      return React.createElement('div', null, typeTabs, controls, renderMacroReport(r, src));
-    }
-    if (rType === 'commodities') {
-      return React.createElement('div', null, typeTabs, controls, renderCommoditiesReport(r, src));
-    }
-    if (rType === 'fx') {
-      return React.createElement('div', null, typeTabs, controls, renderFxReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'rates') {
-      return React.createElement('div', null, typeTabs, controls, renderRatesReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'thematic') {
-      return React.createElement('div', null, typeTabs, controls, renderThematicReport(r, sourceLabel, sourceClass));
-    }
-    if (rType === 'equity') {
-      return React.createElement('div', null, typeTabs, controls, renderEquityReport(r, sourceLabel, sourceClass));
-    }
-    // Fallback — treat as macro
-    return React.createElement('div', null, typeTabs, controls, renderMacroReport(r, src));
+    let body;
+    if      (rType === 'commodities') body = renderCommoditiesReport(r, src);
+    else if (rType === 'fx')          body = renderFxReport(r, sourceLabel, sourceClass);
+    else if (rType === 'rates')       body = renderRatesReport(r, sourceLabel, sourceClass);
+    else if (rType === 'thematic')    body = renderThematicReport(r, sourceLabel, sourceClass);
+    else if (rType === 'equity')      body = renderEquityReport(r, sourceLabel, sourceClass);
+    else                              body = renderMacroReport(r, src);   // macro + unknown
+
+    // Provenance wraps EVERY report type rather than living inside each renderer.
+    // Verified data leads (it is the only part guaranteed real), the report body
+    // follows, and the model's own estimates and cited sources close it out.
+    return React.createElement('div', null,
+      typeTabs,
+      controls,
+      RpGroundingWarning(r),
+      RpVerifiedData(r.marketData, r.dataAsOf),
+      RpPolicyProxy(r.policyPath),
+      body,
+      RpEstimates(r.estimates),
+      RpUnverified(r.unverified),
+      RpSources(r.citedSources, r.allSources)
+    );
   }
 
   // ── EQUITY VIEWS RENDERER ─────────────────────────────────────────────────
@@ -4214,6 +4524,102 @@ function App() {
             'VALUATION: ' + r.amdImplications.valuation
           )
         )
+      ),
+
+      // ── Cross-asset transmission ────────────────────────────────────────
+      // The section whose absence started all this: equities were being analysed
+      // with no view of energy, discount rates, or the policy path.
+      r.crossAssetContext && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'CROSS-ASSET TRANSMISSION'),
+        React.createElement('div', { className:'rp-xa-grid' },
+          [
+            { k:'energyChannel',    name:'ENERGY → MARGINS' },
+            { k:'rateChannel',      name:'REAL YIELDS → MULTIPLES' },
+            { k:'policyChannel',    name:'POLICY PATH → RISK APPETITE' },
+            { k:'volatilityRegime', name:'VOLATILITY REGIME' },
+          ].filter(c => r.crossAssetContext[c.k]).map((c, i) => {
+            const ch  = r.crossAssetContext[c.k];
+            const sev = String(ch.severity || 'MEDIUM').toUpperCase();
+            return React.createElement('div', { key:i, className:'rp-xa-card rp-xa-' + sev.toLowerCase() },
+              React.createElement('div', { className:'rp-xa-hd' },
+                React.createElement('span', { className:'rp-xa-name' }, c.name),
+                React.createElement('span', { className:'rp-xa-sev' }, sev)
+              ),
+              React.createElement('div', { className:'rp-xa-level' }, ch.level || '—'),
+              React.createElement('div', { className:'rp-xa-impact' }, ch.equityImpact || '')
+            );
+          })
+        ),
+        r.crossAssetContext.synthesis && React.createElement('div', { className:'rp-xa-synth' },
+          React.createElement('div', { className:'rp-xa-synth-lbl' }, 'SYNTHESIS'),
+          r.crossAssetContext.synthesis
+        )
+      ),
+
+      // ── Rate sensitivity ────────────────────────────────────────────────
+      r.rateSensitivity && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'RATE SENSITIVITY'),
+        React.createElement('div', { className:'rp-rs-row' },
+          [
+            { lbl:'CURRENT FWD P/E',   val:r.rateSensitivity.currentForwardPE },
+            { lbl:'HISTORICAL AVG P/E', val:r.rateSensitivity.historicalAvgPE },
+            { lbl:'IMPLIED DOWNSIDE',  val:r.rateSensitivity.impliedDownside },
+          ].filter(x => x.val).map((x, i) =>
+            React.createElement('div', { key:i, className:'rp-rs-cell' },
+              React.createElement('div', { className:'rp-rs-lbl' }, x.lbl),
+              React.createElement('div', { className:'rp-rs-val' }, x.val)
+            )
+          )
+        ),
+        r.rateSensitivity.sensitivityNote && React.createElement('div', { className:'research-body' }, r.rateSensitivity.sensitivityNote)
+      ),
+
+      // ── Scenarios ───────────────────────────────────────────────────────
+      r.scenarios && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'SCENARIOS'),
+        React.createElement('div', { className:'rp-scn-grid' },
+          ['bear','base','bull'].filter(k => r.scenarios[k]).map(k => {
+            const sc = r.scenarios[k];
+            return React.createElement('div', { key:k, className:'rp-scn-card rp-scn-' + k },
+              React.createElement('div', { className:'rp-scn-hd' },
+                React.createElement('span', { className:'rp-scn-lbl' }, sc.label || k.toUpperCase()),
+                React.createElement('span', { className:'rp-scn-prob' }, sc.probability || '')
+              ),
+              React.createElement('div', { className:'rp-scn-out' },
+                React.createElement('div', null, 'EPS: ' + (sc.epsOutcome || '—')),
+                React.createElement('div', null, 'Index: ' + (sc.indexOutcome || '—'))
+              ),
+              sc.trigger && React.createElement('div', { className:'rp-scn-trig' }, 'Trigger: ' + sc.trigger),
+              React.createElement('div', { className:'rp-scn-narr' }, sc.narrative || '')
+            );
+          })
+        )
+      ),
+
+      // ── Risks ───────────────────────────────────────────────────────────
+      Array.isArray(r.risks) && r.risks.length > 0 && React.createElement('div', null,
+        React.createElement('div', { className:'research-section-head' }, 'RISKS TO THE FORECAST'),
+        r.risks.map((rk, i) =>
+          React.createElement('div', { key:i, className:'rp-risk-item' },
+            React.createElement('div', { className:'rp-risk-hd' },
+              React.createElement('span', { className:'rp-risk-ch' }, String(rk.channel || 'general').toUpperCase()),
+              React.createElement('span', { className:'rp-risk-prob rp-risk-' + String(rk.probability || 'medium').toLowerCase() },
+                rk.probability || 'MEDIUM'),
+              React.createElement('span', { className:'rp-risk-name' }, rk.risk || '')
+            ),
+            rk.epsImpact && React.createElement('div', { className:'rp-risk-impact' }, 'EPS impact: ' + rk.epsImpact),
+            rk.narrative && React.createElement('div', { className:'rp-risk-narr' }, rk.narrative)
+          )
+        )
+      ),
+
+      // ── Invalidation ────────────────────────────────────────────────────
+      r.invalidation && React.createElement('div', { className:'rp-inval' },
+        React.createElement('div', { className:'rp-inval-hd' }, '◈ WHAT WOULD PROVE THIS WRONG'),
+        Array.isArray(r.invalidation.conditions) && React.createElement('ul', { className:'rp-inval-list' },
+          r.invalidation.conditions.map((c, i) => React.createElement('li', { key:i, className:'rp-inval-item' }, c))
+        ),
+        r.invalidation.narrative && React.createElement('div', { className:'rp-inval-narr' }, r.invalidation.narrative)
       ),
 
       // Consensus comparison
