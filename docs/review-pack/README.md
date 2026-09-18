@@ -17,22 +17,17 @@ what an author cannot see: whether the output would be read by a client, whether
 it would survive a trading floor, whether it reads as credible to someone
 hiring, whether it teaches anything, and whether the code underneath is sound.
 
-## Read the branch, not `main`
+## Where to point it
 
-The current work is in an unmerged draft pull request. `main` still contains the
-pre-fix code, including the fabricated fallback reports that were the reason for
-the rewrite. A reviewer pointed at `main` will review a version of the project
-that no longer exists.
-
-Every path in this pack is given against:
+`main` is current — the research rewrite was merged in PR #1, so a reviewer
+reading `main` reads the real thing. Every path in this pack is given against:
 
 ```
-https://raw.githubusercontent.com/AbidM06/the-dispatch/claude/relaxed-brown-8q5ynd/<path>
+https://raw.githubusercontent.com/AbidM06/the-dispatch/main/<path>
 ```
 
 Raw URLs work more reliably for a browsing model than the GitHub web UI, which
-lazy-loads file contents. Once PR #1 is merged, swap the branch name for `main`
-throughout `03-persona-prompts.md` and `04-engineering-brief.md`.
+lazy-loads file contents.
 
 ## How to run it
 
@@ -55,17 +50,13 @@ questions if it asks — several are written to interrogate rather than monologu
 
 Rate limits and fetch failures happen. Fallbacks, in order of preference:
 
-1. The branch name contains a slash, which makes the short raw URL ambiguous in
-   principle. It resolves correctly today, but the unambiguous form is free
-   insurance:
-   `https://raw.githubusercontent.com/AbidM06/the-dispatch/refs/heads/claude/relaxed-brown-8q5ynd/<path>`
-2. Give it the `blob` URL instead of `raw`:
-   `https://github.com/AbidM06/the-dispatch/blob/claude/relaxed-brown-8q5ynd/<path>`
-3. Download the branch as a zip from the GitHub UI and upload that.
-4. Paste the contents of the relevant brief plus the two or three files the
+1. Give it the `blob` URL instead of `raw`:
+   `https://github.com/AbidM06/the-dispatch/blob/main/<path>`
+2. Download the repository as a zip from the GitHub UI and upload that.
+3. Paste the contents of the relevant brief plus the two or three files the
    prompt names as highest priority.
 
-Option 4 is usually enough for personas 1 to 4, which are judging the product
+Option 3 is usually enough for personas 1 to 4, which are judging the product
 rather than the source.
 
 ## Ground rules to hold the reviewer to
