@@ -5,16 +5,15 @@ personas produces one blurred reviewer who commits to nothing.
 
 Repository (public): <https://github.com/AbidM06/the-dispatch>
 
-**Read the branch, not `main`.** The current work sits in an unmerged draft PR.
-Every path below is given against:
+Every path below is given against `main`, which is current:
 
 ```
-https://raw.githubusercontent.com/AbidM06/the-dispatch/claude/relaxed-brown-8q5ynd/<path>
+https://raw.githubusercontent.com/AbidM06/the-dispatch/main/<path>
 ```
 
 Raw URLs are more reliable for a browsing model than the GitHub web UI, which
 lazy-loads file contents. If a fetch fails, fall back to
-<https://github.com/AbidM06/the-dispatch/blob/claude/relaxed-brown-8q5ynd/><path>.
+<https://github.com/AbidM06/the-dispatch/blob/main/><path>.
 
 Every prompt ends with the same four rules, because reviewers drift without
 them: cite what you read, rank your findings, say what to cut, and do not

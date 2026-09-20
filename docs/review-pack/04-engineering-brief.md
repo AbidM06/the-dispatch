@@ -4,10 +4,10 @@ For the software-engineer review. Written to stop a reviewer spending its budget
 rediscovering constraints that were deliberate, and to point it at the files that
 matter in a repository of ~27,000 lines.
 
-All paths are relative to the branch `claude/relaxed-brown-8q5ynd`:
+All paths are relative to the repository root on `main`:
 
 ```
-https://raw.githubusercontent.com/AbidM06/the-dispatch/claude/relaxed-brown-8q5ynd/<path>
+https://raw.githubusercontent.com/AbidM06/the-dispatch/main/<path>
 ```
 
 ## Reading order
