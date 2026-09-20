@@ -918,7 +918,15 @@ ACCURACY RULES — these override style and formatting:
 2. Every figure you state must be either (a) from the verified block, (b) found via web_search this session, or (c) declared as your own estimate. There is no fourth category — do not state a number you cannot place in one of these three.
 3. If you cannot verify something, say so plainly. "Not verifiable as of today" is an acceptable answer. An invented number that looks plausible is not.
 4. Placeholder text in the schema marks the TYPE of a field, not a target value. Do not anchor on any example figure it contains.
-5. Where the context supplies a derived proxy, cite it as a proxy. Never restate a proxy as a market-implied probability.`;
+5. Where the context supplies a derived proxy, cite it as a proxy. Never restate a proxy as a market-implied probability.
+
+DISCLOSURE — required on EVERY report type, in addition to the fields your schema lists:
+  "estimates": [ { "figure": "<the number you asserted>", "field": "<where it appears>", "basis": "<what it derives from>", "confidence": "HIGH|MEDIUM|LOW" } ],
+  "unverified": [ "<any claim you could not confirm from the verified block or a web search>" ]
+Both keys must be present and must be arrays. Use [] only when genuinely empty —
+an empty "estimates" on a report full of forecasts is a failure, not a pass.
+This is rule 2 made machine-checkable: every number you state lands in the
+verified block, in a search result, or in "estimates".`;
 
 /**
  * REPORT_VALIDATORS — the minimum shape each report type must have to be usable.
@@ -926,13 +934,36 @@ ACCURACY RULES — these override style and formatting:
  * A batched result and a synchronous result go through the same gate, so a
  * malformed report cannot reach the cache by taking the cheaper path.
  */
+/**
+ * hasDisclosures — the contract that makes ACCURACY_RULES rule 2 enforceable.
+ *
+ * "estimates" is the model naming its own forecasts; "unverified" is it naming
+ * what it could not stand up. Both were prompt-only instructions, so a report
+ * that ignored them validated fine and rendered as though every figure were
+ * measured. `{ title: "Incomplete", epsOutlook: {} }` passed the equity gate.
+ *
+ * Validation cannot prove a report is truthful. It can refuse one that declines
+ * to say which parts are guesses, and that is the difference between a
+ * disclosure mechanism and a disclosure aspiration.
+ */
+function hasDisclosures(d) {
+  return Boolean(d) && Array.isArray(d.estimates) && Array.isArray(d.unverified);
+}
+
 const REPORT_VALIDATORS = {
-  fx:          d => Boolean(d && d.title && Array.isArray(d.pairViews)),
-  rates:       d => Boolean(d && d.title && d.thePuzzle),
-  thematic:    d => Boolean(d && d.title && Array.isArray(d.keyThemes) && Array.isArray(d.predictions)),
-  equity:      d => Boolean(d && d.title && d.epsOutlook),
-  commodities: d => Boolean(d && d.title && Array.isArray(d.keyTakeaways)),
-  macro:       d => Boolean(d && d.title && d.scenarios),
+  fx:          d => Boolean(d && d.title && Array.isArray(d.pairViews)) && hasDisclosures(d),
+  rates:       d => Boolean(d && d.title && d.thePuzzle) && hasDisclosures(d),
+  thematic:    d => Boolean(d && d.title && Array.isArray(d.keyThemes) && Array.isArray(d.predictions)) && hasDisclosures(d),
+  // Equity additionally must carry the analytical containers the rewrite added.
+  // Absent fields produce absent analysis, so a report missing its risk surface
+  // is not a usable equity note however well-formed the rest of it is.
+  equity:      d => Boolean(
+                      d && d.title && d.epsOutlook &&
+                      d.crossAssetContext && d.scenarios && d.invalidation &&
+                      Array.isArray(d.risks) && d.risks.length >= 1
+                    ) && hasDisclosures(d),
+  commodities: d => Boolean(d && d.title && Array.isArray(d.keyTakeaways)) && hasDisclosures(d),
+  macro:       d => Boolean(d && d.title && d.scenarios) && hasDisclosures(d),
 };
 
 /**
@@ -1480,6 +1511,7 @@ Write at graduate level. Every number must be specific and sourced. Use language
 
 module.exports = {
   extractJSON,
+  extractSearchSources,
   buildResearchSpec,
   finalizeResearchReport,
   REPORT_VALIDATORS,

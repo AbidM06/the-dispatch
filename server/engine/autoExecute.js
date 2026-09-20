@@ -34,8 +34,9 @@ const MAX_ORDERS_PER_RUN  = 3;
  * @returns {{ dataFresh: boolean, warning: string|null }}
  */
 function checkFreshness() {
-  const MAX_AGE_MIN  = parseInt(process.env.TRADING_DATA_MAX_AGE_MIN || "20", 10);
-  const snapshotMeta = cache.getWithMeta("snapshot:rates");
+  const MAX_AGE_MIN   = parseInt(process.env.TRADING_DATA_MAX_AGE_MIN, 10) || 20;
+  const MAX_OBS_DAYS  = parseInt(process.env.TRADING_DATA_MAX_OBS_AGE_DAYS, 10) || 4;
+  const snapshotMeta  = cache.getWithMeta("snapshot:rates");
 
   if (!snapshotMeta) {
     return { dataFresh: false, warning: "Snapshot rates cache empty — skipping auto-execution." };
@@ -47,6 +48,32 @@ function checkFreshness() {
   const ageMin = (Date.now() - new Date(snapshotMeta.fetchedAt).getTime()) / 60_000;
   if (ageMin > MAX_AGE_MIN) {
     return { dataFresh: false, warning: `Snapshot data is ${ageMin.toFixed(0)} min old (max ${MAX_AGE_MIN} min) — skipping auto-execution.` };
+  }
+
+  // `fetchedAt` is when we WROTE the cache, not when the market measured the
+  // figure. Re-caching a 2020 observation one second ago satisfied the 20-minute
+  // rule, so the advertised freshness safeguard could pass on six-year-old data.
+  // Check the observation dates too. FRED series are daily, so the window is in
+  // days (weekends and holidays) rather than minutes.
+  const obsDates = [];
+  const value = snapshotMeta.value;
+  if (value && typeof value === "object") {
+    for (const fact of Object.values(value)) {
+      if (fact && typeof fact === "object" && typeof fact.date === "string") obsDates.push(fact.date);
+    }
+  }
+  if (obsDates.length) {
+    const newest = obsDates.sort()[obsDates.length - 1];
+    const obsAgeDays = (Date.now() - new Date(`${newest}T00:00:00Z`).getTime()) / 86_400_000;
+    if (!Number.isFinite(obsAgeDays)) {
+      return { dataFresh: false, warning: `Snapshot observation date unparseable (${newest}) — skipping auto-execution.` };
+    }
+    if (obsAgeDays > MAX_OBS_DAYS) {
+      return {
+        dataFresh: false,
+        warning: `Newest observation is ${obsAgeDays.toFixed(0)} days old (${newest}, max ${MAX_OBS_DAYS}d) — skipping auto-execution.`,
+      };
+    }
   }
 
   return { dataFresh: true, warning: null };
@@ -89,13 +116,36 @@ async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}) {
     ? alpaca.getMaxOrdersPerRun()
     : MAX_ORDERS_PER_RUN;
 
-  // Fetch account equity for position sizing (fail gracefully)
-  let accountEquityGBP = 75_000;
+  // Account equity for position sizing. This used to default to £75,000 and
+  // carry on when the fetch failed, so an Alpaca outage sized real orders
+  // against an invented portfolio. Risk-per-trade is a percentage of equity; if
+  // equity is unknown, every downstream number is meaningless. Abort instead.
+  let accountEquityGBP = null;
   try {
     const acct = await alpaca.getAccount();
-    accountEquityGBP = parseFloat(acct.portfolio_value) * usdgbp;
+    const pv = parseFloat(acct.portfolio_value);
+    if (Number.isFinite(pv) && pv > 0) accountEquityGBP = pv * usdgbp;
   } catch (err) {
     console.warn("[autoExecute] Could not fetch Alpaca account for sizing:", err.message);
+  }
+  if (accountEquityGBP == null) {
+    const reason = "Account equity unavailable — cannot size positions; skipping execution.";
+    console.warn(`[autoExecute] ${reason}`);
+    return { executed: false, reason, orders: [], skipped: [] };
+  }
+
+  // Open-position count and portfolio value feed the exposure limits below.
+  // checkPolicy() treats a missing openPositions as 0 and skips the
+  // single-ticker cap entirely when portfolioGBP is absent, so omitting these
+  // silently disabled two of the four advertised circuit breakers.
+  let openPositions = 0;
+  try {
+    const positions = await alpaca.getPositions();
+    if (Array.isArray(positions)) openPositions = positions.length;
+  } catch (err) {
+    const reason = `Could not fetch open positions (${err.message}) — cannot enforce exposure limits; skipping execution.`;
+    console.warn(`[autoExecute] ${reason}`);
+    return { executed: false, reason, orders: [], skipped: [] };
   }
 
   const orders  = [];
@@ -122,7 +172,60 @@ async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}) {
       continue;
     }
 
-    const policyCheck = executionPolicy.checkPolicy({ ticker: ticket.ticker, notionalGBP: 100 });
+    // Size FIRST, then check policy against the real notional.
+    //
+    // The old order was inverted: checkPolicy ran with a placeholder
+    // notionalGBP of 100 and sizing happened afterwards, so the £250 daily
+    // notional cap was tested against £100 no matter how large the order
+    // turned out to be. A valid ticket sizing to £6,000 passed a £250 cap.
+    const priceUSD = ticket.entry ?? ctx.watchlist?.[ticket.ticker]?.price ?? null;
+    const priceGBP = priceUSD ? priceUSD * usdgbp : null;
+    const sizing   = computeSize(ticket.entry, ticket.stop, accountEquityGBP, priceGBP);
+
+    // Blocked sizing means "do not trade this", not "trade one share of it".
+    // `qty = sizing.blocked ? 1 : sizing.qty` turned every rejection into a
+    // small order — an entry of 100 against a stop of 110 is an invalid LONG,
+    // and it still submitted.
+    if (sizing.blocked || !(sizing.qty > 0)) {
+      const reason = sizing.blockReason || sizing.sizingReason || "Position sizing returned no quantity.";
+      skipped.push({ ticker: ticket.ticker, reason });
+      appendExecutionLog({
+        ideaId:    ticket.id,
+        ticker:    ticket.ticker,
+        direction: ticket.direction,
+        decision:  "SKIPPED",
+        reasons:   [reason],
+        freshnessSnapshot: { dataFresh: freshness.dataFresh },
+        orderPayload: null, result: null, error: null,
+      });
+      continue;
+    }
+
+    const qty = sizing.qty;
+    const notionalGBP = priceGBP ? +(qty * priceGBP).toFixed(2) : null;
+
+    // Without a notional we cannot evaluate the caps, so we do not trade.
+    if (notionalGBP == null) {
+      const reason = `No price available for ${ticket.ticker} — cannot compute notional; skipping.`;
+      skipped.push({ ticker: ticket.ticker, reason });
+      appendExecutionLog({
+        ideaId:    ticket.id,
+        ticker:    ticket.ticker,
+        direction: ticket.direction,
+        decision:  "SKIPPED",
+        reasons:   [reason],
+        freshnessSnapshot: { dataFresh: freshness.dataFresh },
+        orderPayload: null, result: null, error: null,
+      });
+      continue;
+    }
+
+    const policyCheck = executionPolicy.checkPolicy({
+      ticker:       ticket.ticker,
+      notionalGBP,                    // the real order size, not a placeholder
+      openPositions,                  // enables the max-open-positions cap
+      portfolioGBP: accountEquityGBP, // enables the single-ticker exposure cap
+    });
     if (!policyCheck.allowed) {
       skipped.push({ ticker: ticket.ticker, reason: policyCheck.reasons.join("; ") });
       appendExecutionLog({
@@ -138,19 +241,13 @@ async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}) {
     }
 
     try {
-      const priceUSD   = ticket.entry ?? ctx.watchlist?.[ticket.ticker]?.price ?? null;
-      const priceGBP   = priceUSD ? priceUSD * usdgbp : null;
-      const sizing     = computeSize(ticket.entry, ticket.stop, accountEquityGBP, priceGBP);
-      const qty        = (!sizing.blocked && sizing.qty > 0) ? sizing.qty : 1;
-      const notionalGBP = priceGBP ? +(qty * priceGBP).toFixed(2) : null;
-
       const dateStr       = new Date().toISOString().slice(0, 10);
       const clientOrderId = `dispatch-${ticket.ticker.toLowerCase()}-${dateStr}`;
       const side          = ticket.direction === "LONG" ? "buy" : "sell";
 
       const order = await alpaca.placeOrder(ticket.ticker, side, qty, "market", clientOrderId);
 
-      executionPolicy.recordTrade(ticket.ticker, notionalGBP ?? 100);
+      executionPolicy.recordTrade(ticket.ticker, notionalGBP);
 
       const btEvidence = playbookPerf[ticket.playbook] ?? null;
 

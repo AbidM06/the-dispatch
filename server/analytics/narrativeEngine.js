@@ -59,11 +59,16 @@ function extractScalars(ctx) {
     t10y2y:    extractVal(rates.t10y2y,    0.59),
     usdgbp:    extractFx(fx.usdgbp,        0.7448),
     // Portfolio
-    totalGBP:    port?.totalGBP    ?? 1110,
-    totalPnLPct: port?.totalPnLPct ?? 1.9,
-    amdPnlPct:   port?.rows?.find(r => r.ticker === "AMD")?.pnlPct ?? -8.6,
-    amdValGBP:   port?.rows?.find(r => r.ticker === "AMD")?.valGBP ?? 134,
-    sgldValGBP:  port?.rows?.find(r => r.ticker === "SGLN")?.valGBP ?? 219,
+    // These describe the OWNER'S OWN POSITIONS, so a default is not a graceful
+    // degradation — it is a fabricated account statement. The previous values
+    // (£1,110 total, +1.9% P&L, AMD −8.6% at £134, SGLN at £219) rendered in
+    // prose as though measured. null means "unknown", and every consumer below
+    // must handle it rather than print it.
+    totalGBP:    Number.isFinite(port?.totalGBP)    ? port.totalGBP    : null,
+    totalPnLPct: Number.isFinite(port?.totalPnLPct) ? port.totalPnLPct : null,
+    amdPnlPct:   port?.rows?.find(r => r.ticker === "AMD")?.pnlPct  ?? null,
+    amdValGBP:   port?.rows?.find(r => r.ticker === "AMD")?.valGBP  ?? null,
+    sgldValGBP:  port?.rows?.find(r => r.ticker === "SGLN")?.valGBP ?? null,
   };
 }
 
@@ -113,11 +118,11 @@ function generateEvents(s) {
       detail:   `ICE BofA HY Index OAS ${fmt(s.hy_spread)}%. ${hyStressed ? "Spread widening signals broad risk-off; high-beta names (AMD, HIES) most exposed." : "Tight spreads support risk assets but leave little cushion for a shock."}`,
     },
     {
-      headline: `AMD portfolio position ${s.amdPnlPct >= 0 ? "profitable" : `down ${fmt(Math.abs(s.amdPnlPct), 1)}%`} — MI450 demand cycle key`,
-      impact:   s.amdPnlPct >= 5 ? "BULLISH" : s.amdPnlPct <= -10 ? "BEARISH" : "NEUTRAL",
+      headline: `AMD portfolio position ${s.amdPnlPct == null ? "P&L unavailable" : s.amdPnlPct >= 0 ? "profitable" : `down ${fmt(Math.abs(s.amdPnlPct), 1)}%`} — MI450 demand cycle key`,
+      impact:   s.amdPnlPct == null ? "NEUTRAL" : s.amdPnlPct >= 5 ? "BULLISH" : s.amdPnlPct <= -10 ? "BEARISH" : "NEUTRAL",
       ticker:   "AMD",
       date:     d,
-      detail:   `Position valued at £${fmt(s.amdValGBP, 0)} (unrealised ${sign(s.amdPnlPct)}${fmt(s.amdPnlPct, 1)}%). ${s.amdPnlPct < 0 ? "Thesis intact: committed MI450 GPU orders from Meta and OpenAI support $9.8B Q1 guide." : "AMD outperforming; monitor NVIDIA Blackwell shipments for competitive read-through."}`,
+      detail:   `${s.amdValGBP == null || s.amdPnlPct == null ? "Position value and unrealised P&L unavailable — no portfolio snapshot loaded." : `Position valued at £${fmt(s.amdValGBP, 0)} (unrealised ${sign(s.amdPnlPct)}${fmt(s.amdPnlPct, 1)}%).`} ${s.amdPnlPct < 0 ? "Thesis intact: committed MI450 GPU orders from Meta and OpenAI support $9.8B Q1 guide." : "AMD outperforming; monitor NVIDIA Blackwell shipments for competitive read-through."}`,
     },
     {
       headline: `Breakeven inflation ${fmt(s.t10yie)}% — ${inflationHot ? "tariff pass-through accelerating" : "anchored near 2.3%"}`,
@@ -209,7 +214,7 @@ function generateEcon(s) {
   const d    = isoDate();
   const oilWord = s.hy_spread > 4.0 ? "above $95" : "around $85–90";
   const ratesVerb = s.dgs10 > 4.5 ? "surged" : s.dgs10 < 3.8 ? "rallied" : "held";
-  const amdDir  = s.amdPnlPct >= 0 ? "outperforming" : "under pressure";
+  const amdDir  = s.amdPnlPct == null ? "of unknown P&L" : s.amdPnlPct >= 0 ? "outperforming" : "under pressure";
 
   return [
     {
@@ -220,7 +225,7 @@ function generateEcon(s) {
       border: "rgba(200,57,43,.2)",
       date:   d,
       title:  "Stagflation Triangle: Oil, Tariffs & Slower Growth",
-      body:   `The macro backdrop is characterised by three simultaneous headwinds: oil ${oilWord} on Middle East supply disruption, 25% tariffs on Canada/Mexico supply chains, and softening consumer demand. The 10Y BEI at ${fmt(s.t10yie)}% shows markets pricing in tariff pass-through, while the ${fmt(s.t10y2y)}bps yield curve spread reflects the Fed's policy bind. SGLN (gold, £${fmt(s.sgldValGBP, 0)}) remains the primary portfolio hedge in this environment. Portfolio total ${s.totalPnLPct >= 0 ? "up" : "down"} ${fmt(Math.abs(s.totalPnLPct), 1)}% — diversification is working.`,
+      body:   `The macro backdrop is characterised by three simultaneous headwinds: oil ${oilWord} on Middle East supply disruption, 25% tariffs on Canada/Mexico supply chains, and softening consumer demand. The 10Y BEI at ${fmt(s.t10yie)}% shows markets pricing in tariff pass-through, while the ${fmt(s.t10y2y)}bps yield curve spread reflects the Fed's policy bind. SGLN (gold${s.sgldValGBP == null ? "" : `, £${fmt(s.sgldValGBP, 0)}`}) remains the primary portfolio hedge in this environment. ${s.totalPnLPct == null ? "Portfolio P&L unavailable — no snapshot loaded." : `Portfolio total ${s.totalPnLPct >= 0 ? "up" : "down"} ${fmt(Math.abs(s.totalPnLPct), 1)}%.`}`,
     },
     {
       id:     2,
@@ -240,7 +245,7 @@ function generateEcon(s) {
       border: "rgba(63,185,80,.2)",
       date:   d,
       title:  `AMD: ${amdDir === "outperforming" ? "Momentum Builds" : "Thesis Under Test"} on MI450 Cycle`,
-      body:   `AMD position ${amdDir} (${sign(s.amdPnlPct)}${fmt(s.amdPnlPct, 1)}%, £${fmt(s.amdValGBP, 0)} current value). Core bull thesis rests on committed GPU demand: Meta $6GW MI450 order and OpenAI $6GW previously announced. Q1 2026 guide $9.8B ±$300M was below elevated buy-side expectations but above the $9.0–9.5B floor needed to maintain bull sentiment. Key upside catalysts: TSMC N2 ramp H2 2026, hyperscaler April capex commentary, and MI500 roadmap reveal. Real yields at ${fmt(s.dfii10)}% remain the primary valuation headwind — every 50bps rise in real yields historically corresponds to roughly −10% compression in AMD's forward P/E multiple.`,
+      body:   `AMD position ${amdDir}${s.amdPnlPct == null || s.amdValGBP == null ? "" : ` (${sign(s.amdPnlPct)}${fmt(s.amdPnlPct, 1)}%, £${fmt(s.amdValGBP, 0)} current value)`}. Core bull thesis rests on committed GPU demand: Meta $6GW MI450 order and OpenAI $6GW previously announced. Q1 2026 guide $9.8B ±$300M was below elevated buy-side expectations but above the $9.0–9.5B floor needed to maintain bull sentiment. Key upside catalysts: TSMC N2 ramp H2 2026, hyperscaler April capex commentary, and MI500 roadmap reveal. Real yields at ${fmt(s.dfii10)}% remain the primary valuation headwind — every 50bps rise in real yields historically corresponds to roughly −10% compression in AMD's forward P/E multiple.`,
     },
   ];
 }

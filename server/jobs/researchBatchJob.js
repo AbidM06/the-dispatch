@@ -125,7 +125,17 @@ async function runBatchRefresh({ force = false } = {}) {
       const hit = results?.[type];
       if (hit?.text) {
         try {
-          report = anthropic.finalizeResearchReport(type, hit.text, [], true);
+          // Pass the sources the batch actually returned. This used to hardcode
+          // `[], true` — an empty source list with grounded:true — so batched
+          // reports claimed to be search-grounded while rendering no footnotes
+          // and silently dropping every citation. grounded now reflects whether
+          // any source came back, so the client can flag an ungrounded report
+          // instead of presenting it as sourced.
+          const sources = hit.sources || [];
+          report = anthropic.finalizeResearchReport(type, hit.text, sources, sources.length > 0);
+          if (!sources.length) {
+            console.warn(`[researchBatch] ${type} returned no web_search sources — marked ungrounded.`);
+          }
           batchCount++;
         } catch (err) {
           console.warn(`[researchBatch] ${type} batched output unusable (${err.message}) — regenerating synchronously.`);

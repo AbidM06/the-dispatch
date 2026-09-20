@@ -33,8 +33,28 @@ let _monthCount = 0;
 // the user tops up their credits, AI resumes on the next scheduled refresh.
 let _apiFallbackUntil = 0; // epoch ms; 0 = not in fallback
 
-function _dailyCap()   { return parseInt(process.env.ANTHROPIC_DAILY_CAP,   10) ?? 5; }
-function _monthlyCap() { return parseInt(process.env.ANTHROPIC_MONTHLY_CAP, 10) ?? 50; }
+/**
+ * `parseInt(undefined, 10)` is NaN, and NaN is neither null nor undefined, so
+ * `?? 5` never fired: with the env var unset both caps evaluated to NaN and
+ * every `spend > cap` comparison was false. The spend limits the README
+ * advertises have therefore never been enforced by default.
+ *
+ * `||` is not a safe fix either — it would silently turn a deliberate cap of 0
+ * into the default. Validate explicitly instead.
+ */
+function _intEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    console.warn(`[budget] ${name}="${raw}" is not a non-negative integer — using ${fallback}.`);
+    return fallback;
+  }
+  return n;
+}
+
+function _dailyCap()   { return _intEnv("ANTHROPIC_DAILY_CAP",   5); }
+function _monthlyCap() { return _intEnv("ANTHROPIC_MONTHLY_CAP", 50); }
 function _today()      { return new Date().toISOString().slice(0, 10); }
 function _thisMonth()  { return new Date().toISOString().slice(0, 7);  }
 

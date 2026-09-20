@@ -283,7 +283,18 @@ describe("research report specs", () => {
   });
 
   test("finalizeResearchReport attaches provenance and marks grounding", () => {
-    const raw = JSON.stringify({ title: "T", epsOutlook: { year2026: {} } });
+    // Equity now requires its analytical containers AND the disclosure arrays,
+    // so a usable fixture has to carry them.
+    const raw = JSON.stringify({
+      title: "T",
+      epsOutlook: { year2026: {} },
+      crossAssetContext: { synthesis: "s" },
+      scenarios: { base: {} },
+      invalidation: { conditions: [] },
+      risks: [{ risk: "r" }],
+      estimates: [],
+      unverified: [],
+    });
     const out = anthropic.finalizeResearchReport("equity", raw, [{ url: "https://x.com", title: "X" }], false);
     expect(out.reportType).toBe("equity");
     expect(out.grounded).toBe(false);

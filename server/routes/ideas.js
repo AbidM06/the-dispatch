@@ -417,9 +417,6 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
     }
   }
 
-  // Execution policy
-  const policyCheck = executionPolicy.checkPolicy({ ticker: idea.ticker, notionalGBP: idea.sizePct ? idea.sizePct * 10 : 100 });
-
   const logBase = { ideaId: idea.id, ticker: idea.ticker, direction: idea.direction,
     freshnessSnapshot: { dataFresh, freshnessWarning } };
 
@@ -429,11 +426,9 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
     return res.json(envelope({ ...updated, freshnessWarning }));
   }
 
-  if (!policyCheck.allowed) {
-    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: policyCheck.reasons.join("; ") });
-    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: policyCheck.reasons, orderPayload: null, result: null, error: null });
-    return res.json(envelope({ ...updated, policyReasons: policyCheck.reasons }));
-  }
+  // The policy check used to run HERE, against `sizePct * 10` — an estimate
+  // standing in for a notional that had not been computed yet. It now runs
+  // after sizing, against the real order size. See below.
 
   // ── Live price fetch at approval time ──
   let currentPrice = idea.entry;
@@ -448,19 +443,72 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
     }
   } catch (_) {}
 
-  // Position sizing
+  // ── Position sizing ──
+  // Equity and FX used to fall back to £1,110 and 0.7558 when the portfolio
+  // snapshot was missing, so risk-per-trade was computed against an invented
+  // account. And when price or stop was unavailable the whole sizing step was
+  // replaced with `{ qty: 1, blocked: false }` — an unblocked one-share order
+  // that had passed no risk calculation at all. Both are gone: if we cannot
+  // size it, we do not trade it.
   const portfolioData = cache.get("portfolio:data");
-  const accountEquityGBP = portfolioData?.totalGBP ?? 1110;
-  const usdgbp = portfolioData?.usdgbp ?? 0.7558;
-  const priceInGBP = currentPrice ? (alpaca.isSupported(idea.ticker) ? currentPrice * usdgbp : currentPrice) : null;
-  const sizing = (currentPrice && idea.stop && priceInGBP)
-    ? computeSize(currentPrice, idea.stop, accountEquityGBP, priceInGBP)
-    : { qty: 1, blocked: false };
+  const accountEquityGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : null;
+  const usdgbp = Number.isFinite(portfolioData?.usdgbp) ? portfolioData.usdgbp : null;
+  const priceInGBP = (currentPrice && (!alpaca.isSupported(idea.ticker) || usdgbp != null))
+    ? (alpaca.isSupported(idea.ticker) ? currentPrice * usdgbp : currentPrice)
+    : null;
 
-  if (sizing.blocked) {
-    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: sizing.blockReason });
-    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [sizing.blockReason], orderPayload: null, result: null, error: null });
-    return res.json(envelope({ ...updated, sizingBlocked: sizing.blockReason }));
+  const sizingInputsMissing =
+    accountEquityGBP == null ? "Portfolio value unavailable — cannot size position."
+    : !currentPrice          ? "No current price — cannot size position."
+    : !idea.stop             ? "Idea has no stop — cannot size position."
+    : !priceInGBP            ? "No GBP price (missing FX rate) — cannot size position."
+    : null;
+
+  if (sizingInputsMissing) {
+    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: sizingInputsMissing });
+    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [sizingInputsMissing], orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, sizingBlocked: sizingInputsMissing }));
+  }
+
+  const sizing = computeSize(currentPrice, idea.stop, accountEquityGBP, priceInGBP);
+
+  if (sizing.blocked || !(sizing.qty > 0)) {
+    const reason = sizing.blockReason || sizing.sizingReason || "Position sizing returned no quantity.";
+    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: reason });
+    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [reason], orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, sizingBlocked: reason }));
+  }
+
+  const qty = sizing.qty;
+  const notionalGBP = Number.isFinite(sizing.notionalGBP)
+    ? sizing.notionalGBP
+    : +(qty * priceInGBP).toFixed(2);
+
+  // Exposure limits need the open-position count and the portfolio value; the
+  // old call passed neither, so two of the four circuit breakers never fired.
+  let openPositions = 0;
+  try {
+    const positions = await alpaca.getPositions();
+    if (Array.isArray(positions)) openPositions = positions.length;
+  } catch (err) {
+    if (alpaca.isAutoExecuteEnabled() && executionPolicy.getConfig().tradingEnabled) {
+      const reason = `Could not fetch open positions (${err.message}) — cannot enforce exposure limits.`;
+      const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: reason });
+      appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [reason], orderPayload: null, result: null, error: null });
+      return res.json(envelope({ ...updated, policyReasons: [reason] }));
+    }
+  }
+
+  const policyCheck = executionPolicy.checkPolicy({
+    ticker:       idea.ticker,
+    notionalGBP,                    // real size, not sizePct * 10
+    openPositions,
+    portfolioGBP: accountEquityGBP,
+  });
+  if (!policyCheck.allowed) {
+    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: policyCheck.reasons.join("; ") });
+    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: policyCheck.reasons, orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, policyReasons: policyCheck.reasons }));
   }
 
   // Attempt paper order
@@ -478,13 +526,13 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
                          process.env.USE_BRACKET_ORDERS === "true";
       if (useBracket) {
         order = await alpaca.placeBracketOrder(
-          idea.ticker, side, sizing.qty || 1,
+          idea.ticker, side, qty,
           idea.entry, idea.target, idea.stop, clientOrderId
         );
       } else {
-        order = await alpaca.placeOrder(idea.ticker, side, sizing.qty || 1, "market", clientOrderId);
+        order = await alpaca.placeOrder(idea.ticker, side, qty, "market", clientOrderId);
       }
-      executionPolicy.recordTrade(idea.ticker, sizing.notionalGBP || 100);
+      executionPolicy.recordTrade(idea.ticker, notionalGBP);
     } catch (err) {
       execError = err.message;
     }
@@ -494,7 +542,7 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
   const updated = updateIdea(idea.id, { executionStatus: newStatus, executionNote: execError || null, alpacaOrderId: order?.id });
   appendExecutionLog({
     ...logBase, decision: newStatus, reasons: execError ? [execError] : [],
-    orderPayload: order ? { ticker: idea.ticker, side: idea.direction === "LONG" ? "buy" : "sell", qty: sizing.qty || 1 } : null,
+    orderPayload: order ? { ticker: idea.ticker, side: idea.direction === "LONG" ? "buy" : "sell", qty } : null,
     result: order ? { orderId: order.id } : null, error: execError
   });
 
@@ -566,7 +614,10 @@ router.post("/", requireWriteAuth, (req, res) => {
   // Run pre-trade risk check using cached portfolio data (or seeds as fallback)
   const portfolioData = cache.get("portfolio:data");
   const portfolioRows = portfolioData?.rows ?? [];
-  const totalGBP      = portfolioData?.totalGBP ?? seeds.POSITIONS_SEED.reduce((s, _p) => s, 1110);
+  // Was `seeds.POSITIONS_SEED.reduce((s, _p) => s, 1110)` — an elaborate way
+  // of writing 1110. The pre-trade risk check now runs against the real book
+  // or against zero, never against an invented one.
+  const totalGBP      = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
   const usdgbp        = portfolioData?.usdgbp   ?? seeds.FX_SEED.usdgbp.value;
 
   const riskCheck = runPreTradeCheck(body, portfolioRows, totalGBP, usdgbp);
@@ -656,7 +707,9 @@ function buildPortfolioContext(rates, portfolioRows, totalGBP) {
   return [
     `MACRO REGIME: ${regime}`,
     `FRED RATES:  10Y ${rates.dgs10.toFixed(2)}%  Real ${rates.dfii10.toFixed(2)}%  Breakeven ${rates.t10yie.toFixed(2)}%  HY OAS ${rates.hy_spread.toFixed(2)}%  Curve ${rates.t10y2y.toFixed(2)}%`,
-    `PORTFOLIO (total ~£${totalGBP.toFixed(0)}):`,
+    totalGBP > 0
+      ? `PORTFOLIO (total ~£${totalGBP.toFixed(0)}):`
+      : `PORTFOLIO (total value unavailable — do not infer position sizes):`,
     rowLines,
     `KEY EVENTS:  FOMC 19 Mar (hold expected, dot plot critical)  |  AMD Q1 Earnings 22 Apr (guide $9.8B)`,
   ].join("\n");
@@ -754,7 +807,9 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
       t10y2y:    extractRateVal(rawRates?.t10y2y,    seeds.RATES_SEED.t10y2y.value),
     };
     const portfolioRows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({ ticker: p.ticker, valGBP: null, chg: null }));
-    const totalGBP      = portfolioData?.totalGBP ?? 1110;
+    // null, not £1,110 — weight() already treats a non-positive total as
+    // "unknown" and returns 0 rather than inventing a percentage.
+    const totalGBP      = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
     const ideas = deterministicIdeas(rates, portfolioRows, totalGBP);
     return res.json({ source: "deterministic", fetchedAt: now(), stale: false, data: { ideas, regime: classifyRegime(rates) } });
   }
@@ -820,7 +875,10 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
       budget.checkAndIncrement(); // throws BudgetError if over daily/monthly cap
       const rates = ctx.rates;
       const portfolioRows = portfolioData?.rows ?? [];
-      const totalGBP = portfolioData?.totalGBP ?? 1110;
+      // £1,110 used to stand in for a missing portfolio value here, so the model
+      // was handed invented weights described as the owner's book. Pass null and
+      // let buildPortfolioContext render "—" for weights it cannot compute.
+      const totalGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : null;
       const aiContext = buildPortfolioContext(rates, portfolioRows, totalGBP);
       // Enrich top 2 ideas — merge AI narrative into rationale, preserve engine structure
       const aiIdeas = await generateTradeIdeas(aiContext, Math.min(engineIdeas.length, 2));
@@ -855,7 +913,7 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
   const finalIdeas = engineIdeas.length > 0 ? engineIdeas : (() => {
     const rates = ctx.rates;
     const portfolioRows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({ ticker: p.ticker, valGBP: null, chg: null }));
-    const totalGBP = portfolioData?.totalGBP ?? 1110;
+    const totalGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
     return deterministicIdeas(rates, portfolioRows, totalGBP);
   })();
 

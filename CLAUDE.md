@@ -158,6 +158,28 @@ They are gone and must not come back. On failure the route returns HTTP 503 with
 renders an unavailable panel. A report that invents a crisis is worse than no report.
 A test asserts the seed builders stay deleted.
 
+**The same class was still live in the Sales tab, and this file wrongly said it was not.**
+`server/routes/macro.js` carried `buildMacroViewFallback()` and `buildClientFallback()`,
+which between them asserted a Fed level of "4.25-4.50%", scenario probabilities of
+60/20/20, a complete trade idea with entry/stop/target, CPI/FOMC/NFP catalysts dated
+April and May 2026, and client talking points claiming real yields were "the highest
+since 2007-era". Both are deleted; `/api/macro/view` and `/api/macro/clients` now return
+503 with the same contract as research, and the client renders the same unavailable panel.
+
+Worse, the Sales tab never had live data to begin with. `rateVal()` probed for an
+`observations` array that `fred.getAllRates()` has never returned, so it fell through to
+its hardcoded fallback (4.2 / 1.85 / 2.38 / 3.2 / 0.5) on every single call — and those
+constants were passed to the model described as "latest FRED data". Invented data wearing
+a source label is worse than no data. `rateVal(fact)` now reads `.value` and has no
+fallback parameter; missing means null, and callers say so.
+
+The lesson generalises: **fixing one instance of a failure class is not fixing the class.**
+When you delete a fabricated fallback, grep the repo for its siblings before writing here
+that the class is gone. Known remaining instance: `server/analytics/narrativeEngine.js`
+still hardcodes market claims (specific GPU orders, a quarterly revenue guide) in its
+LOW_COST_MODE prose. Its invented *portfolio* figures have been removed; the market
+assertions have not.
+
 Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
 produces comes from training data — that path sets `grounded: false` and the client shows
 a warning rather than presenting the output as searched.
@@ -190,6 +212,73 @@ so batching affects cost only, never availability.
 
 Interactive paths (explain, thesis, bulletin) stay synchronous — batch latency is measured
 in minutes and would be visible there.
+
+## Execution controls — the callers, not the policy
+
+`executionPolicy.checkPolicy()` was correct. Both of its callers defeated it.
+
+- It was invoked with a **placeholder** `notionalGBP: 100` *before* sizing ran, so the
+  £250 daily notional cap was tested against £100 regardless of the real order. A ticket
+  sizing to £6,000 passed a £250 cap.
+- `const qty = (!sizing.blocked && sizing.qty > 0) ? sizing.qty : 1` turned every sizing
+  **rejection** into a one-share order. An entry of 100 against a stop of 110 is an
+  invalid LONG; it still submitted.
+- `openPositions` and `portfolioGBP` were never passed, and `checkPolicy` treats a missing
+  `openPositions` as 0 and skips the single-ticker cap entirely without `portfolioGBP` —
+  so two of the four advertised circuit breakers could never fire.
+- Account equity defaulted to £75,000 (auto path) and £1,110 (approve path) when the
+  fetch failed, sizing real orders against a portfolio that did not exist.
+
+Order is now: size → require a real quantity and notional → check policy with the real
+numbers → trade. If equity, price, stop or open-position count is unavailable, the trade
+is skipped. **Never reintroduce a placeholder notional or a quantity fallback.**
+
+`checkFreshness()` also measured the wrong thing: `fetchedAt` is when we wrote the cache,
+not when the market measured the figure, so a freshly-cached 2020 observation satisfied
+the 20-minute rule. It now additionally bounds the newest observation date
+(`TRADING_DATA_MAX_OBS_AGE_DAYS`, default 4 — FRED series are daily, so the window is in
+days, not minutes).
+
+## Disclosure is enforced, not requested
+
+`estimates[]` (figures the model produced itself) and `unverified[]` (what it could not
+confirm) were prompt-only instructions on one report type out of six. A report that
+ignored them validated fine and rendered as though every figure were measured —
+`{"title":"Incomplete","epsOutlook":{}}` passed the equity gate.
+
+The disclosure contract now lives in `ACCURACY_RULES`, so every report type is asked for
+both arrays, and `REPORT_VALIDATORS` rejects any report that omits them. Equity
+additionally requires `crossAssetContext`, `scenarios`, `invalidation` and a non-empty
+`risks[]`.
+
+Validation cannot prove a report is truthful. It can refuse one that declines to say
+which parts are guesses, and that is the difference between a disclosure mechanism and a
+disclosure aspiration.
+
+## Levels are not changes
+
+"Steepener" and "flattener" describe how a curve is **moving**. A level cannot support
+either word. `buildCtx()` emitted "Bear steepener" from a curve level and "Bear flattener"
+from the HY spread and real yields — two mutually exclusive directions, neither derived
+from a curve movement, both able to land in the same string. `t10y2y: 0.8` produced
+"Bear steepener + Elevated real yields + Bear flattener".
+
+Regime labels now name shape and level only. `deltas.t10y2y_d` is `null`, not 0: the
+change needs a prior 2Y and `RATES_HISTORY_SEED` carries only y10/real/bei. The old
+expression reduced to `t10y2y - (prev.y10 - 2.0)`, i.e. it assumed the 2Y had always been
+exactly 2.00%. Do not describe curve direction until that series exists.
+
+## Contested instruments
+
+`CONTESTED_INSTRUMENTS` in `server/engine/playbooks.js` lists tickers whose asset class is
+asserted inconsistently inside this repo. A playbook naming one will not fire.
+
+HBKS is currently held: `shariahFilter.js` catalogues it as "iShares MSCI UK Islamic UCITS
+ETF" (UK Equities), while the breakout-failure playbook built a flight-to-quality
+*duration* thesis on it and quoted an unsourced beta of 0.62. Both cannot be true, and an
+equity fund does not re-rate on "normalising rate expectations". Resolve against the fund
+factsheet by ISIN (the HBKS ticker collides across venues), fix whichever record is wrong,
+then remove the entry. Do not guess which one is right.
 
 ## Cache strategy
 All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
@@ -278,7 +367,9 @@ Key conventions:
 - `providers.test.js` Polygon suite: one `mockFetch` call per ticker (parallel calls),
   using `aggsResponse(sym, bars)` helper with `bar(close, epochMs)` shape
 
-Current status: **260 passing.** `tests/research.test.js` covers the cross-asset layer,
+Current status: **291 passing.** `tests/reviewFindings.test.js` carries regression tests
+named after the external review's finding and ledger IDs, so a test traces back to the
+claim it settles. `tests/research.test.js` covers the cross-asset layer,
 the policy proxy, provenance, the batch adapter, and the no-fabrication guarantee.
 One pre-existing failure in `tests/phase1.test.js` — a date-dependent event-horizon
 assertion — is unrelated to this work and fails on a clean checkout too.

@@ -54,19 +54,56 @@ function fixOpportunitiesNesting(analysis) {
 }
 
 // ── Live macro context from FRED ──────────────────────────────────────────────
+/**
+ * `fred.getAllRates()` resolves Facts — { seriesId, value, date, source } — not
+ * bare numbers. This function used to call `.toFixed()` straight on the object,
+ * which threw, and a bare `catch { return null }` swallowed the TypeError. The
+ * result: every bulletin ever generated ran with no macro context at all, and
+ * nothing in the output said so. Unwrap `.value` explicitly and log on failure.
+ */
+function factValue(fact) {
+  if (fact == null) return null;
+  const v = (typeof fact === "object") ? fact.value : fact;
+  return Number.isFinite(v) ? v : null;
+}
+
+/** Observation date of a Fact — when the figure was measured, not fetched. */
+function factDate(fact) {
+  return (fact && typeof fact === "object" && fact.date) ? fact.date : null;
+}
+
 /** Fetch current FRED rates and format as a grounding data block for the prompt. */
 async function fetchMacroContext() {
   try {
     const rates = await fred.getAllRates();
     if (!rates) return null;
+
+    const dgs10  = factValue(rates.dgs10);
+    const dfii10 = factValue(rates.dfii10);
+    const t10yie = factValue(rates.t10yie);
+    const hyPct  = factValue(rates.hy_spread);
+    const t10y2y = factValue(rates.t10y2y);
+
     const lines = [];
-    if (rates.dgs10      != null) lines.push(`10Y UST Nominal Yield (DGS10):     ${rates.dgs10.toFixed(2)}%`);
-    if (rates.dfii10     != null) lines.push(`10Y Real Yield (DFII10):           ${rates.dfii10.toFixed(2)}%`);
-    if (rates.t10yie     != null) lines.push(`10Y Breakeven Inflation (T10YIE):  ${rates.t10yie.toFixed(2)}%`);
-    if (rates.hy_spread  != null) lines.push(`US HY OAS Spread (BAML):           ${Math.round(rates.hy_spread)}bps`);
-    if (rates.t10y2y     != null) lines.push(`Yield Curve 10Y-2Y (T10Y2Y):       ${rates.t10y2y.toFixed(2)}%`);
-    return lines.length ? lines.join("\n") : null;
-  } catch {
+    if (dgs10  != null) lines.push(`10Y UST Nominal Yield (DGS10):     ${dgs10.toFixed(2)}%`);
+    if (dfii10 != null) lines.push(`10Y Real Yield (DFII10):           ${dfii10.toFixed(2)}%`);
+    if (t10yie != null) lines.push(`10Y Breakeven Inflation (T10YIE):  ${t10yie.toFixed(2)}%`);
+    // BAMLH0A0HYM2 is published in PERCENT. The old line rounded it as though it
+    // were already basis points, so a 3.17% spread rendered as "3bps".
+    if (hyPct  != null) lines.push(`US HY OAS Spread (BAML):           ${Math.round(hyPct * 100)}bps (${hyPct.toFixed(2)}%)`);
+    if (t10y2y != null) lines.push(`Yield Curve 10Y-2Y (T10Y2Y):       ${t10y2y.toFixed(2)}%`);
+
+    if (!lines.length) return null;
+
+    // Observation dates, so the model states when the data was measured rather
+    // than implying it is live.
+    const dates = [rates.dgs10, rates.dfii10, rates.t10yie, rates.hy_spread, rates.t10y2y]
+      .map(factDate).filter(Boolean).sort();
+    if (dates.length) lines.push(`(FRED observation date: ${dates[dates.length - 1]}, source: FRED)`);
+
+    return lines.join("\n");
+  } catch (err) {
+    console.warn("[bulletin] FRED macro context unavailable:", err.message);
     return null;
   }
 }
@@ -298,12 +335,33 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
 });
 
 // ── macOS notification ────────────────────────────────────────────────────────
+/**
+ * The title is a news headline and the body is generated text — both are
+ * attacker-influenceable, so neither may reach a shell or an AppleScript
+ * source string.
+ *
+ * execFile does not spawn a shell, and the script below reads its text out of
+ * `argv` rather than having it interpolated in, so there is no quoting context
+ * for a headline to escape from. The previous implementation built a
+ * single-quoted shell string and replaced `"` with `'` — which manufactured
+ * the very character that terminated the quoting.
+ */
+const NOTIFY_SCRIPT =
+  "on run argv\n" +
+  "  display notification (item 1 of argv) " +
+  "with title \"The Dispatch\" subtitle (item 2 of argv) sound name \"Default\"\n" +
+  "end run";
+
 function sendMacNotification(title, body) {
+  if (process.platform !== "darwin") return;   // osascript is macOS-only
   try {
-    const { exec } = require("child_process");
-    const safeTitle = (title || "").replace(/"/g, "'").slice(0, 100);
-    const safeBody  = (body  || "").replace(/"/g, "'").slice(0, 200);
-    exec(`osascript -e 'display notification "${safeBody}" with title "The Dispatch" subtitle "${safeTitle}" sound name "Default"'`,
+    const { execFile } = require("child_process");
+    const safeTitle = String(title || "").slice(0, 100);
+    const safeBody  = String(body  || "").slice(0, 200);
+    execFile(
+      "osascript",
+      ["-e", NOTIFY_SCRIPT, safeBody, safeTitle],
+      { timeout: 5_000 },
       (err) => { if (err) console.warn("[bulletin] macOS notification failed:", err.message); }
     );
   } catch (err) {
@@ -358,6 +416,9 @@ function buildFallbackBulletin(top, articles) {
 }
 
 module.exports = router;
+// Exposed for tests: the FRED unwrap is the bug that silently blanked the
+// macro block on every bulletin ever generated, so it needs direct coverage.
+module.exports._fetchMacroContext = fetchMacroContext;
 module.exports.generateBulletin = async function() {
   // Callable by the scheduler without going through HTTP
   const existing = getTodaysBulletin();

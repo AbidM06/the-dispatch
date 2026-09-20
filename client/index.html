@@ -1162,6 +1162,8 @@ function App() {
   const [lastOrders, setLastOrders]         = useState([]);
   // ── SALES tab state ────────────────────────────────────────────────────────
   const [macroView, setMacroView]           = useState(null);
+  // /api/macro/* now answers 503 rather than serving an invented view.
+  const [salesUnavailable, setSalesUnavailable] = useState(null);
   const [macroClients, setMacroClients]     = useState([]);
   const [salesLoading, setSalesLoading]     = useState(false);
   const [salesClientLoading, setSalesClientLoading] = useState(false);
@@ -1687,9 +1689,18 @@ function App() {
     try {
       const resp = await apiFetch('/api/macro/view' + (force ? '?refresh=true' : ''));
       setMacroView(resp.data);
+      setSalesUnavailable(null);
       if (force) showToast('Macro view refreshed (' + resp.source + ')', 'success');
     } catch (err) {
-      showToast('Macro view error: ' + err.message, 'error');
+      // 503 carries { available:false, reason, detail, lastSuccessAt }. Render
+      // the unavailable panel rather than leaving the tab blank or, worse,
+      // showing a stale view as though it were current.
+      if (err.status === 503 && err.payload && err.payload.data) {
+        setMacroView(null);
+        setSalesUnavailable(err.payload.data);
+      } else {
+        showToast('Macro view error: ' + err.message, 'error');
+      }
     }
     setSalesLoading(false);
   }
@@ -1700,7 +1711,11 @@ function App() {
       const resp = await apiFetch('/api/macro/clients' + (force ? '?refresh=true' : ''));
       setMacroClients(resp.data || []);
     } catch (err) {
-      showToast('Client impact error: ' + err.message, 'error');
+      if (err.status === 503) {
+        setMacroClients([]);   // no invented client impact map
+      } else {
+        showToast('Client impact error: ' + err.message, 'error');
+      }
     }
     setSalesClientLoading(false);
   }
@@ -2603,6 +2618,14 @@ function App() {
   // ── SALES TAB ─────────────────────────────────────────────────────────────
   function renderSales() {
     const mv = macroView;
+
+    // No live macro view and a reason why: show the same honest panel the
+    // Research tab uses. There is deliberately no fallback content.
+    if (!mv && salesUnavailable) {
+      return React.createElement('div', { className:'tab-pane' },
+        RpUnavailable(salesUnavailable, () => loadMacroView(true), 'SALES MACRO', 'VIEW')
+      );
+    }
 
     function signalClass(s) {
       return s === 'BULLISH' ? 'xasset-bull' : s === 'BEARISH' ? 'xasset-bear' : 'xasset-neutral';
@@ -3663,7 +3686,7 @@ function App() {
     );
   }
 
-  function RpUnavailable(payload, onRetry, typeLabel) {
+  function RpUnavailable(payload, onRetry, typeLabel, noun) {
     if (!payload) return null;
     const reasonText = {
       LOW_COST_MODE:   'AI generation is switched off (LOW_COST_MODE=true).',
@@ -3674,7 +3697,7 @@ function App() {
 
     return React.createElement('div', { className:'rp-unavailable' },
       React.createElement('div', { className:'rp-unavail-mark' }, '—'),
-      React.createElement('div', { className:'rp-unavail-hd' }, (typeLabel || 'REPORT').toUpperCase() + ' REPORT UNAVAILABLE'),
+      React.createElement('div', { className:'rp-unavail-hd' }, (typeLabel || 'REPORT').toUpperCase() + ' ' + (noun || 'REPORT') + ' UNAVAILABLE'),
       React.createElement('div', { className:'rp-unavail-reason' }, reasonText),
       payload.detail && React.createElement('div', { className:'rp-unavail-detail' }, payload.detail),
       React.createElement('div', { className:'rp-unavail-note' },

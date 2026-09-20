@@ -56,29 +56,83 @@ Do not recommend fixes that these rule out.
 
 ## Known defects — confirmed, do not spend the review finding these
 
-1. **Spend caps are inert.** `server/providers/budget.js:36-37`:
-   ```js
-   parseInt(process.env.ANTHROPIC_DAILY_CAP, 10) ?? 5
-   ```
-   `parseInt(undefined, 10)` returns `NaN`, and `NaN` is neither `null` nor
-   `undefined`, so `??` never fires. Both caps are `NaN` when the env vars are
-   unset and every comparison against them is false. The daily and monthly spend
-   limits are therefore unenforced by default. Known, unfixed, deliberate
-   deferral — it was offered as a fix and not taken up.
-2. **`web_search` has no `max_uses`.** Per-report search cost is unbounded. Also
-   known and deferred.
-3. **`client/index.html:6369`** calls `snapshotMeta.source.toUpperCase()` with no
-   guard. Any snapshot payload missing `source` white-screens the entire app —
-   there is no error boundary. This was found by rendering the app against a
-   fixture that omitted the field.
+This list is post-review. Items struck through were on the list handed to the
+reviewers and have since been fixed; the ones that remain are still live.
+
+1. ~~**Spend caps are inert.**~~ Fixed. `budget.js` used
+   `parseInt(process.env.ANTHROPIC_DAILY_CAP, 10) ?? 5`; `parseInt(undefined, 10)`
+   is `NaN`, which is neither `null` nor `undefined`, so `??` never fired and
+   both caps were `NaN` — every comparison against them false. `_intEnv()` now
+   parses explicitly, rejects non-numeric values with a warning, and honours a
+   deliberate `0`.
+2. **`web_search` has no `max_uses`.** Per-report search cost is unbounded.
+   Still known and deferred.
+3. **`client/index.html:6392` and `:6417`** call `snapshotMeta.source.toUpperCase()`
+   with no guard. Any snapshot payload missing `source` white-screens the entire
+   app — there is no error boundary. Still live. (Line numbers moved with the
+   unavailable-panel work; the defect did not.)
 4. **One failing test on a clean checkout.** `tests/phase1.test.js`, "event
    within horizon returns WARN on event risk check" — a date-dependent
-   assertion. 260 of 261 pass. It fails on `main` too.
+   assertion. 291 of 292 pass. It fails on `main` too.
 5. **No CI.** No `.github/workflows`. Adding one would go red immediately on
    defect 4.
-6. **`README.md` is stale** in two places: it states 227 tests (there are 261)
+6. **`README.md` is stale** in two places: it states 227 tests (there are 292)
    and lists five research report types (there are six — it omits equity and
    commodities).
+7. **`narrativeEngine.js` hardcodes market claims.** The LOW_COST_MODE narrative
+   still asserts specific facts about the world — a named GPU order, a quarterly
+   revenue guide — unsourced and undated. Its invented portfolio figures have
+   been removed; these have not. Same class as the deleted research fallbacks.
+8. **HBKS's asset class is contested inside the repo.** The Shariah filter
+   catalogues it as a UK equity ETF; a playbook traded it as a duration hedge
+   and quoted an unsourced beta. The playbook is held by `CONTESTED_INSTRUMENTS`
+   until the fund is identified by ISIN rather than ticker.
+
+## What the external review found that this list did not
+
+Nine reviewer perspectives were run over the review pack and the repository.
+Six findings and several ledger items were confirmed against source and fixed;
+they are recorded as `tests/reviewFindings.test.js`, whose test names carry the
+reviewer's own IDs so a regression test traces back to the claim it settles.
+
+- **F01 — command injection.** `bulletin.js` interpolated AI-generated text into
+  an `osascript -e` string passed to `exec`. A quote in a headline was arbitrary
+  shell. Now `execFile` with an `on run argv` handler, so the text is an
+  argument and never part of the script source.
+- **F02 — execution controls defeated by their callers.** Policy was checked
+  against a £100 placeholder before sizing; a blocked sizing became a 1-share
+  order; `openPositions` and `portfolioGBP` were never passed, silently
+  disabling two caps; account equity defaulted to £75,000 and £1,110. Order is
+  now size → validate → check policy with real numbers → trade.
+- **F03 — the macro block in the bulletin.** It rendered `[object Object]`-class
+  values because it never unwrapped the Fact, reported the HY spread's *percent*
+  value as basis points (a 3.2% OAS printed as 3.2bp), and carried no
+  observation dates. Fixed, with dates and source attached.
+- **F03b — batch reports lost their sources.** The batch adapter dropped the
+  `server_tool_use` blocks, then the job passed `[]` for sources and `true` for
+  `grounded` — so every batched report claimed to be grounded with nothing
+  behind it. Sources now survive the adapter and `grounded` is derived.
+- **F04 — disclosure was requested, not enforced.** `estimates[]` and
+  `unverified[]` were prompt-side only. Now in `ACCURACY_RULES` for all six
+  types and required by `REPORT_VALIDATORS`.
+- **F05 — fabricated fallbacks still live in the Sales tab.** See the product
+  brief; this repo had claimed the class was dead after fixing one instance.
+- **F06 — an instrument traded as two different asset classes.** See defect 8.
+- **T03 — regime labels mixed levels with directions.** "Bear steepener" was
+  emitted from a curve *level*, and could co-occur with "Bear flattener" in the
+  same string. Labels now name shape and level only.
+
+Two defects the review did not find, discovered while fixing the ones it did:
+
+- `rateVal()` in `macro.js` probed for a field `getAllRates()` never returns, so
+  it returned hardcoded constants on every call — and those constants were sent
+  to the live model described as "latest FRED data".
+- `checkFreshness()` compared against cache-write time, not observation date, so
+  a freshly-cached stale observation passed the 20-minute gate.
+
+One reviewer claim was **not reproduced**: a reported test count of 257 with 4
+failures. A clean checkout gave 260 of 261, and now 291 of 292, with the single
+date-dependent failure above.
 
 ## Recently changed, and the most useful thing to review
 
@@ -95,7 +149,9 @@ What changed:
 - Six hardcoded "deterministic" fallback reports were deleted. They rendered
   identically to live research while asserting events that had not happened.
   Failure now returns 503 and the client renders an unavailable panel. A test
-  asserts they stay deleted.
+  asserts they stay deleted. (The external review then found the same pattern
+  still live in `server/routes/macro.js` — deleting one instance of a failure
+  class is not deleting the class.)
 - Citations from `web_search` now resolve to URLs instead of being stripped.
   `extractJSON` had been removing the closing `</cite>` unconditionally, which
   orphaned the opening tag and made every citation unresolvable — fixed behind a

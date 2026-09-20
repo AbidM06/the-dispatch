@@ -121,14 +121,21 @@ function buildCtx(rawRates, portfolioData, watchlistData) {
     dfii10_d:    prev   ? +(rates.dfii10    - (prev.real ?? rates.dfii10)) * 100   : 0,
     t10yie_d:    prev   ? +(rates.t10yie    - (prev.bei  ?? rates.t10yie)) * 100   : 0,
     hy_spread_d: prevHY ? +(rates.hy_spread - prevHY.oas) * 100                    : 0,   // bps
-    t10y2y_d:    prev   ? +(rates.t10y2y   - (prev.y10 - (prev.real != null ? prev.y10 - (prev.y10 - 2.0) : 2.0))) * 100 : 0,
+    // The curve CHANGE needs a prior 2Y, and RATES_HISTORY_SEED carries only
+    // y10/real/bei. The old expression reduced algebraically to
+    // `t10y2y - (prev.y10 - 2.0)`, i.e. it assumed the 2Y had always been
+    // exactly 2.00% — a number nobody measured. null means "not computable",
+    // and callers must not describe curve direction without it.
+    t10y2y_d:    null,
   };
 
   // ── Portfolio ──
   const rows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({
     ticker: p.ticker, valGBP: null, chg: null,
   }));
-  const totalGBP = portfolioData?.totalGBP ?? 1110;
+  // No invented book size: £1,110 used to stand in here, so weights, HHI and
+  // USD exposure were all computed against a portfolio that did not exist.
+  const totalGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
   const usdgbp   = portfolioData?.usdgbp   ?? seeds.FX_SEED.usdgbp.value;
 
   const weights = {};
@@ -157,16 +164,35 @@ function buildCtx(rawRates, portfolioData, watchlistData) {
   const ratesHistory = seeds.RATES_HISTORY_SEED;
   const signals = computeSignals(rates, ratesHistory, watchlist);
 
-  // ── Regime (mirrors classifyRegime from brief.js) ──
-  const regimeLabels = [];
-  if      (rates.t10y2y < 0)   regimeLabels.push("Inverted curve");
-  else if (rates.t10y2y < 0.3) regimeLabels.push("Flat curve");
-  else                          regimeLabels.push("Bear steepener");
-  if      (rates.dfii10 > 2.0) regimeLabels.push("High real yields");
-  else if (rates.dfii10 > 1.5) regimeLabels.push("Elevated real yields");
-  if      (rates.hy_spread > 4.5)                            regimeLabels.push("Credit stress");
-  else if (rates.hy_spread > 3.5)                            regimeLabels.push("Risk-off");
-  else if (rates.hy_spread > 3.0 && rates.dfii10 > 1.5)     regimeLabels.push("Bear flattener");
+  // ── Regime ──
+  //
+  // These labels describe SHAPE and LEVEL, never direction.
+  //
+  // The old logic emitted "Bear steepener" from a curve LEVEL and "Bear
+  // flattener" from the HY spread and real yields — two mutually exclusive
+  // curve directions, neither derived from a curve movement, and both able to
+  // appear in the same string. Feeding `t10y2y: 0.8` produced
+  // "Bear steepener + Elevated real yields + Bear flattener", which is not a
+  // regime; it is a contradiction rendered as one.
+  //
+  // A steepener/flattener call needs `deltas.t10y2y_d`, which is null until a
+  // 2Y history exists. Until then, say what is measurable.
+  const curveLabel =
+    rates.t10y2y < 0    ? "Inverted curve" :
+    rates.t10y2y < 0.3  ? "Flat curve"     :
+                          "Positively sloped curve";
+
+  const creditLabel =
+    rates.hy_spread > 4.5 ? "Credit stress"   :
+    rates.hy_spread > 3.5 ? "Credit widening" :
+                            null;
+
+  const realYieldLabel =
+    rates.dfii10 > 2.0 ? "High real yields"     :
+    rates.dfii10 > 1.5 ? "Elevated real yields" :
+                         null;
+
+  const regimeLabels = [curveLabel, realYieldLabel, creditLabel].filter(Boolean);
   if (rates.dgs10 > 4.5) regimeLabels.push("Rates restrictive");
   const regime = regimeLabels.length ? regimeLabels.join(" + ") : "Broadly neutral";
 
@@ -196,7 +222,10 @@ function generateIdeas(ctx, opts = {}) {
   const allowedCategories = opts.allowedCategories ?? ["macro", "structure", "portfolio"];
 
   const portfolioRows = ctx.portfolio?.rows ?? [];
-  const totalGBP      = ctx.portfolio?.totalGBP ?? 1110;
+  // 0, not £1,110. Sizing rules downstream treat a non-positive total as
+  // "weight unknown" rather than computing a percentage of a book that
+  // does not exist.
+  const totalGBP      = Number.isFinite(ctx.portfolio?.totalGBP) ? ctx.portfolio.totalGBP : 0;
   const usdgbp        = ctx._usdgbp ?? seeds.FX_SEED.usdgbp.value;
 
   const tickets = [];

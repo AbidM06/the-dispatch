@@ -16,6 +16,7 @@ const anthropic   = require("../providers/anthropic");
 const fred        = require("../providers/fred");
 const eia         = require("../providers/eia");
 const macroContext = require("../providers/macroContext");
+const requireWriteAuth = require("../middleware/auth");
 
 const router    = Router();
 const TTL_24H   = 24 * 60 * 60 * 1000;
@@ -220,7 +221,11 @@ router.get("/report", async (req, res) => {
 });
 
 // ── POST /api/research/report/refresh ────────────────────────────────────────
-router.post("/report/refresh", async (req, res) => {
+// Regenerating a report costs a Sonnet call with unbounded web_search, so this
+// is a spend endpoint, not a read. Every sibling refresh route (bulletin,
+// events, correlations) was already guarded; this one was not, which left
+// anyone who could reach the port able to run up the API bill at will.
+router.post("/report/refresh", requireWriteAuth, async (req, res) => {
   const { topic, type: bodyType } = req.body || {};
   const type = VALID_TYPES.has(bodyType || req.query.type) ? (bodyType || req.query.type) : "macro";
 

@@ -40,6 +40,30 @@ function priceFmt(ctx, ticker, fallback) {
   return ctx.watchlist[ticker]?.price ?? fallback;
 }
 
+/**
+ * CONTESTED_INSTRUMENTS — tickers whose asset class is asserted inconsistently
+ * inside this repository, and which therefore must not generate trade ideas.
+ *
+ * HBKS is catalogued in server/engine/shariahFilter.js as "iShares MSCI UK
+ * Islamic UCITS ETF", sector "UK Equities". The breakout-failure playbook below
+ * described the same ticker as a "sukuk/duration ETF" with a beta of 0.62 and
+ * built a flight-to-quality duration thesis on it. Both cannot be true, and the
+ * difference is not cosmetic: an equity fund does not re-rate on "normalising
+ * rate expectations" the way the rationale claims.
+ *
+ * External lookup is unavailable from this environment, so rather than guess
+ * which record is correct, the playbook is held. Resolve the identity against
+ * the fund's factsheet (ISIN, not ticker — HBKS collides across venues), correct
+ * whichever record is wrong, then delete the entry here.
+ */
+const CONTESTED_INSTRUMENTS = {
+  HBKS: "Asset class disputed: catalogued as a UK equity ETF, traded here as a sukuk/duration ETF. Verify against the fund factsheet before re-enabling.",
+};
+
+function isContested(ticker) {
+  return Object.prototype.hasOwnProperty.call(CONTESTED_INSTRUMENTS, ticker);
+}
+
 // ── Macro Playbooks (7) ───────────────────────────────────────────────────────
 
 const hotCPI = {
@@ -402,13 +426,18 @@ const breakoutFailure = {
   description: "Fires when HY spreads spiked above 4.0% but are now reverting " +
                "(recent delta < −10bps), indicating a 'breakout failure' in credit stress. " +
                "When credit spreads fail to sustain above key levels, it often marks the " +
-               "short-term bottom in risk assets. Duration/sukuk (HBKS) benefits from the " +
-               "flight-to-quality unwind as credit normalises.",
+               "short-term bottom in risk assets. " +
+               "HELD: this playbook expresses the view through HBKS, whose asset class is " +
+               "disputed in this repository (see CONTESTED_INSTRUMENTS). It will not fire " +
+               "until the instrument is verified.",
   invalidation: "HY OAS resumes widening above 4.0%; fundamental credit event (default) causes structural spread elevation.",
   riskNotes:    "Breakout failures can re-test — give HBKS a wider stop to avoid being stopped by the re-test before reversal.",
   requiredData: ["BAMLH0A0HYM2"],
 
   trigger(ctx) {
+    // Held while the instrument identity is contested. The credit signal itself
+    // is sound; the expression vehicle is not established.
+    if (isContested("HBKS")) return false;
     return ctx.rates.hy_spread > 4.0 && ctx.deltas.hy_spread_d < -10;
   },
 
@@ -423,11 +452,11 @@ const breakoutFailure = {
       confidence:   62,
       sizePct:      3,
       entry, stop, target,
-      entryLogic:   `Enter HBKS as credit breakout fails — HY OAS at ${ctx.rates.hy_spread.toFixed(2)}% but reverting (${ctx.deltas.hy_spread_d}bps). Duration benefits from flight-to-quality unwind.`,
+      entryLogic:   `Enter HBKS as credit breakout fails — HY OAS at ${ctx.rates.hy_spread.toFixed(2)}% but reverting (${ctx.deltas.hy_spread_d}bps). Credit normalisation is the signal.`,
       stopLogic:    `Stop at £${stop} (5% below). Wider stop needed to handle re-test of credit spike.`,
       targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). HBKS rebounds as credit normalises and duration is re-valued.`,
-      sizingRule:   `3% allocation. HBKS beta is 0.62 — modest equity sensitivity. Current weight ${w(ctx,'HBKS').toFixed(1)}%.`,
-      rationale:    `Credit breakout failure: HY OAS hit ${ctx.rates.hy_spread.toFixed(2)}% but has reversed ${Math.abs(ctx.deltas.hy_spread_d)}bps. Failed breakouts in credit often mark local cycle highs in stress. HBKS (sukuk/duration ETF) benefits from normalising rate expectations and credit recovery.`,
+      sizingRule:   `3% allocation. Current weight ${w(ctx,'HBKS').toFixed(1)}%. (Beta not stated — the 0.62 previously quoted here was never sourced.)`,
+      rationale:    `Credit breakout failure: HY OAS hit ${ctx.rates.hy_spread.toFixed(2)}% but has reversed ${Math.abs(ctx.deltas.hy_spread_d)}bps. Failed breakouts in credit often mark local cycle highs in stress. Expression vehicle pending instrument verification.`,
       expectedDrivers: ["Credit spread reversal", "Duration re-rating", "Risk-off unwind"],
       requiredDataFreshness: "BAMLH0A0HYM2 < 24h; HBKS price < 30min",
     };
