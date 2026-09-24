@@ -167,6 +167,8 @@ async function getFxRate(from, to) {
     toCurrency:    r["3. To_Currency Code"],
     rate:          parseFloat(r["5. Exchange Rate"]),
     lastRefreshed: r["6. Last Refreshed"],
+    // AV reports the zone separately; without it "Last Refreshed" is ambiguous.
+    timeZone:      r["7. Time Zone"] || null,
     source:        "Alpha Vantage",
   };
 }

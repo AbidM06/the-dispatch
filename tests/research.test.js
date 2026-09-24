@@ -158,10 +158,13 @@ describe("provenance — citations survive to the client", () => {
     }
   });
 
-  test("an out-of-range cite index is dropped, not guessed at", () => {
-    const { text, cited } = anthropic.parseCiteTags('Value is <cite index="9-0">X</cite>.', sources);
-    expect(text).toBe("Value is X.");
+  test("an out-of-range cite index is not guessed at, and the claim is flagged", () => {
+    // Silently dropping the marker left the claim looking as supported as its
+    // neighbours. It is now kept visibly unresolved and counted.
+    const { text, cited, unresolved } = anthropic.parseCiteTags('Value is <cite index="9-0">X</cite>.', sources);
+    expect(text).toBe("Value is X [citation unresolved].");
     expect(cited).toHaveLength(0);
+    expect(unresolved).toBe(1);
   });
 
   test("attachProvenance walks nested structures and reports only cited sources", () => {
@@ -278,15 +281,30 @@ describe("research report specs", () => {
   });
 
   test("finalizeResearchReport rejects a report missing its required shape", () => {
-    expect(() => anthropic.finalizeResearchReport("equity", '{"title":"x"}')).toThrow(/could not parse a usable JSON report/);
+    expect(() => anthropic.finalizeResearchReport("equity", '{"title":"x"}')).toThrow(/failed its contract/);
     expect(() => anthropic.finalizeResearchReport("equity", "not json at all")).toThrow();
   });
 
   test("finalizeResearchReport attaches provenance and marks grounding", () => {
-    const raw = JSON.stringify({ title: "T", epsOutlook: { year2026: {} } });
+    // Equity now requires its analytical containers AND the disclosure arrays,
+    // so a usable fixture has to carry them.
+    const raw = JSON.stringify({
+      title: "T",
+      epsOutlook: { year2026: {} },
+      crossAssetContext: { synthesis: "s" },
+      rateSensitivity: { note: "n" },
+      scenarios: { bear: {}, base: {}, bull: {} },
+      invalidation: { conditions: [] },
+      risks: [{ risk: "r" }],
+      estimates: [],
+      unverified: [],
+    });
+    // searchEnabled:false (e.g. the OpenAI tier): a tier with no search cannot
+    // be grounded, whatever sources array it is handed.
     const out = anthropic.finalizeResearchReport("equity", raw, [{ url: "https://x.com", title: "X" }], false);
     expect(out.reportType).toBe("equity");
     expect(out.grounded).toBe(false);
+    expect(out.grounding.searchEnabled).toBe(false);
     expect(out.allSources).toHaveLength(1);
     expect(out.generatedAt).toBeTruthy();
   });
@@ -389,6 +407,15 @@ describe("generateReport — end to end", () => {
       title: 'S&P 500 Outlook',
       epsOutlook: { year2026: { epsLevel: 'REDACTED_FOR_TEST' } },
       crossAssetContext: { synthesis: 'Oil at (cite index="0-0">$97.73</cite> is a headwind.' },
+      // The rest of the equity contract. The previous fixture carried only the
+      // three fields above and was accepted, because the synchronous path never
+      // ran the validators the batch path used.
+      rateSensitivity: { note: 'n' },
+      scenarios: { bear: {}, base: {}, bull: {} },
+      risks: [{ risk: 'r' }],
+      invalidation: { conditions: ['c'] },
+      estimates: [],
+      unverified: [],
     };
 
     // FRED for every macro series, then the Anthropic response.
@@ -418,6 +445,26 @@ describe("generateReport — end to end", () => {
     expect(out.report.crossAssetContext.synthesis).toBe("Oil at $97.73 is a headwind.");
     expect(out.report.citedSources[0].url).toBe("https://reuters.com/oil");
     expect(out.report.grounded).toBe(true);
+    expect(out.report.grounding.resolvedCitations).toBe(1);
+    // dataAsOf is the OBSERVATION span, not the time the context was fetched.
+    expect(out.report.dataAsOf.oldestObservation).toBe("2026-09-09");
+    expect(out.report.dataAsOf.retrievedAt).toBeTruthy();
+  });
+
+  test("the synchronous path rejects a report missing its contract fields", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    jest.resetModules();
+    global.fetch = jest.fn(async (url) => {
+      if (String(url).includes("stlouisfed")) {
+        return mockResponse({ observations: [{ date: "2026-09-09", value: "4.50" }] });
+      }
+      return mockResponse({ content: [{ type: "text", text: JSON.stringify({ title: "T", epsOutlook: {} }) }] });
+    });
+    const research = require("../server/routes/research.js");
+    const out = await research.generateReport("equity");
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe("REPORT_SCHEMA_INVALID");
+    expect(out.detail).toMatch(/estimates/);
   });
 
   test("an AI failure produces an unavailable result rather than a substitute report", async () => {

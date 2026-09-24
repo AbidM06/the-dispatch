@@ -28,17 +28,32 @@
  *   - 20% benchmark: hotel/resort, stockbroking mixed activities < 20%
  *   - Debt to asset ratio ≤ 33% (DJIM standard)
  *
- * Implementation: curated allowlist approach, cross-referenced against DJIM,
- * FTSE Shariah, and S&P 500 Shariah indices. Screened as of 2025.
+ * Implementation: a hand-curated allowlist. The original comment said it was
+ * "cross-referenced against DJIM, FTSE Shariah, and S&P 500 Shariah indices.
+ * Screened as of 2025." No per-ticker screening date, index-membership record
+ * or ratio figures are stored, so this app cannot show that any entry is
+ * CURRENTLY screened — index constituents and company ratios change. Every
+ * status carries SCREENING_BASIS saying so. No new compliance claims are made
+ * here; this is a record of the owner's list and its limits.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 "use strict";
 
-// ── Curated Shariah-compliant universe ────────────────────────────────────────
-// Pre-screened against DJIM, FTSE Shariah, S&P 500 Shariah indices.
-// All pass: haram sector check, debt/assets ≤ 33%, interest income ≤ 5%.
-// Update periodically as companies' financials change.
+// ── Curated Shariah universe (owner's list) ───────────────────────────────────
+// Entries were described as passing the sector, debt/assets ≤ 33% and interest
+// income ≤ 5% screens at an unrecorded date. Re-verify against current index
+// membership or a screening provider before relying on any entry.
+
+const SCREENING_BASIS = Object.freeze({
+  kind:     "unverified",
+  asOf:     null,
+  source:   "Hand-curated list; original catalogue comment says 'Screened as of 2025'.",
+  note:     "Screening date and evidence are not stored. Index membership and financial ratios change; this status is the owner's list, not a current screening result.",
+});
+
+// Tickers whose identity itself is unverified (see playbooks CONTESTED_INSTRUMENTS).
+const IDENTITY_UNVERIFIED = new Set(["HBKS"]);
 
 const SHARIAH_UNIVERSE = new Map([
   // ── Semiconductors & Hardware (core universe) ─────────────────────────────
@@ -194,6 +209,9 @@ function getShariahStatus(ticker) {
       sector:    info.sector,
       index:     info.index,
       note:      info.note || null,
+      screening: SCREENING_BASIS,
+      ...(IDENTITY_UNVERIFIED.has(t) ? { identityVerified: false,
+          identityNote: "Instrument identity unverified: verify fund name and asset class by ISIN against the issuer factsheet." } : {}),
     };
   }
 
@@ -254,6 +272,7 @@ function filterCompliant(tickers) {
 }
 
 module.exports = {
+  SCREENING_BASIS,
   SHARIAH_UNIVERSE,
   HARAM_TICKERS,
   PROHIBITED_TRANSACTIONS,

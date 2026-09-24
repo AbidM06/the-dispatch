@@ -9,29 +9,41 @@
 const { z } = require("zod");
 
 // ── Shared envelope ───────────────────────────────────────────────────────────
+// .passthrough() on every provenance-bearing schema is deliberate. Zod's default
+// is to STRIP unknown keys, and validate() returns the parsed copy — so any
+// provenance field not listed here (retrievedAt, freshness, kind, components…)
+// was silently deleted from the response on its way to the client. A schema
+// that removes provenance is worse than no schema.
 const Envelope = z.object({
-  source:    z.enum(["live", "cache", "seeded", "computed"]),
-  fetchedAt: z.string().datetime({ offset: true }).or(z.string()),
+  source:    z.enum(["live", "cache", "seeded", "computed", "demo", "partial", "unavailable"]),
+  fetchedAt: z.string().datetime({ offset: true }).or(z.string()).nullable(),
   stale:     z.boolean(),
-});
+}).passthrough();
 
-// ── Rate observation ──────────────────────────────────────────────────────────
+const Freshness = z.object({
+  status: z.enum(["current", "lagging", "stale", "unknown", "demo", "unavailable"]),
+}).passthrough();
+
+// ── Rate observation (Fact) ───────────────────────────────────────────────────
+// value may be null: an unavailable fact is still a fact about what we lack.
 const RateObs = z.object({
-  value:    z.number(),
-  seriesId: z.string(),
-  date:     z.string(),
-  source:   z.string(),
-});
+  value:     z.number().nullable(),
+  seriesId:  z.string().optional(),
+  date:      z.string().nullable(),
+  source:    z.string().optional(),
+  kind:      z.enum(["observed", "calculated", "estimate", "unavailable", "demo"]).optional(),
+  freshness: Freshness.optional(),
+}).passthrough();
 
 // ── Watchlist item ────────────────────────────────────────────────────────────
 const WatchlistItem = z.object({
   sym:    z.string(),
-  price:  z.number(),
-  chg:    z.number(),
+  price:  z.number().nullable(),
+  chg:    z.number().nullable(),
   note:   z.string(),
-  source: z.string(),
-  date:   z.string(),
-});
+  source: z.string().nullable(),
+  date:   z.string().nullable(),
+}).passthrough();
 
 // ── International watchlist item ──────────────────────────────────────────────
 const IntlItem = z.object({
@@ -42,15 +54,15 @@ const IntlItem = z.object({
   note:   z.string(),
   source: z.string(),
   date:   z.string(),
-});
+}).passthrough();
 
 // ── FX rate ───────────────────────────────────────────────────────────────────
 const FxRate = z.object({
-  value:  z.number(),
+  value:  z.number().nullable(),
   pair:   z.string(),
-  date:   z.string(),
-  source: z.string(),
-});
+  date:   z.string().nullable(),
+  source: z.string().optional(),
+}).passthrough();
 
 // ── Chart history points ──────────────────────────────────────────────────────
 // real/bei are nullable: DFII10 and T10YIE sometimes lag DGS10 by a day.
@@ -90,11 +102,11 @@ const SnapshotPayload = z.object({
   ratesHistory: z.array(RatesHistoryPoint),
   hyHistory:    z.array(HyHistoryPoint),
   rsiHistory:   z.array(RsiHistoryPoint),
-});
+}).passthrough();
 
 const SnapshotResponse = Envelope.extend({
   data: SnapshotPayload,
-});
+}).passthrough();
 
 // ── /api/portfolio ────────────────────────────────────────────────────────────
 const PositionRow = z.object({
@@ -159,15 +171,17 @@ const RiskItem = z.object({
   detail:  z.string(),
   affects: z.string(),
   date:    z.string().optional(),
-});
+}).passthrough();
 
+// Any number of risks. Exactly-7 forced the deterministic generator to pad the
+// list with canned scenarios (a war, a tariff package) to satisfy the schema.
 const RiskPayload = z.object({
-  risks: z.array(RiskItem).length(7),
-});
+  risks: z.array(RiskItem),
+}).passthrough();
 
 const RiskResponse = Envelope.extend({
   data: RiskPayload,
-});
+}).passthrough();
 
 // ── /api/events ───────────────────────────────────────────────────────────────
 const EventItem = z.object({
@@ -176,16 +190,16 @@ const EventItem = z.object({
   ticker:   z.string(),
   detail:   z.string(),
   date:     z.string().optional(),
-});
+}).passthrough();
 
 const EventsPayload = z.object({
   events: z.array(EventItem),
   econ:   z.array(z.any()),
-});
+}).passthrough();
 
 const EventsResponse = Envelope.extend({
   data: EventsPayload,
-});
+}).passthrough();
 
 // ── /api/explain/:ticker ──────────────────────────────────────────────────────
 const ExplainPayload = z.object({
@@ -249,14 +263,16 @@ const IdeaStats = z.object({
 });
 
 // ── /api/brief ────────────────────────────────────────────────────────────────
+// prev/deltaBps are null when no dated prior observation exists. The signal
+// describes the RATE's direction, not a market call on it.
 const WhatChangedItem = z.object({
   series:   z.string(),
   label:    z.string(),
-  current:  z.number(),
-  prev:     z.number(),
-  deltaBps: z.number(),
-  signal:   z.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
-});
+  current:  z.number().nullable(),
+  prev:     z.number().nullable(),
+  deltaBps: z.number().nullable(),
+  signal:   z.enum(["RISING", "FALLING", "LITTLE CHANGED", "NEUTRAL", "UNAVAILABLE"]),
+}).passthrough();
 
 const ActionableSetupItem = z.object({
   ticker:    z.string(),
@@ -350,6 +366,75 @@ const PaperMetrics = z.object({
   }),
 });
 
+// ── Research reports — runtime contract per report type ─────────────────────
+// Each schema mirrors the JSON contract its prompt in providers/anthropic.js
+// asks for. The prompt ASKS for estimates[] and unverified[]; these schemas are
+// what REQUIRE them. A report that omits its disclosures, its scenarios or its
+// invalidation conditions is rejected, not rendered as complete.
+//
+// .passthrough(): every other field the model returns is kept.
+const Disclosures = {
+  // Figures the model produced itself (forecasts, estimates) rather than read
+  // from the verified block or a search result.
+  estimates:  z.array(z.any()),
+  // Claims it could not confirm. [] is allowed; absence is not.
+  unverified: z.array(z.any()),
+};
+const nonEmpty = z.string().trim().min(1);
+
+const ResearchSchemas = {
+  fx: z.object({
+    title: nonEmpty,
+    pairViews: z.array(z.object({ pair: nonEmpty, direction: nonEmpty }).passthrough()).min(1),
+    risks: z.array(z.any()).min(1),
+    ...Disclosures,
+  }).passthrough(),
+  rates: z.object({
+    title: nonEmpty,
+    thePuzzle: nonEmpty,
+    catalysts: z.array(z.any()).min(1),
+    ...Disclosures,
+  }).passthrough(),
+  thematic: z.object({
+    title: nonEmpty,
+    keyThemes: z.array(z.any()).min(1),
+    predictions: z.array(z.any()).min(1),
+    ...Disclosures,
+  }).passthrough(),
+  equity: z.object({
+    title: nonEmpty,
+    epsOutlook: z.object({}).passthrough(),
+    crossAssetContext: z.object({}).passthrough(),
+    rateSensitivity: z.object({}).passthrough(),
+    scenarios: z.object({}).passthrough().refine(o => Object.keys(o).length >= 2, "scenarios needs at least two cases"),
+    risks: z.array(z.any()).min(1),
+    invalidation: z.union([nonEmpty, z.object({}).passthrough()]),
+    ...Disclosures,
+  }).passthrough(),
+  commodities: z.object({
+    title: nonEmpty,
+    keyTakeaways: z.array(z.any()).min(1),
+    scenarios: z.object({}).passthrough(),
+    ...Disclosures,
+  }).passthrough(),
+  macro: z.object({
+    title: nonEmpty,
+    abstract: z.array(z.any()).min(1),
+    scenarios: z.object({ baseline: z.object({}).passthrough(), stress: z.object({}).passthrough() }).passthrough(),
+    ...Disclosures,
+  }).passthrough(),
+};
+
+/**
+ * validateResearchReport — { ok, errors } for a parsed report of `type`.
+ * Unknown types are validated as macro (the default report).
+ */
+function validateResearchReport(type, data) {
+  const schema = ResearchSchemas[type] || ResearchSchemas.macro;
+  if (!data || typeof data !== "object") return { ok: false, errors: ["report is not a JSON object"] };
+  return validate(schema, data);
+}
+
 // ── Validation helper ─────────────────────────────────────────────────────────
 function validate(schema, payload) {
   const result = schema.safeParse(payload);
@@ -371,5 +456,7 @@ module.exports = {
     EngineTicket,
     PaperMetrics,
   },
+  ResearchSchemas,
   validate,
+  validateResearchReport,
 };

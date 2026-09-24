@@ -15,8 +15,8 @@
  */
 "use strict";
 
+const store = require("../analytics/analysisStore");
 const cache              = require("../cache");
-const seeds              = require("../../seeds/fallback");
 const { fetchAllAnalysis } = require("../providers/anthropic");
 const { isApiFallback }  = require("../providers/budget");
 const { generateNarrative } = require("../analytics/narrativeEngine");
@@ -116,9 +116,9 @@ async function runRefresh() {
 
     const { events, risks, econ } = await fetchAllAnalysis(newsCtx);
 
-    cache.set(CACHE_KEY_EVENTS, events, TTL_AI);
-    cache.set(CACHE_KEY_ECON,   econ,   TTL_AI);
-    cache.set(CACHE_KEY_RISK,   risks,  TTL_AI);
+    store.storeAnalysis(CACHE_KEY_EVENTS, events, "ai", TTL_AI);
+    store.storeAnalysis(CACHE_KEY_ECON,   econ,   "ai", TTL_AI);
+    store.storeAnalysis(CACHE_KEY_RISK,   risks,  "ai", TTL_AI);
 
     // Only record success after cache is written
     status.lastRunAt  = new Date().toISOString();
@@ -136,17 +136,12 @@ async function runRefresh() {
 
     if (!hasLiveEvents || !hasLiveEcon || !hasLiveRisk) {
       try {
-        const snapData      = cache.get("snapshot:data");
-        const portfolioData = cache.get("portfolio:data");
-        const ctx = {
-          rates:     snapData?.rates     ?? seeds.RATES_SEED,
-          watchlist: snapData?.watchlist ?? seeds.WATCHLIST_SEED,
-          portfolio: portfolioData       ?? [],
-        };
-        const { events, econ, risks } = generateNarrative(ctx);
-        if (!hasLiveEvents) cache.set(CACHE_KEY_EVENTS, events, TTL_AI);
-        if (!hasLiveEcon)   cache.set(CACHE_KEY_ECON,   econ,   TTL_AI);
-        if (!hasLiveRisk)   cache.set(CACHE_KEY_RISK,   risks,  TTL_AI);
+        // Snapshot facts only — no seed rates. The narrative is stored as
+        // "deterministic" so no later read can present it as AI analysis.
+        const { events, econ, risks, inputs } = generateNarrative(store.narrativeContext());
+        if (!hasLiveEvents) store.storeAnalysis(CACHE_KEY_EVENTS, events, "deterministic", TTL_AI, { inputs });
+        if (!hasLiveEcon)   store.storeAnalysis(CACHE_KEY_ECON,   econ,   "deterministic", TTL_AI, { inputs });
+        if (!hasLiveRisk)   store.storeAnalysis(CACHE_KEY_RISK,   risks,  "deterministic", TTL_AI, { inputs });
         console.log("[aiRefresh] Deterministic fallback written for missing cache keys.");
       } catch (fallbackErr) {
         console.error("[aiRefresh] Fallback also failed:", fallbackErr.message);

@@ -361,7 +361,7 @@ describe("GET /api/brief", () => {
   test("returns 200 with expected shape", async () => {
     const res = await request(app).get("/api/brief");
     expect(res.status).toBe(200);
-    expect(res.body.source).toMatch(/cache|seeded/);
+    expect(res.body.source).toMatch(/^(cache|partial|unavailable)$/);
     expect(res.body.data.regime).toBeTruthy();
     expect(Array.isArray(res.body.data.whatChanged)).toBe(true);
     expect(Array.isArray(res.body.data.actionableSetup)).toBe(true);
@@ -377,21 +377,21 @@ describe("GET /api/brief", () => {
     expect(series).toContain("HY OAS");
   });
 
-  test("regime label uses seed rates when cache is empty", async () => {
-    // Seeds have dfii10=1.85, hy_spread=3.17, t10y2y=0.51
-    // Expected regime: "Bear steepener + Elevated real yields + Bear flattener"
+  test("with no cached rates the brief says so instead of using seed levels", async () => {
+    // It used to fall back to March 2026 seed rates and label them
+    // "Bear steepener + Elevated real yields + Bear flattener" — a contradiction.
     const res = await request(app).get("/api/brief");
-    expect(res.body.data.regime).toBeTruthy();
-    expect(res.body.stale).toBe(true); // seeded data is always stale
+    expect(res.body.source).toBe("unavailable");
+    expect(res.body.data.regime).toMatch(/Unavailable/);
+    expect(res.body.data.regime).not.toMatch(/steepener|flattener/i);
+    expect(res.body.stale).toBe(true);
+    expect(res.body.data.whatChanged.every(w => w.deltaBps === null)).toBe(true);
   });
 
-  test("nextEvent is the earliest upcoming event", async () => {
+  test("with no calendar loaded, nextEvent is null and the calendar is marked unavailable", async () => {
     const res = await request(app).get("/api/brief");
-    // FOMC is 19 Mar — should be the next event from today (Mar 14)
-    if (res.body.data.nextEvent) {
-      expect(res.body.data.nextEvent.date).toBeTruthy();
-      expect(res.body.data.nextEvent.importance).toBeTruthy();
-    }
+    expect(res.body.data.nextEvent).toBeNull();
+    expect(res.body.data.calendar.available).toBe(false);
   });
 });
 
@@ -482,15 +482,30 @@ describe("riskCheck — pure unit tests", () => {
     expect(rCheck.status).toBe("OK");
   });
 
+  // This test used to fail every year from April to December: it relied on a
+  // hand-typed, year-less seed calendar ("19 Mar") that only produced an event
+  // inside the horizon in spring. The calendar is now injected with full dates.
   test("event within horizon returns WARN on event risk check", () => {
-    // FOMC is 19 Mar — within a "3 months" horizon from Mar 14
+    const soon = new Date(Date.now() + 10 * 86_400_000);
+    const calendar = { available: true, source: "test", events: [
+      { date: soon.toISOString().slice(0, 10), at: soon, event: "FOMC Rate Decision", ticker: "US", importance: "HIGH", kind: "observed" },
+    ] };
     const result = riskCheck.runPreTradeCheck(
-      idea({ horizon: "3 months" }), portfolioRows, totalGBP
+      idea({ horizon: "3 months" }), portfolioRows, totalGBP, null, { calendar }
     );
     const eventCheck = result.checks.find(c => c.name === "Event Risk");
-    // FOMC is HIGH importance — should be flagged
     expect(eventCheck.status).toBe("WARN");
-    expect(eventCheck.detail).toMatch(/FOMC|event/i);
+    expect(eventCheck.detail).toMatch(/FOMC/);
+  });
+
+  test("an unavailable calendar is a WARN, never a silent pass", () => {
+    const result = riskCheck.runPreTradeCheck(
+      idea({ horizon: "3 months" }), portfolioRows, totalGBP, null,
+      { calendar: { available: false, events: [], source: "unavailable", reason: "none loaded" } }
+    );
+    const eventCheck = result.checks.find(c => c.name === "Event Risk");
+    expect(eventCheck.status).toBe("WARN");
+    expect(eventCheck.detail).toMatch(/unavailable/i);
   });
 
   test("all OK returns pass=true and level=OK", () => {

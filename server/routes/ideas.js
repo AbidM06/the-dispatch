@@ -27,6 +27,9 @@ const { loadIdeas, addIdea, updateIdea } = require("../importers/ideas");
 const { runPreTradeCheck }               = require("../analytics/riskCheck");
 const { generateTradeIdeas }             = require("../providers/anthropic");
 const budget  = require("../providers/budget");
+const { classifyLevels } = require("../analytics/regime");
+const { prepareOrder } = require("../engine/executionGate");
+const { getCalendar } = require("../analytics/eventCalendar");
 const cache   = require("../cache");
 const seeds   = require("../../seeds/fallback");
 
@@ -39,7 +42,6 @@ const { generateWeeklyReport, saveWeeklyReport } = require("../jobs/weeklyReview
 const alpaca                      = require("../providers/alpaca");
 const { getUniverseDetailed, SCREENING_THRESHOLDS, PROHIBITED_TRANSACTIONS } = require("../engine/shariahFilter");
 const requireWriteAuth            = require("../middleware/auth");
-const { computeSize }             = require("../engine/positionSizing");
 const executionPolicy             = require("../analytics/executionPolicy");
 const { fireWebhook }            = require("../providers/webhook");
 const { autoExecuteIdeas }        = require("../engine/autoExecute");
@@ -138,9 +140,10 @@ router.get("/universe", (_req, res) => {
     prohibitedTransactions: Object.fromEntries(
       Object.entries(PROHIBITED_TRANSACTIONS).map(([k, v]) => [k, v.reason])
     ),
-    note: "Pre-screened against DJIM, FTSE Shariah, and S&P 500 Shariah indices. " +
-          "Financial ratios (debt/assets, interest income) verified at screening date. " +
-          "Re-screen annually as company financials change.",
+    note: "Owner-curated list. Its original comment says it was cross-referenced against DJIM, FTSE Shariah " +
+          "and S&P 500 Shariah indices in 2025, but no screening date, index-membership record or ratio " +
+          "figures are stored, so current compliance is NOT verified by this app. Re-screen before relying on it.",
+    screening: require("../engine/shariahFilter").SCREENING_BASIS,
   }));
 });
 
@@ -367,17 +370,20 @@ router.get("/universe-scan", (req, res) => {
 
 // ── Live price helper ────────────────────────────────────────────────────────
 async function fetchLivePrice(ticker) {
-  // Returns { price, source } or null on failure
+  // Returns { price, source, date, priceType } or null on failure
   try {
     const { AV_SUPPORTED, getQuote } = require("../providers/alphaVantage");
     const { POLYGON_PEERS, getSnapshots } = require("../providers/polygon");
+    // Both are DAILY prices (AV GLOBAL_QUOTE latest trading day; Polygon free
+    // /v2/aggs daily bar). They are returned with their date and are never
+    // treated as executable by the execution gate.
     if (AV_SUPPORTED.has(ticker)) {
       const q = await getQuote(ticker);
-      return q ? { price: q.price, source: "AlphaVantage" } : null;
+      return q ? { price: q.price, source: "Alpha Vantage", date: q.latestTradingDay, priceType: "daily quote (latest trading day)" } : null;
     }
     if (POLYGON_PEERS.has(ticker)) {
       const results = await getSnapshots([ticker]);
-      if (results.length > 0) return { price: results[0].price, source: "Polygon" };
+      if (results.length > 0) return { price: results[0].price, source: "Polygon.io", date: results[0].date, priceType: "daily close" };
     }
     // LSE ETFs — no live price available
     return null;
@@ -401,102 +407,78 @@ router.post("/:id/approve", requireWriteAuth, async (req, res) => {
     return res.status(400).json({ error: "Idea has been rejected and cannot be approved." });
   }
 
-  // Freshness gate
-  const MAX_AGE_MIN   = parseInt(process.env.TRADING_DATA_MAX_AGE_MIN || "20", 10);
-  const snapshotMeta  = cache.getWithMeta("snapshot:rates");
-  let dataFresh = true;
-  let freshnessWarning = null;
-  if (!snapshotMeta || snapshotMeta.stale) {
-    dataFresh = false;
-    freshnessWarning = "Snapshot data stale or missing.";
-  } else {
-    const ageMin = (Date.now() - new Date(snapshotMeta.fetchedAt).getTime()) / 60_000;
-    if (ageMin > MAX_AGE_MIN) {
-      dataFresh = false;
-      freshnessWarning = `Snapshot ${ageMin.toFixed(0)} min old (max ${MAX_AGE_MIN} min).`;
-    }
+  // Execution disabled (the default): record the approval, send nothing. The
+  // old path sized orders against invented inputs even when it could never
+  // place them; there is nothing to size when nothing can be sent.
+  const executionOn = alpaca.isAutoExecuteEnabled() && executionPolicy.getConfig().tradingEnabled;
+  const logBase = { ideaId: idea.id, ticker: idea.ticker, direction: idea.direction };
+  if (!executionOn) {
+    const note = "Approved. Execution is disabled (TRADING_ENABLED / ALPACA_AUTO_EXECUTE not set) — no order sent.";
+    const updated = updateIdea(idea.id, { executionStatus: "APPROVED", executionNote: note });
+    appendExecutionLog({ ...logBase, decision: "APPROVED", reasons: [note], freshnessSnapshot: {}, orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, order: null, executionNote: note }));
   }
 
-  // Execution policy
-  const policyCheck = executionPolicy.checkPolicy({ ticker: idea.ticker, notionalGBP: idea.sizePct ? idea.sizePct * 10 : 100 });
-
-  const logBase = { ideaId: idea.id, ticker: idea.ticker, direction: idea.direction,
-    freshnessSnapshot: { dataFresh, freshnessWarning } };
-
-  if (!dataFresh) {
-    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: freshnessWarning });
-    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [freshnessWarning], orderPayload: null, result: null, error: null });
-    return res.json(envelope({ ...updated, freshnessWarning }));
+  // Rates freshness (observation dates) — same check as auto-execution.
+  const { checkFreshness } = require("../engine/autoExecute");
+  const freshness = checkFreshness();
+  logBase.freshnessSnapshot = { dataFresh: freshness.dataFresh, freshnessWarning: freshness.warning };
+  if (!freshness.dataFresh) {
+    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: freshness.warning });
+    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [freshness.warning], orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, freshnessWarning: freshness.warning }));
   }
 
-  if (!policyCheck.allowed) {
-    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: policyCheck.reasons.join("; ") });
-    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: policyCheck.reasons, orderPayload: null, result: null, error: null });
-    return res.json(envelope({ ...updated, policyReasons: policyCheck.reasons }));
-  }
-
-  // ── Live price fetch at approval time ──
-  let currentPrice = idea.entry;
-  let priceSource  = "cached";
-  let livePrice    = null;
+  // Broker state and price, then the shared gate. Nothing here falls back to
+  // idea.entry (a planning level) or to a cached daily close as a price.
+  let account = null, positions = null;
   try {
-    const livePriceResult = await fetchLivePrice(idea.ticker);
-    if (livePriceResult) {
-      currentPrice = livePriceResult.price;
-      priceSource  = livePriceResult.source;
-      livePrice    = livePriceResult.price;
-    }
-  } catch (_) {}
+    const acct = await alpaca.getAccount();
+    const eq = parseFloat(acct?.equity ?? acct?.portfolio_value);
+    account = Number.isFinite(eq) && eq > 0 ? { equity: eq, currency: acct?.currency || "USD" } : null;
+  } catch (err) { console.warn("[approve] account fetch failed:", err.message); }
+  try {
+    const p = await alpaca.getPositions();
+    positions = Array.isArray(p) ? p : null;
+  } catch (err) { console.warn("[approve] positions fetch failed:", err.message); }
 
-  // Position sizing
-  const portfolioData = cache.get("portfolio:data");
-  const accountEquityGBP = portfolioData?.totalGBP ?? 1110;
-  const usdgbp = portfolioData?.usdgbp ?? 0.7558;
-  const priceInGBP = currentPrice ? (alpaca.isSupported(idea.ticker) ? currentPrice * usdgbp : currentPrice) : null;
-  const sizing = (currentPrice && idea.stop && priceInGBP)
-    ? computeSize(currentPrice, idea.stop, accountEquityGBP, priceInGBP)
-    : { qty: 1, blocked: false };
+  const quote = await fetchLivePrice(idea.ticker);
+  const priceFact = quote ? { value: quote.price, executable: false, priceType: quote.priceType,
+                              observedAt: quote.date, observedAtPrecision: "date", source: quote.source } : null;
+  const fx = cache.getWithMeta("snapshot:fx")?.value || null;
 
-  if (sizing.blocked) {
-    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: sizing.blockReason });
-    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: [sizing.blockReason], orderPayload: null, result: null, error: null });
-    return res.json(envelope({ ...updated, sizingBlocked: sizing.blockReason }));
+  const prep = prepareOrder({ ticket: idea, priceFact, fx, account, positions });
+  if (!prep.ok) {
+    const note = `Blocked at ${prep.stage}: ${prep.reasons.join("; ")}`;
+    const updated = updateIdea(idea.id, { executionStatus: "SKIPPED", executionNote: note });
+    appendExecutionLog({ ...logBase, decision: "SKIPPED", reasons: prep.reasons, orderPayload: null, result: null, error: null });
+    return res.json(envelope({ ...updated, blockedAt: prep.stage, policyReasons: prep.reasons, livePrice: quote?.price ?? null, priceSource: quote?.source ?? null }));
   }
 
-  // Attempt paper order
   let order = null;
   let execError = null;
-  if (alpaca.isAutoExecuteEnabled() && executionPolicy.getConfig().tradingEnabled) {
-    try {
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const clientOrderId = `dispatch-${idea.ticker.toLowerCase()}-${idea.id.slice(0, 8)}-${dateStr}`;
-      const side  = idea.direction === "LONG" ? "buy" : "sell";
-
-      // Prefer bracket order when we have full numeric entry/stop/target
-      const useBracket = idea.entry && idea.stop && idea.target &&
-                         alpaca.isSupported(idea.ticker) &&
-                         process.env.USE_BRACKET_ORDERS === "true";
-      if (useBracket) {
-        order = await alpaca.placeBracketOrder(
-          idea.ticker, side, sizing.qty || 1,
-          idea.entry, idea.target, idea.stop, clientOrderId
-        );
-      } else {
-        order = await alpaca.placeOrder(idea.ticker, side, sizing.qty || 1, "market", clientOrderId);
-      }
-      executionPolicy.recordTrade(idea.ticker, sizing.notionalGBP || 100);
-    } catch (err) {
-      execError = err.message;
-    }
+  try {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const clientOrderId = `dispatch-${idea.ticker.toLowerCase()}-${idea.id.slice(0, 8)}-${dateStr}`;
+    const useBracket = Number.isFinite(idea.target) && Number.isFinite(idea.stop) && process.env.USE_BRACKET_ORDERS === "true";
+    order = useBracket
+      ? await alpaca.placeBracketOrder(idea.ticker, "buy", prep.qty, prep.price, idea.target, idea.stop, clientOrderId)
+      : await alpaca.placeOrder(idea.ticker, "buy", prep.qty, "market", clientOrderId);
+    executionPolicy.recordTrade(idea.ticker, prep.notionalGBP);
+  } catch (err) {
+    execError = err.message;
   }
 
-  const newStatus = order ? "EXECUTED" : (execError ? "FAILED" : "APPROVED");
+  const sizing = prep.sizing;
+  const newStatus = order ? "EXECUTED" : "FAILED";
   const updated = updateIdea(idea.id, { executionStatus: newStatus, executionNote: execError || null, alpacaOrderId: order?.id });
   appendExecutionLog({
     ...logBase, decision: newStatus, reasons: execError ? [execError] : [],
-    orderPayload: order ? { ticker: idea.ticker, side: idea.direction === "LONG" ? "buy" : "sell", qty: sizing.qty || 1 } : null,
+    orderPayload: order ? { ticker: idea.ticker, side: "buy", qty: prep.qty, notionalGBP: prep.notionalGBP } : null,
     result: order ? { orderId: order.id } : null, error: execError
   });
+  const priceSource = "executable quote";
+  const livePrice = prep.price;
 
   // Fire webhook for executed orders (fire-and-forget)
   if (order) {
@@ -566,7 +548,10 @@ router.post("/", requireWriteAuth, (req, res) => {
   // Run pre-trade risk check using cached portfolio data (or seeds as fallback)
   const portfolioData = cache.get("portfolio:data");
   const portfolioRows = portfolioData?.rows ?? [];
-  const totalGBP      = portfolioData?.totalGBP ?? seeds.POSITIONS_SEED.reduce((s, _p) => s, 1110);
+  // Was `seeds.POSITIONS_SEED.reduce((s, _p) => s, 1110)` — an elaborate way
+  // of writing 1110. The pre-trade risk check now runs against the real book
+  // or against zero, never against an invented one.
+  const totalGBP      = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
   const usdgbp        = portfolioData?.usdgbp   ?? seeds.FX_SEED.usdgbp.value;
 
   const riskCheck = runPreTradeCheck(body, portfolioRows, totalGBP, usdgbp);
@@ -621,114 +606,48 @@ router.delete("/:id", requireWriteAuth, (req, res) => {
 // portfolio + macro context. Uses Claude AI or falls back to deterministic.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Extract numeric value from a seed rate object or plain number. */
-function extractRateVal(obs, fallback) {
-  if (obs && typeof obs.value === "number") return obs.value;
-  if (typeof obs === "number") return obs;
-  return fallback;
-}
-
-/** Classify current macro regime from rates (mirrors brief.js). */
-function classifyRegime(r) {
-  const labels = [];
-  if      (r.t10y2y < 0)   labels.push("Inverted curve");
-  else if (r.t10y2y < 0.3) labels.push("Flat curve");
-  else                      labels.push("Bear steepener");
-  if      (r.dfii10 > 2.0) labels.push("High real yields");
-  else if (r.dfii10 > 1.5) labels.push("Elevated real yields");
-  if      (r.hy_spread > 4.5)                         labels.push("Credit stress");
-  else if (r.hy_spread > 3.5)                         labels.push("Risk-off");
-  else if (r.hy_spread > 3.0 && r.dfii10 > 1.5)      labels.push("Bear flattener");
-  if (r.dgs10 > 4.5) labels.push("Rates restrictive");
-  return labels.length ? labels.join(" + ") : "Broadly neutral";
-}
-
-/** Build portfolio context string for the AI prompt. */
-function buildPortfolioContext(rates, portfolioRows, totalGBP) {
-  const regime = classifyRegime(rates);
+/**
+ * buildPortfolioContext — the context string handed to the AI enrichment step.
+ *
+ * It used to end with a hardcoded "KEY EVENTS: FOMC 19 Mar (hold expected, dot
+ * plot critical) | AMD Q1 Earnings 22 Apr (guide $9.8B)" — a March 2026 calendar
+ * presented to the model as current on every call. Events now come from the
+ * dated calendar, or the prompt says there is none. Rates carry their dates.
+ */
+function buildPortfolioContext(rates, portfolioRows, totalGBP, ratesAsOf = {}) {
+  const { regime } = classifyLevels(rates);
   const rowLines = portfolioRows
     .map(r => {
       const pct = totalGBP > 0 && r.valGBP != null ? (r.valGBP / totalGBP * 100).toFixed(1) : "—";
-      return `  ${r.ticker}: ${pct}% portfolio weight${r.chg != null ? `, today ${r.chg >= 0 ? "+" : ""}${r.chg.toFixed(1)}%` : ""}`;
+      return `  ${r.ticker}: ${pct}% portfolio weight${r.chg != null ? `, latest change ${r.chg >= 0 ? "+" : ""}${r.chg.toFixed(1)}%` : ""}`;
     })
     .join("\n");
+  const fmtRate = (k, label) => Number.isFinite(rates[k])
+    ? `${label} ${rates[k].toFixed(2)}% (${ratesAsOf[k] || "date n/a"})` : `${label} unavailable`;
+
+  const cal = getCalendar();
+  const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+  const upcoming = cal.events.filter(e => e.at >= today).sort((a, b) => a.at - b.at).slice(0, 4);
+  const eventsLine = cal.available && upcoming.length
+    ? `KEY EVENTS (${cal.source}): ${upcoming.map(e => `${e.event} ${e.ticker} ${e.date}`).join("  |  ")}`
+    : `KEY EVENTS: none available — ${cal.reason || "no dated calendar loaded"}. Do not assume or invent event dates.`;
 
   return [
-    `MACRO REGIME: ${regime}`,
-    `FRED RATES:  10Y ${rates.dgs10.toFixed(2)}%  Real ${rates.dfii10.toFixed(2)}%  Breakeven ${rates.t10yie.toFixed(2)}%  HY OAS ${rates.hy_spread.toFixed(2)}%  Curve ${rates.t10y2y.toFixed(2)}%`,
-    `PORTFOLIO (total ~£${totalGBP.toFixed(0)}):`,
+    `MACRO LEVELS (shape/level labels only): ${regime}`,
+    `FRED END-OF-DAY OBSERVATIONS: ${fmtRate("dgs10", "10Y")}  ${fmtRate("dfii10", "Real")}  ${fmtRate("t10yie", "Breakeven")}  ${fmtRate("hy_spread", "HY OAS")}  ${fmtRate("t10y2y", "10Y-2Y")}`,
+    totalGBP > 0
+      ? `PORTFOLIO (total ~£${totalGBP.toFixed(0)}):`
+      : `PORTFOLIO (total value unavailable — do not infer position sizes):`,
     rowLines,
-    `KEY EVENTS:  FOMC 19 Mar (hold expected, dot plot critical)  |  AMD Q1 Earnings 22 Apr (guide $9.8B)`,
+    eventsLine,
   ].join("\n");
 }
 
-/** Deterministic ideas based on current regime — used when AI is unavailable. */
-function deterministicIdeas(rates, portfolioRows, totalGBP) {
-  function weight(ticker) {
-    const row = portfolioRows.find(r => r.ticker === ticker);
-    return (row?.valGBP != null && totalGBP > 0) ? row.valGBP / totalGBP * 100 : 0;
-  }
-
-  const ideas = [];
-  const amdPct  = weight("AMD");
-  const sglnPct = weight("SGLN");
-
-  // 1. AMD long — rate-sensitive growth / FOMC catalyst
-  if (amdPct < 20) {
-    ideas.push({
-      ticker:       "AMD",
-      direction:    "LONG",
-      thesis:       `Earnings momentum + macro catalyst play. AMD trades at a discount (real yields ${rates.dfii10.toFixed(2)}% compress growth P/E). MI450 GPU ramp on track for Q1 $9.8B guide. A dovish FOMC dot plot shift on 19 Mar mechanically re-rates growth multiples, delivering double benefit: lower discount rate + improved AI capex sentiment.`,
-      catalyst:     "FOMC dot plot shifts dovish on 19 Mar; real yield compression below 1.6%.",
-      entry:        192,
-      stop:         175,
-      target:       230,
-      invalidation: "MI450 hyperscaler order cancellations; Q1 miss >10% vs $9.8B guide; FOMC unexpectedly hawkish.",
-      horizon:      "3 months",
-      confidence:   62,
-      sizePct:      4,
-      notes:        `Strategy: earnings momentum + rate catalyst. Current weight ${amdPct.toFixed(1)}%. High beta (1.82) — size conservatively while real yields >1.5%.`,
-    });
-  }
-
-  // 2. SGLN long — macro hedge / risk-off
-  if (sglnPct < 25 && (rates.hy_spread > 3.0 || rates.dfii10 > 1.5)) {
-    ideas.push({
-      ticker:       "SGLN",
-      direction:    "LONG",
-      thesis:       `Macro hedge strategy. HY OAS at ${rates.hy_spread.toFixed(2)}% signals credit stress building; real yields at ${rates.dfii10.toFixed(2)}% support gold's store-of-value bid. SGLN's negative beta (−0.08) earns its keep passively without active management. Risk-off / high-real-yield regime typically favours gold over equities.`,
-      catalyst:     "HY spread widening above 3.5% or equity drawdown >5%.",
-      entry:        74.00,
-      stop:         70.50,
-      target:       82.00,
-      invalidation: "HY spread compression below 2.5% or real yield decline below 1.0% on confirmed Fed pivot.",
-      horizon:      "3 months",
-      confidence:   70,
-      sizePct:      3,
-      notes:        `Strategy: macro hedge / risk-off. Current weight ${sglnPct.toFixed(1)}%. Keep total SGLN below 25%.`,
-    });
-  }
-
-  // 3. HBKS long — duration play / flat curve
-  if (rates.t10y2y < 0.5) {
-    ideas.push({
-      ticker:       "HBKS",
-      direction:    "LONG",
-      thesis:       `Late-cycle duration long strategy. Yield curve at ${rates.t10y2y.toFixed(2)}% points to late-cycle dynamics where the front end reprices lower first on any growth scare. Halal sukuk provides compliant duration + income. Negative equity correlation provides ballast against AMD drawdown risk in the portfolio.`,
-      catalyst:     "Fed signals June 2026 rate cuts in dot plot; US ISM Manufacturing <48 for two consecutive months.",
-      entry:        8.65,
-      stop:         8.25,
-      target:       9.50,
-      invalidation: "Bear steepener — long-end yield sell-off above 4.75% on inflationary re-acceleration.",
-      horizon:      "6 months",
-      confidence:   65,
-      sizePct:      3,
-      notes:        "Strategy: late-cycle duration long. Halal-compliant. Diversifies AMD equity concentration risk.",
-    });
-  }
-
-  return ideas.slice(0, 3);
-}
+// deterministicIdeas() was removed. It was the "AI unavailable" fallback and
+// returned fixed ideas with hardcoded entries (AMD 192, SGLN 74.00, HBKS 8.65),
+// a 19 Mar FOMC catalyst, an AMD "$9.8B guide", betas, and HBKS described as a
+// halal sukuk duration fund — none sourced. When the engine produces nothing,
+// the route now says so and why.
 
 router.post("/generate", requireWriteAuth, async (req, res) => {
   const count   = Math.min(Math.max(parseInt(req.body?.count || 5, 10), 1), 10);
@@ -744,19 +663,10 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
   try {
     ctx = buildCtx(rawRates, portfolioData, watchlistRaw);
   } catch (err) {
-    console.warn("[ideas/generate] buildCtx failed, using legacy path:", err.message);
-    // Legacy fallback: use old deterministic path
-    const rates = {
-      dgs10:     extractRateVal(rawRates?.dgs10,     seeds.RATES_SEED.dgs10.value),
-      dfii10:    extractRateVal(rawRates?.dfii10,    seeds.RATES_SEED.dfii10.value),
-      t10yie:    extractRateVal(rawRates?.t10yie,    seeds.RATES_SEED.t10yie.value),
-      hy_spread: extractRateVal(rawRates?.hy_spread, seeds.RATES_SEED.hy_spread.value),
-      t10y2y:    extractRateVal(rawRates?.t10y2y,    seeds.RATES_SEED.t10y2y.value),
-    };
-    const portfolioRows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({ ticker: p.ticker, valGBP: null, chg: null }));
-    const totalGBP      = portfolioData?.totalGBP ?? 1110;
-    const ideas = deterministicIdeas(rates, portfolioRows, totalGBP);
-    return res.json({ source: "deterministic", fetchedAt: now(), stale: false, data: { ideas, regime: classifyRegime(rates) } });
+    console.warn("[ideas/generate] buildCtx failed:", err.message);
+    return res.status(503).json({ source: "unavailable", fetchedAt: now(), stale: true,
+      data: { ideas: [], universeScan: [], regime: "Unavailable", engineVersion: "1.0", alpacaOrders: [], persistedCount: 0,
+              reason: `Engine context could not be built: ${err.message}` } });
   }
 
   // ── Try idea engine (deterministic playbooks) ──
@@ -820,8 +730,11 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
       budget.checkAndIncrement(); // throws BudgetError if over daily/monthly cap
       const rates = ctx.rates;
       const portfolioRows = portfolioData?.rows ?? [];
-      const totalGBP = portfolioData?.totalGBP ?? 1110;
-      const aiContext = buildPortfolioContext(rates, portfolioRows, totalGBP);
+      // £1,110 used to stand in for a missing portfolio value here, so the model
+      // was handed invented weights described as the owner's book. Pass null and
+      // let buildPortfolioContext render "—" for weights it cannot compute.
+      const totalGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : null;
+      const aiContext = buildPortfolioContext(rates, portfolioRows, totalGBP, ctx.ratesAsOf);
       // Enrich top 2 ideas — merge AI narrative into rationale, preserve engine structure
       const aiIdeas = await generateTradeIdeas(aiContext, Math.min(engineIdeas.length, 2));
       for (let i = 0; i < Math.min(aiIdeas.length, engineIdeas.length); i++) {
@@ -851,13 +764,12 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
     console.warn("[ideas/generate] Universe scan failed:", err.message);
   }
 
-  // ── Fallback: if engine produced nothing, use legacy deterministic ideas ──
-  const finalIdeas = engineIdeas.length > 0 ? engineIdeas : (() => {
-    const rates = ctx.rates;
-    const portfolioRows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({ ticker: p.ticker, valGBP: null, chg: null }));
-    const totalGBP = portfolioData?.totalGBP ?? 1110;
-    return deterministicIdeas(rates, portfolioRows, totalGBP);
-  })();
+  // No fallback ideas. If the engine produced nothing, say why.
+  const finalIdeas = engineIdeas;
+  const noIdeasReason = finalIdeas.length ? null
+    : !ctx.dataQuality?.ratesComplete
+      ? `No ideas: rate data incomplete (missing ${ctx.dataQuality.missingRates.join(", ")}). Refresh the snapshot.`
+      : "No playbook triggered on current levels.";
 
   res.json({
     source:    source,
@@ -870,6 +782,9 @@ router.post("/generate", requireWriteAuth, async (req, res) => {
       engineVersion: "1.0",
       alpacaOrders,
       persistedCount: persistedIdeas.length,
+      dataQuality:   ctx.dataQuality,
+      ratesAsOf:     ctx.ratesAsOf,
+      ...(noIdeasReason ? { reason: noIdeasReason } : {}),
       ...(freshnessWarning ? { freshnessWarning } : {}),
       ...(engineError ? { engineError } : {}),
     },

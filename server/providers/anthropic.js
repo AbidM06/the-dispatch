@@ -13,6 +13,7 @@
  */
 
 const { fetchWithTimeout, withRetry, isRetryable } = require("../retry");
+const { validateResearchReport } = require("../schemas");
 const budget   = require("./budget");
 const { callOpenAI } = require("./openai");
 
@@ -414,20 +415,38 @@ function stripCiteTags(str) {
  * Out-of-range indices are dropped rather than guessed at.
  */
 function parseCiteTags(str, sources = []) {
-  if (typeof str !== "string") return { text: str, cited: [] };
+  if (typeof str !== "string") return { text: str, cited: [], resolved: 0, unresolved: 0 };
 
   const cited = new Set();
+  let resolved = 0, unresolved = 0;
   const CITE  = /[<(]cite[^>]*\bindex\s*=\s*"([^"]*)"[^>]*>([\s\S]*?)<\/cite>/gi;
 
-  const text = str.replace(CITE, (_m, index, inner) => {
+  let text = str.replace(CITE, (_m, index, inner) => {
     const resultIdx = parseInt(String(index).split("-")[0], 10);
-    if (Number.isInteger(resultIdx) && sources[resultIdx]) cited.add(resultIdx);
-    return inner;
+    if (Number.isInteger(resultIdx) && sources[resultIdx]) {
+      cited.add(resultIdx);
+      resolved++;
+      return inner;
+    }
+    // The model marked this claim as cited, but the index points at no source
+    // we received. Deleting the tag silently would leave the claim looking as
+    // well-supported as its neighbours. Keep the text, flag it visibly.
+    unresolved++;
+    return `${inner} [citation unresolved]`;
+  });
+
+  // Malformed or index-less tags: the claim was presented as cited but cannot
+  // be traced. Same treatment.
+  text = text.replace(/[<(]cite(?![^>]*\bindex\s*=)[^>]*>([\s\S]*?)<\/cite>/gi, (_m, inner) => {
+    unresolved++;
+    return `${inner} [citation unresolved]`;
   });
 
   return {
-    text: stripCiteTags(text),           // sweep any malformed or index-less tags
+    text: stripCiteTags(text),           // sweep any orphaned fragments
     cited: [...cited].map(i => sources[i]),
+    resolved,
+    unresolved,
   };
 }
 
@@ -441,12 +460,15 @@ function parseCiteTags(str, sources = []) {
  */
 function attachProvenance(obj, sources = []) {
   const usedUrls = new Set();
+  let resolved = 0, unresolved = 0;
 
   function walk(node) {
     if (typeof node === "string") {
-      const { text, cited } = parseCiteTags(node, sources);
-      cited.forEach(src => usedUrls.add(src.url));
-      return text;
+      const r = parseCiteTags(node, sources);
+      r.cited.forEach(src => usedUrls.add(src.url));
+      resolved   += r.resolved;
+      unresolved += r.unresolved;
+      return r.text;
     }
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === "object") {
@@ -462,6 +484,7 @@ function attachProvenance(obj, sources = []) {
     clean,
     citedSources: sources.filter(s => usedUrls.has(s.url)),
     allSources:   sources,
+    citationStats: { resolved, unresolved },
   };
 }
 
@@ -479,13 +502,17 @@ async function fetchAllAnalysis(newsContext = "") {
   const isoDate = new Date().toISOString().slice(0, 10);
   const system  = `Today is ${today}. You MUST use web_search before answering. Return ONLY a single valid JSON object — no markdown fences, no preamble, no commentary.`;
 
-  const prompt = `Search for the latest financial and geopolitical news as of ${today}. Focus on: US-Iran conflict, tariffs, AI semiconductors, Federal Reserve, credit markets, EM currencies, Bank of Japan.
+  // The topic list and the seven risk titles used to be fixed in this prompt:
+  // "US/Israel-Iran War", "US Tariffs Canada/Mexico", "AMD ASIC Competitive
+  // Threat", "Japan YCC Exit"… Asking the model to score a named war on every
+  // run presupposes the war. It now has to find the risks from its searches.
+  const prompt = `Search for the latest financial and geopolitical news as of ${today} relevant to these holdings: AMD, and UK-listed ETFs HIES, HIUS, HIJS (equity funds) and SGLN (physical gold). Cover whatever is actually driving markets — rates, credit, FX, equities, commodities, policy, geopolitics. Do NOT assume any particular event is happening: include an item only if your search found it, and give the date of the source.
 
 Return a single JSON object with EXACTLY these three keys:
 
-"events": array of exactly 5 objects, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD", "detail": string (one concise sentence with specific data) }
+"events": array of up to 5 objects, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD" (date of the underlying news, not today unless it happened today), "detail": string (one concise sentence with specific data and where it came from) }
 
-"risks": array of exactly 7 objects in this order — (1) US/Israel-Iran War, (2) US Tariffs Canada/Mexico, (3) AMD ASIC Competitive Threat, (4) Rising Real Yields, (5) EM Currency Stress, (6) Credit Spread Widening, (7) Japan YCC Exit — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100, "date": "${isoDate}", "detail": string (2 sentences max, specific data), "affects": string }
+"risks": array of 3 to 7 objects, the most material current risks YOUR SEARCHES found for these holdings, ordered by materiality — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100 (your judgement, not a probability), "date": "YYYY-MM-DD" (date of the evidence), "detail": string (2 sentences max, specific data), "affects": string }
 
 "econ": array of exactly 3 objects: { "id": number, "label": string, "color": string, "bg": string, "border": string, "date": "${isoDate}", "title": string, "body": string (3 sentences max, specific current data) }
 Labels/colors: ["MACRO THEME","RATES ANALYSIS","EQUITY DEEP DIVE"] / ["#c8392b","#1a3a5c","#2c6e49"]
@@ -554,10 +581,10 @@ async function fetchRiskScores() {
   const today = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
   const system = `Today is ${today}. Use web_search. Return ONLY valid JSON array.`;
-  const prompt = `Search latest news on 7 portfolio risks (AMD, HIES, HIUS, HIJS, SGLN, HBKS): (1) US/Israel-Iran conflict, (2) US tariffs Canada/Mexico, (3) AMD ASIC threats, (4) US real yields, (5) EM currency stress, (6) HY credit spreads, (7) BoJ normalisation. Return JSON array of 7 objects: { "title", "level": "HIGH"|"MEDIUM"|"LOW", "score": 0-100, "date": "${isoDate}", "detail" (2 sentences), "affects" }. Be concise.`;
+  const prompt = `Search the latest news for the most material current risks to these holdings: AMD, HIES, HIUS, HIJS, SGLN. Do not assume any specific event is occurring — include only risks your searches found. Return a JSON array of 3 to 7 objects: { "title", "level": "HIGH"|"MEDIUM"|"LOW", "score": 0-100 (judgement, not a probability), "date": "YYYY-MM-DD" (date of the evidence), "detail" (2 sentences), "affects" }. Be concise.`;
   const raw  = await callClaude(system, prompt, 1600);
   const data = extractJSON(raw, "array");
-  if (!data || data.length < 7) throw new Error("Insufficient risk items from AI");
+  if (!data || data.length < 1) throw new Error("No risk items from AI");
   return data.slice(0, 7).map((r, i) => ({ ...r, id: i + 1 }));
 }
 
@@ -566,7 +593,7 @@ async function fetchEconAnalysis() {
   const today = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
   const system = `Today is ${today}. Use web_search. Return ONLY valid JSON array.`;
-  const prompt = `Search today's macro/markets. Return JSON array of 3 objects — MACRO THEME (Iran/oil), RATES ANALYSIS (Fed/yields), EQUITY DEEP DIVE (AMD). Each: { "id", "label", "color", "bg", "border", "date": "${isoDate}", "title", "body" (3 sentences, specific data) }. Colors: #c8392b,#1a3a5c,#2c6e49. Be concise.`;
+  const prompt = `Search today's macro/markets. Return JSON array of 3 objects — MACRO THEME (whatever your searches show is the dominant theme; do not assume one), RATES ANALYSIS (Fed/yields), EQUITY DEEP DIVE (AMD). Each: { "id", "label", "color", "bg", "border", "date": "YYYY-MM-DD" (date of the evidence), "title", "body" (3 sentences, specific data with sources) }. Colors: #c8392b,#1a3a5c,#2c6e49. Be concise.`;
   const raw  = await callClaude(system, prompt, 2000);
   const data = extractJSON(raw, "array");
   if (!data || data.length !== 3) throw new Error("Expected 3 econ items");
@@ -629,7 +656,7 @@ async function generateTradeIdeas(portfolioContext, count = 3) {
     messages:   [{
       role:    "user",
       content: `Based on the portfolio and market context below, generate exactly ${count} trade idea(s).\n` +
-               `Use ONLY instruments from: AMD, SGLN, HIES, HIUS, HIJS, HBKS, NVDA, MU.\n\n` +
+               `Use ONLY instruments from: AMD, SGLN, HIES, HIUS, HIJS, NVDA, MU. (HBKS is excluded while its identity is unverified.)\n\n` +
                `${portfolioContext}\n\n` +
                `Return JSON:\n` +
                `{ "ideas": [ {\n` +
@@ -732,7 +759,7 @@ CRITICAL OUTPUT RULES — violating any of these makes the note unusable:
 
 Return a single JSON object with ALL of the following keys:
 
-"headline": string — one sentence with the dominant theme and 2-3 specific levels. Example: "10Y at 4.37% (+5bps) as oil hits $111 on Iran escalation — SPX futures -0.8%, VIX 25"
+"headline": string — one sentence with the dominant theme and 2-3 specific levels, each of which must appear in the verified data or a search result. Form: "<instrument> at <level> (<change>) as <driver> — <instrument> <change>". Do not reuse any figure from this instruction.
 
 "regimeLabel": string — 2-4 words
 
@@ -742,17 +769,17 @@ Return a single JSON object with ALL of the following keys:
   "dominantTheme": string — 1 sentence, the single biggest force in markets right now
 
 "keyLevels": object — append source tag to each value, return null if unavailable:
-  "spxFutures": string or null (e.g. "5,210 (-0.8%) (web search)")
-  "us10y": string or null (e.g. "4.37% (+5bps) (web search)")
+  "spxFutures": string or null — form "<level> (<% change>) (<source tag>)"
+  "us10y": string or null — form "<yield %> (<bp change>) (<source tag>)"
   "us2y": string or null
   "dxy": string or null
   "cable": string or null — GBP/USD ONLY, null if not found
   "brent": string or null
   "gold": string or null — ONE price only, math-checked against pct move
   "vix": string or null
-  "hyOas": string or null — must include overnight bps move (e.g. "376bps (+8bps overnight) (web search)")
-  "vix3m": string or null — CBOE 3-Month VIX level with source tag (e.g. "23.1 (Yahoo Finance)")
-  "skew": string or null — CBOE SKEW Index level with interpretation (e.g. "132 — elevated tail risk (Yahoo Finance)")
+  "hyOas": string or null — must include overnight bp move, form "<bp> (<bp change> overnight) (<source tag>)"
+  "vix3m": string or null — CBOE 3-Month VIX level with source tag, form "<level> (<source>)"
+  "skew": string or null — CBOE SKEW Index level with interpretation, form "<level> — <interpretation> (<source>)"
 
 "scenarios": object:
   "base":  { "probability": integer, "title": string, "narrative": string (2 sentences with specific thresholds), "keyAssets": string }
@@ -918,22 +945,34 @@ ACCURACY RULES — these override style and formatting:
 2. Every figure you state must be either (a) from the verified block, (b) found via web_search this session, or (c) declared as your own estimate. There is no fourth category — do not state a number you cannot place in one of these three.
 3. If you cannot verify something, say so plainly. "Not verifiable as of today" is an acceptable answer. An invented number that looks plausible is not.
 4. Placeholder text in the schema marks the TYPE of a field, not a target value. Do not anchor on any example figure it contains.
-5. Where the context supplies a derived proxy, cite it as a proxy. Never restate a proxy as a market-implied probability.`;
+5. Where the context supplies a derived proxy, cite it as a proxy. Never restate a proxy as a market-implied probability.
+
+DISCLOSURE — required on EVERY report type, in addition to the fields your schema lists:
+  "estimates": [ { "figure": "<the number you asserted>", "field": "<where it appears>", "basis": "<what it derives from>", "confidence": "HIGH|MEDIUM|LOW" } ],
+  "unverified": [ "<any claim you could not confirm from the verified block or a web search>" ]
+Both keys must be present and must be arrays. Use [] only when genuinely empty —
+an empty "estimates" on a report full of forecasts is a failure, not a pass.
+This is rule 2 made machine-checkable: every number you state lands in the
+verified block, in a search result, or in "estimates".`;
 
 /**
- * REPORT_VALIDATORS — the minimum shape each report type must have to be usable.
+ * REPORT_VALIDATORS — runtime contract per report type, backed by the Zod
+ * schemas in server/schemas (ResearchSchemas). Kept as boolean functions for
+ * existing callers; finalizeResearchReport uses validateResearchReport directly
+ * so a rejection names the missing fields.
  *
- * A batched result and a synchronous result go through the same gate, so a
- * malformed report cannot reach the cache by taking the cheaper path.
+ * The synchronous path used to run its own weaker per-branch checks and never
+ * called these, so disclosure enforcement applied only to batched reports. Both
+ * paths now go through finalizeResearchReport.
  */
-const REPORT_VALIDATORS = {
-  fx:          d => Boolean(d && d.title && Array.isArray(d.pairViews)),
-  rates:       d => Boolean(d && d.title && d.thePuzzle),
-  thematic:    d => Boolean(d && d.title && Array.isArray(d.keyThemes) && Array.isArray(d.predictions)),
-  equity:      d => Boolean(d && d.title && d.epsOutlook),
-  commodities: d => Boolean(d && d.title && Array.isArray(d.keyTakeaways)),
-  macro:       d => Boolean(d && d.title && d.scenarios),
-};
+function hasDisclosures(d) {
+  return Boolean(d) && Array.isArray(d.estimates) && Array.isArray(d.unverified);
+}
+
+const REPORT_VALIDATORS = Object.fromEntries(
+  ["fx", "rates", "thematic", "equity", "commodities", "macro"]
+    .map(t => [t, d => validateResearchReport(t, d).ok])
+);
 
 /**
  * buildResearchSpec — the prompt for a report, without calling the API.
@@ -948,23 +987,60 @@ async function buildResearchSpec(ratesContext = "", topic = "", reportType = "ma
 }
 
 /**
- * finalizeResearchReport — parse, validate and attach provenance to raw model
- * text. Shared by the synchronous and batched paths.
+ * describeGrounding — what "grounded" does and does not mean, as data.
+ *
+ * `grounded: true` used to be set whenever the code path COULD search, even if
+ * no source came back, and it read as "verified". It now means only: web search
+ * was available on this tier AND returned at least one source. Neither tool use
+ * nor a citation establishes that every claim is verified — resolved citations
+ * link specific passages to specific pages, and everything else is the model's.
  */
-function finalizeResearchReport(reportType, rawText, sources = [], grounded = true) {
+function describeGrounding({ searchEnabled, tier, sources, stats }) {
+  const sourcesReturned = sources.length;
+  return {
+    searchEnabled:        Boolean(searchEnabled),
+    tier:                 tier || (searchEnabled ? "claude" : "no-search"),
+    sourcesReturned,
+    resolvedCitations:    stats.resolved,
+    unresolvedCitations:  stats.unresolved,
+    grounded:             Boolean(searchEnabled) && sourcesReturned > 0,
+    meaning: "grounded = search was available and returned sources. It does not mean every claim was verified: only passages with a resolved citation are linked to a page; figures in the VERIFIED MARKET DATA block come from FRED; everything else is model output (see estimates/unverified).",
+  };
+}
+
+/**
+ * finalizeResearchReport — parse, validate and attach provenance to raw model
+ * text. The ONE exit for both the synchronous and the batched path, so the two
+ * cannot diverge on what they accept or on the provenance they carry.
+ *
+ * @param {string} reportType
+ * @param {string} rawText
+ * @param {object[]} sources  web_search results, in result-index order
+ * @param {boolean|{searchEnabled?:boolean, tier?:string}} meta
+ *        legacy boolean = "search was enabled on this call"
+ */
+function finalizeResearchReport(reportType, rawText, sources = [], meta = {}) {
+  const m = typeof meta === "boolean" ? { searchEnabled: meta } : (meta || {});
+  const searchEnabled = m.searchEnabled !== false;
+
   const data = extractJSON(rawText, "object", { preserveCitations: true });
-  const isValid = REPORT_VALIDATORS[reportType] || REPORT_VALIDATORS.macro;
-  if (!isValid(data)) {
-    throw new Error(`finalizeResearchReport[${reportType}]: could not parse a usable JSON report`);
+  const check = validateResearchReport(reportType, data);
+  if (!check.ok) {
+    const err = new Error(`finalizeResearchReport[${reportType}]: report failed its contract — ${check.errors.slice(0, 8).join("; ")}`);
+    err.code   = "REPORT_SCHEMA_INVALID";
+    err.issues = check.errors;
+    throw err;
   }
-  const { clean, citedSources, allSources } = attachProvenance(data, sources);
+  const { clean, citedSources, allSources, citationStats } = attachProvenance(data, sources);
+  const grounding = describeGrounding({ searchEnabled, tier: m.tier, sources, stats: citationStats });
   return {
     ...clean,
     reportType,
     generatedAt: new Date().toISOString(),
     citedSources,
     allSources,
-    grounded: grounded !== false,
+    grounding,
+    grounded: grounding.grounded,
   };
 }
 
@@ -980,7 +1056,7 @@ function finalizeResearchReport(reportType, rawText, sources = [], grounded = tr
  *  - Market implications section (rates, equities, credit, FX)
  *
  * Cached 24h — call is ~$0.015, generated once daily unless force-refreshed.
- * topic: optional focus (e.g. "US tariffs", "Iran geopolitics", "Fed policy")
+ * topic: optional focus chosen by the user
  */
 async function fetchResearchReport(ratesContext = "", topic = "", reportType = "macro", { specOnly = false } = {}) {
   const today   = todayString();
@@ -1000,7 +1076,7 @@ Use web_search to find current G10 FX rates, CB statements, oil prices, CFTC pos
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<punchy headline like Think Outside the Barrel>",
+  "title": "<punchy headline naming the dominant FX driver your research found>",
   "subtitle": "<one sentence: key tension in FX markets right now>",
   "date": "${isoDate}",
   "keyTakeaways": [
@@ -1012,15 +1088,13 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "thesis": "<max 2 sentences — dominant driver of G10 FX today>",
   "framework": "<max 2 sentences — analytical lens that explains the price action>",
   "pairViews": [
-    { "pair": "EUR/USD", "direction": "SHORT", "type": "conviction", "rationale": "<max 2 sentences>", "horizon": "3 months" },
-    { "pair": "USD/JPY", "direction": "LONG", "type": "conviction", "rationale": "<max 2 sentences>", "horizon": "near-term" },
-    { "pair": "AUD/NZD", "direction": "LONG", "type": "normalisation", "rationale": "<max 2 sentences>", "horizon": "1-3 months" },
-    { "pair": "EUR/NOK", "direction": "SHORT", "type": "normalisation", "rationale": "<max 2 sentences>", "horizon": "medium-term" }
+    { "pair": "<G10 pair your analysis selects>", "direction": "<LONG | SHORT | NEUTRAL>", "type": "<conviction | normalisation>", "rationale": "<max 2 sentences>", "horizon": "<horizon>" }
+    // 3-5 entries; pairs and directions are YOUR conclusions, none are implied by this template
   ],
   "cbReactionFunctions": [
-    { "bank": "Federal Reserve", "stance": "<e.g. Hawkish hold>", "rationale": "<max 1 sentence>" },
-    { "bank": "Bank of Japan", "stance": "<e.g. Slow normaliser>", "rationale": "<max 1 sentence>" },
-    { "bank": "ECB", "stance": "<e.g. Gradual easer>", "rationale": "<max 1 sentence>" }
+    { "bank": "Federal Reserve", "stance": "<stance, per a cited statement>", "rationale": "<max 1 sentence>" },
+    { "bank": "Bank of Japan", "stance": "<stance, per a cited statement>", "rationale": "<max 1 sentence>" },
+    { "bank": "ECB", "stance": "<stance, per a cited statement>", "rationale": "<max 1 sentence>" }
   ],
   "tradeBarbell": {
     "hedges": ["<near-term hedge 1>", "<near-term hedge 2>"],
@@ -1032,13 +1106,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "fx", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
-    const data = extractJSON(raw, "object", { preserveCitations: true });
-    if (!data || !data.title || !Array.isArray(data.pairViews)) {
-      throw new Error("fetchResearchReport[fx]: could not parse JSON response");
-    }
-    const { clean, citedSources, allSources } = attachProvenance(data, sources);
-    return { ...clean, reportType: "fx", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
+    const { text: raw, sources, grounded, tier } = await callClaudeSourced(system, prompt, 4000);
+    return finalizeResearchReport("fx", raw, sources, { searchEnabled: grounded !== false, tier });
   }
 
   // ── Rates & Carry Deep-Dive (MS G10 FX style) ────────────────────────────
@@ -1055,7 +1124,7 @@ Use web_search to find CFTC positioning, CB minutes, real yield differentials, a
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<specific title like Linking the JPY Carry Trade to JPY Weakness>",
+  "title": "<specific title naming the puzzle your research found>",
   "subtitle": "<the central paradox in one sentence>",
   "date": "${isoDate}",
   "keyTakeaways": [
@@ -1075,21 +1144,15 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
     { "catalyst": "<event>", "impact": "MIXED", "detail": "<max 1 sentence>" }
   ],
   "levelTargets": [
-    { "pair": "USD/JPY", "target": "<e.g. 145>", "rationale": "<max 1 sentence>" },
-    { "pair": "EUR/USD", "target": "<e.g. 1.05-1.09>", "rationale": "<max 1 sentence>" }
+    { "pair": "<pair>", "target": "<level or range>", "rationale": "<max 1 sentence>" }
   ]
 }
 
 MS language: "We believe", "In our conversations with clients". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "rates", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
-    const data = extractJSON(raw, "object", { preserveCitations: true });
-    if (!data || !data.title || !data.thePuzzle) {
-      throw new Error("fetchResearchReport[rates]: could not parse JSON response");
-    }
-    const { clean, citedSources, allSources } = attachProvenance(data, sources);
-    return { ...clean, reportType: "rates", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
+    const { text: raw, sources, grounded, tier } = await callClaudeSourced(system, prompt, 4000);
+    return finalizeResearchReport("rates", raw, sources, { searchEnabled: grounded !== false, tier });
   }
 
   // ── Thematic Analysis (MS Thematic Lens style) ────────────────────────────
@@ -1138,13 +1201,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 Use MS language: "We believe", "Key Theme: X". Return pure JSON only — no extra text outside the JSON object.`;
 
     if (specOnly) return { reportType: "thematic", system, prompt, maxTokens: 5000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 5000);
-    const data = extractJSON(raw, "object", { preserveCitations: true });
-    if (!data || !data.title || !Array.isArray(data.keyThemes) || !Array.isArray(data.predictions)) {
-      throw new Error("fetchResearchReport[thematic]: could not parse JSON response");
-    }
-    const { clean, citedSources, allSources } = attachProvenance(data, sources);
-    return { ...clean, reportType: "thematic", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
+    const { text: raw, sources, grounded, tier } = await callWithFallbackSourced(system, prompt, 5000);
+    return finalizeResearchReport("thematic", raw, sources, { searchEnabled: grounded !== false, tier });
   }
 
   // ── Equity Views (GS US Equity Views style) ─────────────────────────────
@@ -1156,7 +1214,7 @@ Use MS language: "We believe", "Key Theme: X". Return pure JSON only — no extr
   //
   // Placeholder values are deliberately type descriptors ("<percent>") rather than
   // worked examples. Concrete examples in a template act as anchors — a template
-  // reading "<e.g. 46% of index EPS growth>" reliably produced reports asserting 46%.
+  // reading "<value>" reliably produced reports asserting 46%.
   if (reportType === "equity") {
     const system = `Today is ${today}. You are a Goldman Sachs portfolio strategy analyst producing a US Equity Views research note.
 Declare every forecast figure you produce yourself in the "estimates" array.
@@ -1259,20 +1317,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 Include at least 4 entries in "risks" and cover every channel that the verified data flags as elevated. Populate "estimates" with every forecast figure you produced yourself — that array is what separates your projections from measured data, so an empty array on a report full of forecasts is wrong. Use GS language: "We forecast", "We estimate", "We expect". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "equity", system, prompt, maxTokens: 8000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
-    const data = extractJSON(raw, "object", { preserveCitations: true });
-    if (!data || !data.title || !data.epsOutlook) {
-      throw new Error("fetchResearchReport[equity]: could not parse JSON response");
-    }
-    const { clean, citedSources, allSources } = attachProvenance(data, sources);
-    return {
-      ...clean,
-      reportType:   "equity",
-      generatedAt:  new Date().toISOString(),
-      citedSources,
-      allSources,
-      grounded:     grounded !== false,
-    };
+    const { text: raw, sources, grounded, tier } = await callWithFallbackSourced(system, prompt, 8000);
+    return finalizeResearchReport("equity", raw, sources, { searchEnabled: grounded !== false, tier });
   }
 
 
@@ -1290,7 +1336,7 @@ Use web_search to find: current Brent/WTI/gold/copper prices, OPEC+ production f
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<GS-style punchy title e.g. 'Mounting Upside Risks to Oil Prices From Hormuz'>",
+  "title": "<GS-style punchy title naming the driver your searches found>",
   "subtitle": "<one sentence — the core tension: supply shock vs demand response>",
   "reportType": "commodities",
   "date": "${isoDate}",
@@ -1308,13 +1354,13 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
     "balance": "<1-2 sentences — market balance: surplus/deficit in mb/d or metric tons, current vs 5-year average inventory.>"
   },
   "price_targets": [
-    { "commodity": "<e.g. Brent Crude>", "current": "<$/bbl>", "dispatch_base": "<$/bbl 3m>", "dispatch_bull": "<$/bbl>", "dispatch_bear": "<$/bbl>", "rationale": "<1 sentence>" },
-    { "commodity": "<e.g. Gold>", "current": "<$/oz>", "dispatch_base": "<$/oz 3m>", "dispatch_bull": "<$/oz>", "dispatch_bear": "<$/oz>", "rationale": "<1 sentence>" }
+    { "commodity": "<commodity>", "current": "<$/bbl>", "dispatch_base": "<$/bbl 3m>", "dispatch_bull": "<$/bbl>", "dispatch_bear": "<$/bbl>", "rationale": "<1 sentence>" },
+    { "commodity": "<commodity>", "current": "<$/oz>", "dispatch_base": "<$/oz 3m>", "dispatch_bull": "<$/oz>", "dispatch_bear": "<$/oz>", "rationale": "<1 sentence>" }
   ],
   "scenarios": {
-    "bear": { "label": "Bear", "probability": "<e.g. 20%>", "trigger": "<what causes this>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
-    "base": { "label": "Base", "probability": "<e.g. 55%>", "trigger": "<conditions for base case>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
-    "bull": { "label": "Bull", "probability": "<e.g. 25%>", "trigger": "<what causes upside>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" }
+    "bear": { "label": "Bear", "probability": "<value>", "trigger": "<what causes this>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
+    "base": { "label": "Base", "probability": "<value>", "trigger": "<conditions for base case>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
+    "bull": { "label": "Bull", "probability": "<value>", "trigger": "<what causes upside>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" }
   },
   "scenario_chart": [
     { "period": "NOW", "bear": null, "base": null, "bull": null, "actual": <current price as number> },
@@ -1323,7 +1369,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
     { "period": "Q4-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
     { "period": "Q1-27", "bear": <number>, "base": <number>, "bull": <number>, "actual": null }
   ],
-  "scenario_chart_label": "<e.g. 'Brent Crude ($/bbl)' or 'Gold ($/oz)'>",
+  "scenario_chart_label": "<value>",
   "dispatch_angle": {
     "headline": "<max 12 words — the overlooked second-order consequence>",
     "mechanism": "<3 sentences — the causal chain A → B → C → D that consensus is missing. Specific magnitudes.>",
@@ -1340,22 +1386,17 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "macro_linkages": "<2-3 sentences — how commodity moves feed through to FX (petrocurrencies, EM terms of trade), rates (inflation pass-through), and equities (sector rotation).>",
   "key_watchpoints": ["<data release or event to watch 1>", "<watchpoint 2>", "<watchpoint 3>"],
   "live_market_data": [
-    { "label": "<e.g. Brent Crude>", "value": "<e.g. $112.40/bbl>", "change": "<e.g. +1.2% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
-    { "label": "<e.g. WTI Crude>",   "value": "<e.g. $108.20/bbl>", "change": "<e.g. +0.8% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
-    { "label": "<e.g. Henry Hub NG>","value": "<e.g. $3.10/mmbtu>","change": "<e.g. -0.5% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" }
+    { "label": "<commodity>", "value": "<value>", "change": "<value>", "direction": "<up|down|flat>", "source": "<value>", "as_of": "<value>" },
+    { "label": "<value>",   "value": "<value>", "change": "<value>", "direction": "<up|down|flat>", "source": "<value>", "as_of": "<value>" },
+    { "label": "<value>","value": "<value>","change": "<value>", "direction": "<up|down|flat>", "source": "<value>", "as_of": "<value>" }
   ]
 }
 
 Write at graduate level. Every price, volume, and percentage must be real and sourced from your web search. Use web_search to find today's actual spot prices for the live_market_data array — search CME, Bloomberg, or Reuters for current Brent, WTI, and Henry Hub prices as of ${today}. The EIA historical data in context is for trend reference only (it lags ~1 week). Populate live_market_data with today's actual market prices. Return pure JSON only.`;
 
     if (specOnly) return { reportType: "commodities", system, prompt, maxTokens: 6000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 6000);
-    const data = extractJSON(raw, "object", { preserveCitations: true });
-    if (!data || !data.title || !Array.isArray(data.keyTakeaways)) {
-      throw new Error("fetchResearchReport[commodities]: could not parse JSON response");
-    }
-    const { clean, citedSources, allSources } = attachProvenance(data, sources);
-    return { ...clean, reportType: "commodities", generatedAt: new Date().toISOString(), citedSources, allSources, grounded: grounded !== false };
+    const { text: raw, sources, grounded, tier } = await callWithFallbackSourced(system, prompt, 6000);
+    return finalizeResearchReport("commodities", raw, sources, { searchEnabled: grounded !== false, tier });
   }
 
   // ── Macro (GS Global Economics Comment — default) ─────────────────────────
@@ -1373,9 +1414,9 @@ Use web_search for what is NOT in the verified block above: central bank stateme
 
 Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON object with EXACTLY these keys:
 
-"title": string — punchy title like "Global Economic Impacts of [event]" (never vague)
+"title": string — punchy title naming the development your research found (never vague)
 
-"subtitle": string — one sentence contextualising the event (e.g. "Oil rises 14% as Iran conflict escalates; we assess the macro transmission channels")
+"subtitle": string — one sentence contextualising the event: <what moved, by how much, per a cited source>; <what this note assesses>
 
 "date": "${isoDate}"
 
@@ -1385,24 +1426,24 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 "scenarios": object with two keys:
   "baseline": {
-    "label": string (e.g. "Baseline"),
-    "anchor": string (e.g. "Oil at $80/bbl, Strait disruption 5 days"),
-    "gdpImpact": string (e.g. "-0.1pp to global GDP growth"),
-    "cpiImpact": string (e.g. "+0.2pp to headline inflation"),
+    "label": string,
+    "anchor": string,
+    "gdpImpact": string,
+    "cpiImpact": string,
     "narrative": string (3 sentences — what happens under this scenario, why, what data supports it)
   }
   "stress": {
-    "label": string (e.g. "Upside / Stress"),
-    "anchor": string (e.g. "Oil spikes to $100/bbl, Strait closed 5 weeks"),
+    "label": string,
+    "anchor": string,
     "gdpImpact": string,
     "cpiImpact": string,
     "narrative": string (3 sentences — what makes this scenario materialise, magnitude of impact, policy response)
   }
 
 "secondaryRisks": array of 2-3 objects, each: {
-  "channel": string (e.g. "Financial conditions tightening"),
-  "magnitude": string (e.g. "31bp FCI tightening"),
-  "growthImpact": string (e.g. "-0.3pp if sustained 1 year"),
+  "channel": string,
+  "magnitude": string,
+  "growthImpact": string,
   "narrative": string (2 sentences — mechanism and historical precedent)
 }
 
@@ -1432,7 +1473,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 "dispatch_angle": object — THE one overlooked second-order consequence that consensus is missing. Be opinionated and specific. Format:
 {
-  "headline": string — max 12 words. The contrarian or overlooked angle (e.g. "Iran closure accelerates Gulf states' pivot to renewables"),
+  "headline": string — max 12 words. The contrarian or overlooked angle your research supports,
   "mechanism": string — 3 sentences. The causal chain: A leads to B because C; B leads to D which the market is underpricing. Be specific with magnitudes where possible,
   "winners": array of 2-3 strings — each naming a specific asset class, sector, or geography + one-sentence reason why they benefit from this angle,
   "losers": array of 2-3 strings — each naming a specific loser + one-sentence reason,
@@ -1460,26 +1501,13 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 Write at graduate level. Every number must be specific and sourced. Use language: "We estimate", "We see incremental risks", "Effects could be larger if", "Under our baseline". Keep each string value under 200 words. Return pure JSON only — no markdown, no preamble, no trailing text.`;
 
   if (specOnly) return { reportType: "macro", system, prompt, maxTokens: 8000, tier: "fallback" };
-  const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
-  const data = extractJSON(raw, "object", { preserveCitations: true });
-
-  if (!data || !data.title || !data.scenarios || !Array.isArray(data.abstract)) {
-    throw new Error("fetchResearchReport: could not parse JSON response");
-  }
-
-  const { clean, citedSources, allSources } = attachProvenance(data, sources);
-
-  return {
-    ...clean,
-    generatedAt: new Date().toISOString(),
-    citedSources,
-    allSources,
-    grounded: grounded !== false,
-  };
+  const { text: raw, sources, grounded, tier } = await callWithFallbackSourced(system, prompt, 8000);
+  return finalizeResearchReport("macro", raw, sources, { searchEnabled: grounded !== false, tier });
 }
 
 module.exports = {
   extractJSON,
+  extractSearchSources,
   buildResearchSpec,
   finalizeResearchReport,
   REPORT_VALIDATORS,

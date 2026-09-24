@@ -2,6 +2,14 @@
  * server/engine/playbooks.js
  * ─────────────────────────────────────────────────────────────────────────────
  * 13 deterministic trade playbooks for the Idea Engine.
+ *
+ * Rules every template follows:
+ *  - Levels (entry/stop/target) come from a SOURCED price with its date, or
+ *    they are null. There are no fallback prices.
+ *  - A rate LEVEL is never described as a movement (steepening, widening) or
+ *    as an event (a CPI surprise, a Fed decision).
+ *  - Claims about how assets behave (betas, lead times, historical episodes,
+ *    per-cut valuation effects) are either removed or labelled assumptions.
  * Pure functions — no I/O, no API calls.
  *
  * Each playbook exposes:
@@ -18,7 +26,8 @@
  * ctx shape (passed by ideaEngine.js):
  * {
  *   rates:     { dgs10, dfii10, t10yie, hy_spread, t10y2y }   scalars
- *   deltas:    { dgs10_d, dfii10_d, t10yie_d, hy_spread_d }   Δbps vs prior month
+ *   deltas:    { dgs10_d, dfii10_d, t10yie_d, hy_spread_d, t10y2y_d, windows }
+ *              Δbp over the dated FRED history window; null when unavailable
  *   portfolio: { rows, totalGBP, weights:{ticker:%}, hhi, usdPct }
  *   watchlist: { AMD:{price,chg}, NVDA:{price,chg}, ... }
  *   regime:    string
@@ -33,243 +42,285 @@
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function w(ctx, ticker) {
-  return ctx.portfolio.weights[ticker] ?? 0;
+  return (ctx.portfolio.weights[ticker] ?? 0) * 100;
 }
 
-function priceFmt(ctx, ticker, fallback) {
-  return ctx.watchlist[ticker]?.price ?? fallback;
+// LSE-listed holdings are GBP; US watchlist names are USD. The old templates
+// printed AMD's USD price with a £ sign.
+const CCY = { AMD: "USD", NVDA: "USD", MSFT: "USD", TSLA: "USD", MU: "USD", AMAT: "USD", LRCX: "USD",
+              SGLN: "GBP", HIES: "GBP", HIUS: "GBP", HIJS: "GBP", HBKS: "GBP" };
+const SYM = { USD: "$", GBP: "£" };
+
+/**
+ * priceOf — the latest SOURCED price for a ticker, with its date, or null.
+ *
+ * Every template used to call `priceFmt(ctx, "SGLN", 74.00)`: the fallback
+ * price was used whenever the ticker had no feed — which, for the LSE ETFs,
+ * was always. Entry, stop and target were therefore percentages of a number
+ * typed into this file, and they flowed into sizing. There is no fallback now.
+ */
+function priceOf(ctx, ticker) {
+  const q = ctx.watchlist?.[ticker];
+  if (q && Number.isFinite(q.price)) {
+    return { price: q.price, date: q.date || null, source: q.source || null, currency: CCY[ticker] || "USD",
+             priceType: "daily close (not an executable quote)" };
+  }
+  const row = (ctx.portfolio?.rows || []).find(r => r.ticker === ticker);
+  const p = row && (Number.isFinite(row.priceGBP) ? row.priceGBP : Number.isFinite(row.priceUSD) ? row.priceUSD : null);
+  if (Number.isFinite(p)) {
+    return { price: p, date: row.date || null, source: row.source || "portfolio snapshot",
+             currency: Number.isFinite(row.priceGBP) ? "GBP" : "USD", priceType: "portfolio snapshot price" };
+  }
+  return null;
 }
+
+/**
+ * plan — entry/stop/target from a sourced price and percentage rules.
+ * Unpriced: levels are null and the text states the rule instead of a number.
+ */
+function plan(ctx, ticker, stopPct, targetPct) {
+  const q = priceOf(ctx, ticker);
+  const ccy = q?.currency || CCY[ticker] || "USD";
+  const sym = SYM[ccy] || "";
+  if (!q) {
+    return {
+      entry: null, stop: null, target: null, priced: false,
+      priceBasis: { available: false, reason: `No price feed for ${ticker}${CCY[ticker] === "GBP" ? " (LSE-listed; no free source configured)" : ""}.` },
+      entryText:  `No sourced price for ${ticker} — entry level not computed.`,
+      stopText:   `Rule: stop ${stopPct}% below entry (level not computed — no price).`,
+      targetText: `Rule: target ${targetPct}% above entry (level not computed — no price).`,
+      rr:         (targetPct / stopPct).toFixed(1),
+    };
+  }
+  const entry  = +q.price.toFixed(4);
+  const stop   = +(entry * (1 - stopPct / 100)).toFixed(4);
+  const target = +(entry * (1 + targetPct / 100)).toFixed(4);
+  return {
+    entry, stop, target, priced: true,
+    priceBasis: { available: true, price: q.price, currency: ccy, date: q.date, source: q.source, priceType: q.priceType },
+    entryText:  `Reference price ${sym}${entry.toFixed(2)} (${q.source || "source n/a"}, ${q.priceType}, ${q.date || "date n/a"}).`,
+    stopText:   `Stop ${sym}${stop.toFixed(2)} (${stopPct}% below reference).`,
+    targetText: `Target ${sym}${target.toFixed(2)} (${targetPct}% above reference).`,
+    rr:         ((target - entry) / (entry - stop)).toFixed(1),
+  };
+}
+
+const f2 = v => Number(v).toFixed(2);
+const bp = v => Math.round(Number(v) * 100);
+const fin = v => Number.isFinite(v);
+
+/**
+ * CONTESTED_INSTRUMENTS — tickers whose identity or asset class is asserted
+ * inconsistently in this repository; no playbook may generate ideas in them.
+ *
+ * HBKS: shariahFilter.js catalogues it as "iShares MSCI UK Islamic UCITS ETF"
+ * (an EQUITY index name), while two playbooks, the learning layer and the
+ * glossary described the same ticker as a sukuk/duration ETF with a beta of
+ * 0.62 and a ~3-year duration. None of those figures had a source, and the
+ * ticker collides across venues. External lookup is unavailable here, so every
+ * HBKS idea is held and the asset-class claims are removed until the fund is
+ * identified by ISIN from its factsheet.
+ */
+const CONTESTED_INSTRUMENTS = {
+  HBKS: "Identity unverified: catalogued as an MSCI UK Islamic (equity) ETF but previously described elsewhere as a sukuk/duration fund. Verify by ISIN against the issuer factsheet before re-enabling.",
+};
+
+function isContested(ticker) {
+  return Object.prototype.hasOwnProperty.call(CONTESTED_INSTRUMENTS, ticker);
+}
+
+const HEURISTIC = "Trigger thresholds are this app's heuristics, not estimated relationships.";
 
 // ── Macro Playbooks (7) ───────────────────────────────────────────────────────
 
 const hotCPI = {
   id:          "hot-cpi",
-  name:        "Hot CPI / Inflation Spike",
+  name:        "High Breakeven Inflation",
   category:    "macro",
-  description: "Fires when 10-year breakeven inflation (T10YIE) exceeds 2.5%, signalling " +
-               "above-consensus inflation expectations. Gold (SGLN) is the primary beneficiary " +
-               "as it preserves real purchasing power when inflation erodes fixed-income returns. " +
-               "Strategy: add inflation hedge before CPI print confirms the move.",
-  invalidation: "T10YIE drops below 2.2% on weaker-than-expected CPI; Fed signals aggressive hikes; gold supply shock.",
+  // The name used to promise a "Hot CPI" playbook that detected "above-consensus
+  // inflation". It reads a BREAKEVEN — market-implied inflation compensation
+  // over ten years — and has no CPI release or consensus input at all.
+  description: "Fires when 10-year breakeven inflation (T10YIE) is above 2.5%. A breakeven is the " +
+               "nominal–TIPS yield gap: market-implied average inflation over ten years plus risk " +
+               "premia. It is not a CPI print and says nothing about a surprise versus consensus. " +
+               "Expression: gold (SGLN), on the assumption that it hedges inflation — an assumption, " +
+               "not an estimated relationship. " + HEURISTIC,
+  invalidation: "T10YIE falls back below 2.2%; real yields rise sharply (gold has no yield).",
   riskNotes:    "Gold is already held (SGLN). Avoid over-concentration above 25% weight.",
-  requiredData: ["T10YIE", "BAMLH0A0HYM2"],
+  requiredData: ["T10YIE", "SGLN price"],
 
   trigger(ctx) {
-    return ctx.rates.t10yie > 2.5;
+    return fin(ctx.rates.t10yie) && ctx.rates.t10yie > 2.5;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "SGLN", 74.00);
-    const stop   = +(entry * 0.95).toFixed(2);
-    const target = +(entry * 1.11).toFixed(2);
+    const p = plan(ctx, "SGLN", 5, 11);
     return {
-      ticker:       "SGLN",
-      direction:    "LONG",
-      horizon:      "3 months",
-      confidence:   72,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Enter near current price £${entry} — inflation breakeven above 2.5% supports gold bid. Use limit at £${entry} or market on next open.`,
-      stopLogic:    `Stop at £${stop} (5% below entry). Gold breaks down if real rates spike sharply on surprise Fed hike.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Inflation regime typically sustains gold above prior resistance.`,
-      sizingRule:   `3% portfolio allocation. Total SGLN (current ${w(ctx,'SGLN').toFixed(1)}% + new 3%) must stay below 25%.`,
-      rationale:    `Breakeven inflation at ${ctx.rates.t10yie.toFixed(2)}% (above 2.5% threshold) confirms market pricing above-consensus inflation. SGLN (negative beta −0.08) provides inflation hedge with no equity correlation drag. ${ctx.regime} regime supports defensive positioning.`,
-      expectedDrivers: ["Breakeven inflation >2.5%", "Real yield erosion", "Safe-haven demand"],
-      requiredDataFreshness: "T10YIE < 24h; SGLN price < 30min",
+      ticker: "SGLN", direction: "LONG", horizon: "3 months", confidence: 62, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: 10Y breakeven ${f2(ctx.rates.t10yie)}% (T10YIE, ${ctx.ratesAsOf?.t10yie || "date n/a"}) above 2.5%.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% allocation. Total SGLN (current ${w(ctx,'SGLN').toFixed(1)}% + new 3%) must stay below 25%.`,
+      rationale:    `10Y breakeven ${f2(ctx.rates.t10yie)}% is above this app's 2.5% threshold. That is a level of market-implied inflation compensation, not evidence of a CPI surprise. Gold is used here as an assumed inflation hedge.`,
+      expectedDrivers: ["Breakeven inflation above 2.5%", "Assumed gold inflation-hedge behaviour"],
+      requiredDataFreshness: "T10YIE daily (FRED); SGLN price — no free feed",
     };
   },
 };
 
 const softCPI = {
   id:          "soft-cpi",
-  name:        "Soft CPI / Disinflation",
+  name:        "Low Breakeven + Tight Credit",
   category:    "macro",
-  description: "Fires when breakeven inflation falls below 2.0% AND HY spreads are contained " +
-               "below 3.0%, signalling a benign inflation outlook. This is the ideal macro " +
-               "backdrop for high-growth, rate-sensitive names like AMD — the Fed gains " +
-               "room to cut, compressing the real yield discount rate and expanding P/E multiples.",
-  invalidation: "CPI re-accelerates above 3.5%; tariff pass-through adds 50bps+ to breakeven; FOMC turns hawkish.",
-  riskNotes:    "AMD has high beta (1.82). Position sizing critical — use 4% max if AMD already at target weight.",
-  requiredData: ["T10YIE", "BAMLH0A0HYM2", "DFII10"],
+  description: "Fires when 10-year breakeven inflation is below 2.0% AND HY OAS is below 3.0%. " +
+               "Both are levels; neither is a CPI release. The view expressed is that lower " +
+               "inflation compensation and tight credit are a supportive backdrop for rate-sensitive " +
+               "growth equity (AMD). " + HEURISTIC,
+  invalidation: "Breakeven back above 2.3%; HY OAS above 3.5%.",
+  riskNotes:    "Single-stock, high-volatility expression. Keep AMD total weight below 20%.",
+  requiredData: ["T10YIE", "BAMLH0A0HYM2", "AMD price"],
 
   trigger(ctx) {
-    return ctx.rates.t10yie < 2.0 && ctx.rates.hy_spread < 3.0;
+    return fin(ctx.rates.t10yie) && fin(ctx.rates.hy_spread) && ctx.rates.t10yie < 2.0 && ctx.rates.hy_spread < 3.0;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "AMD", 192.00);
-    const stop   = +(entry * 0.91).toFixed(2);
-    const target = +(entry * 1.20).toFixed(2);
+    const p = plan(ctx, "AMD", 9, 20);
     return {
-      ticker:       "AMD",
-      direction:    "LONG",
-      horizon:      "3 months",
-      confidence:   70,
-      sizePct:      4,
-      entry, stop, target,
-      entryLogic:   `Enter AMD near £${entry} on confirmed disinflation signal — breakeven <2.0% & HY OAS <3.0%. Prefer limit entry on 1–2% intraday pullback.`,
-      stopLogic:    `Stop at $${stop} (9% below entry). Macro thesis breaks if inflation re-accelerates or credit spreads widen sharply.`,
-      targetLogic:  `Target $${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Multiple expansion potential if real yields compress toward 1.0–1.2%.`,
-      sizingRule:   `4% allocation. AMD is high-beta (1.82) — size conservatively. Total AMD (current ${w(ctx,'AMD').toFixed(1)}% + 4%) should not exceed 20%.`,
-      rationale:    `Soft inflation (T10YIE ${ctx.rates.t10yie.toFixed(2)}%) + contained credit (HY OAS ${ctx.rates.hy_spread.toFixed(2)}%) = ideal conditions for AMD re-rating. Disinflation unlocks Fed optionality for H2 cuts, mechanically expanding growth multiples. Q1 earnings Apr 22 is the near-term catalyst.`,
-      expectedDrivers: ["Disinflation + Fed easing optionality", "AMD Q1 earnings catalyst", "Growth multiple expansion"],
-      requiredDataFreshness: "T10YIE < 24h; BAMLH0A0HYM2 < 24h; AMD price < 30min",
+      ticker: "AMD", direction: "LONG", horizon: "3 months", confidence: 60, sizePct: 4,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: breakeven ${f2(ctx.rates.t10yie)}% < 2.0% and HY OAS ${bp(ctx.rates.hy_spread)}bp < 300bp.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `4% allocation. Total AMD (current ${w(ctx,'AMD').toFixed(1)}% + 4%) should not exceed 20%.`,
+      rationale:    `Breakeven ${f2(ctx.rates.t10yie)}% and HY OAS ${bp(ctx.rates.hy_spread)}bp are both below this app's thresholds. The view is that this backdrop is supportive for rate-sensitive growth equity; no valuation sensitivity or company catalyst is asserted.`,
+      expectedDrivers: ["Low inflation compensation", "Tight credit spreads"],
+      requiredDataFreshness: "T10YIE, BAMLH0A0HYM2 daily (FRED); AMD daily close",
     };
   },
 };
 
 const hawkishFed = {
   id:          "hawkish-fed",
-  name:        "Hawkish Fed / Rates Restrictive",
+  name:        "High Nominal Yields",
   category:    "macro",
-  description: "Fires when the 10-year Treasury yield exceeds 4.5% and the yield curve " +
-               "is not inverted (still positively sloped), indicating the Fed is in an " +
-               "actively restrictive stance. In this environment, fixed-income proxies and " +
-               "gold outperform equities as the cost of capital rises. SGLN benefits from " +
-               "flight-to-quality demand and as a rates-restrictive inflation hedge.",
-  invalidation: "DGS10 reverses below 4.2% on surprise dovish pivot; risk appetite returns; HY spreads tighten sharply.",
-  riskNotes:    "Gold can sell off on USD strength. Monitor DXY — rising dollar headwind for gold even in hawkish regime.",
-  requiredData: ["DGS10", "T10Y2Y"],
+  description: "Fires when the 10-year Treasury yield is above 4.5% and the 10Y–2Y curve is above " +
+               "+0.3pp. Both are LEVELS; this does not identify Fed policy or its direction. The view " +
+               "expressed is defensive (gold, SGLN) while nominal yields are high. " + HEURISTIC,
+  invalidation: "DGS10 back below 4.2%.",
+  riskNotes:    "Gold pays no yield, so high real yields are a headwind for it as well; this is a judgement call, not a hedge with a measured beta.",
+  requiredData: ["DGS10", "T10Y2Y", "SGLN price"],
 
   trigger(ctx) {
-    return ctx.rates.dgs10 > 4.5 && ctx.rates.t10y2y > 0.3;
+    return fin(ctx.rates.dgs10) && fin(ctx.rates.t10y2y) && ctx.rates.dgs10 > 4.5 && ctx.rates.t10y2y > 0.3;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "SGLN", 74.00);
-    const stop   = +(entry * 0.94).toFixed(2);
-    const target = +(entry * 1.10).toFixed(2);
+    const p = plan(ctx, "SGLN", 6, 10);
     return {
-      ticker:       "SGLN",
-      direction:    "LONG",
-      horizon:      "2 months",
-      confidence:   65,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Enter SGLN at market — 10Y Treasury at ${ctx.rates.dgs10.toFixed(2)}% (above 4.5%) confirms restrictive stance. Gold is historically the best hedge in prolonged high-rate environments.`,
-      stopLogic:    `Stop at £${stop} (6% below entry). Exit if DGS10 falls below 4.0% on dovish surprise.`,
-      targetLogic:  `Target £${target} (~R${((target-entry)/(entry-stop)).toFixed(1)}×). Gold re-rates higher as restrictive policy increases recession risk premium.`,
-      sizingRule:   `3% allocation. Complement existing SGLN (${w(ctx,'SGLN').toFixed(1)}%). Keep total below 25%.`,
-      rationale:    `10Y Treasury at ${ctx.rates.dgs10.toFixed(2)}% with a positively sloped curve (T10Y2Y ${ctx.rates.t10y2y.toFixed(2)}%) signals the Fed is in a sustained restrictive regime. Historical precedent: gold outperforms equities in the 12 months following peak-restrictive rate cycles. SGLN's negative equity beta (−0.08) reduces portfolio volatility.`,
-      expectedDrivers: ["Prolonged restrictive Fed stance", "Recession risk premium", "Flight-to-safety bid"],
-      requiredDataFreshness: "DGS10 < 24h; T10Y2Y < 24h",
+      ticker: "SGLN", direction: "LONG", horizon: "2 months", confidence: 55, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: 10Y ${f2(ctx.rates.dgs10)}% > 4.5% with 10Y–2Y ${f2(ctx.rates.t10y2y)}pp > 0.3pp.`,
+      stopLogic:    `${p.stopText} Also exit if DGS10 falls below 4.0%.`,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% allocation. Current SGLN ${w(ctx,'SGLN').toFixed(1)}%. Keep total below 25%.`,
+      rationale:    `10Y Treasury ${f2(ctx.rates.dgs10)}% and a positively sloped curve (${f2(ctx.rates.t10y2y)}pp). These levels alone do not establish the Fed's stance; the defensive tilt is a judgement, and no historical outperformance claim is made.`,
+      expectedDrivers: ["High nominal yields", "Defensive tilt"],
+      requiredDataFreshness: "DGS10, T10Y2Y daily (FRED); SGLN price — no free feed",
     };
   },
 };
 
 const dovishFed = {
   id:          "dovish-fed",
-  name:        "Dovish Fed / Rate Cut Cycle",
+  name:        "Lower Nominal and Real Yields",
   category:    "macro",
-  description: "Fires when the 10-year yield drops below 4.0% AND real yields (DFII10) " +
-               "are below 1.5%, indicating the market is pricing Fed rate cuts. This is the " +
-               "classic risk-on pivot playbook — falling discount rates mechanically expand " +
-               "P/E multiples for high-growth names. AMD with its 1.82 beta is the highest " +
-               "leverage play in the portfolio for a dovish pivot.",
-  invalidation: "DGS10 rebounds above 4.3% on sticky inflation; FOMC dot plot moves hawkish; AMD earnings miss.",
-  riskNotes:    "AMD is high-beta — a 10% rate cut rally can reverse 15–20% on any bad headline. Use defined stop.",
-  requiredData: ["DGS10", "DFII10"],
+  description: "Fires when the 10-year yield is below 4.0% AND the 10-year real yield (DFII10) is " +
+               "below 1.5%. Levels only — this does not detect rate cuts or their pricing. The view is " +
+               "that lower discount rates are supportive for long-duration growth equity (AMD). " + HEURISTIC,
+  invalidation: "DGS10 back above 4.3% or DFII10 above 1.8%.",
+  riskNotes:    "High-volatility single stock. Use the defined stop.",
+  requiredData: ["DGS10", "DFII10", "AMD price"],
 
   trigger(ctx) {
-    return ctx.rates.dgs10 < 4.0 && ctx.rates.dfii10 < 1.5;
+    return fin(ctx.rates.dgs10) && fin(ctx.rates.dfii10) && ctx.rates.dgs10 < 4.0 && ctx.rates.dfii10 < 1.5;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "AMD", 192.00);
-    const stop   = +(entry * 0.90).toFixed(2);
-    const target = +(entry * 1.25).toFixed(2);
+    const p = plan(ctx, "AMD", 10, 25);
     return {
-      ticker:       "AMD",
-      direction:    "LONG",
-      horizon:      "6 months",
-      confidence:   75,
-      sizePct:      5,
-      entry, stop, target,
-      entryLogic:   `Enter AMD as dovish pivot confirms — DGS10 at ${ctx.rates.dgs10.toFixed(2)}% below 4.0% threshold. Real yields at ${ctx.rates.dfii10.toFixed(2)}% compressing = multiple expansion setup.`,
-      stopLogic:    `Stop at $${stop} (10% below entry). Dovish thesis invalidated if yields rapidly reverse.`,
-      targetLogic:  `Target $${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Each 25bps cut historically adds 8–12% to AMD's fair value via discount rate.`,
-      sizingRule:   `5% allocation reflects high conviction in dovish pivot. AMD high-beta (1.82) — still use defined stop. Max total AMD: 20%.`,
-      rationale:    `Dovish conditions confirmed: DGS10 ${ctx.rates.dgs10.toFixed(2)}% and DFII10 ${ctx.rates.dfii10.toFixed(2)}%. Fed rate cuts are the most powerful near-term catalyst for AMD's P/E re-rating. MI450 GPU ramp + Q1 Apr 22 earnings provide company-specific upside. Portfolio alpha trade.`,
-      expectedDrivers: ["Rate cut cycle compresses discount rate", "AMD P/E multiple expansion", "AI capex re-acceleration"],
-      requiredDataFreshness: "DGS10 < 24h; DFII10 < 24h; AMD price < 30min",
+      ticker: "AMD", direction: "LONG", horizon: "6 months", confidence: 60, sizePct: 5,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: DGS10 ${f2(ctx.rates.dgs10)}% < 4.0% and DFII10 ${f2(ctx.rates.dfii10)}% < 1.5%.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×. No fair-value-per-cut estimate is made.`,
+      sizingRule:   `5% allocation, max total AMD 20%. Current ${w(ctx,'AMD').toFixed(1)}%.`,
+      rationale:    `DGS10 ${f2(ctx.rates.dgs10)}% and DFII10 ${f2(ctx.rates.dfii10)}% are below this app's thresholds. Lower discount rates are the assumed channel; the size of any multiple effect is not estimated, and no company catalyst is asserted.`,
+      expectedDrivers: ["Lower real discount rate (assumed channel)"],
+      requiredDataFreshness: "DGS10, DFII10 daily (FRED); AMD daily close",
     };
   },
 };
 
 const payrollProxy = {
   id:          "payroll-proxy",
-  name:        "Payroll Surprise / Growth Resilience",
+  name:        "Curve Steepening (requires 2Y history)",
   category:    "macro",
-  description: "Uses yield curve steepening (T10Y2Y rising >+10bps) as a proxy for " +
-               "growth-positive payroll surprises — the curve steepens when the market " +
-               "prices stronger growth and less likelihood of near-term Fed cuts. " +
-               "In this environment, broad equity exposure via diversified ETFs outperforms " +
-               "single-stock. HIES (global equity) benefits from risk appetite returning.",
-  invalidation: "Yield curve flattens again (<+5bps); HY spreads widen; risk-off resumes.",
-  riskNotes:    "HIES has significant EM/Korea exposure — strong USD can negate the global growth thesis.",
-  requiredData: ["T10Y2Y"],
+  description: "Intended to fire when the 10Y–2Y curve steepens by more than 10bp. A steepening is a " +
+               "CHANGE and needs 2Y history, which is not fetched, so ctx.deltas.t10y2y_d is null and this " +
+               "playbook does not fire. It previously described curve steepening as a proxy for payroll " +
+               "surprises; that link was never tested and has been removed.",
+  invalidation: "Curve flattens again.",
+  riskNotes:    "HIES has significant non-USD exposure.",
+  requiredData: ["T10Y2Y history (not fetched)", "HIES price"],
 
   trigger(ctx) {
-    return ctx.deltas.dgs10_d !== undefined && ctx.deltas.t10y2y_d > 10;
+    return fin(ctx.deltas?.t10y2y_d) && ctx.deltas.t10y2y_d > 10;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "HIES", 15.74);
-    const stop   = +(entry * 0.94).toFixed(2);
-    const target = +(entry * 1.08).toFixed(2);
+    const p = plan(ctx, "HIES", 6, 8);
     return {
-      ticker:       "HIES",
-      direction:    "LONG",
-      horizon:      "2 months",
-      confidence:   58,
-      sizePct:      2,
-      entry, stop, target,
-      entryLogic:   `Enter HIES as curve steepens — growth resilience signal. Yield curve delta: +${ctx.deltas.t10y2y_d ?? "N/A"}bps.`,
-      stopLogic:    `Stop at £${stop} (6% below entry). Thesis breaks if curve re-flattens or EM sells off.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Growth-positive regime supports global equity exposure.`,
-      sizingRule:   `2% small add-on. HIES beta is 1.15 vs portfolio. Current weight ${w(ctx,'HIES').toFixed(1)}%.`,
-      rationale:    `Yield curve steepening (T10Y2Y at ${ctx.rates.t10y2y.toFixed(2)}%, +${ctx.deltas.t10y2y_d ?? 'N/A'}bps) signals market pricing growth resilience. Strong labour market historically supports global equity risk appetite. HIES (global equity ETF) provides diversified exposure without single-stock risk.`,
-      expectedDrivers: ["Curve steepening = growth optimism", "Risk-on rotation into equities", "EM outperformance"],
-      requiredDataFreshness: "T10Y2Y < 24h; HIES price < 30min",
+      ticker: "HIES", direction: "LONG", horizon: "2 months", confidence: 50, sizePct: 2,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Curve change +${ctx.deltas.t10y2y_d}bp.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `2% add-on. Current weight ${w(ctx,'HIES').toFixed(1)}%.`,
+      rationale:    `10Y–2Y changed +${ctx.deltas.t10y2y_d}bp over the measured window.`,
+      expectedDrivers: ["Curve steepening"],
+      requiredDataFreshness: "T10Y2Y history; HIES price — no free feed",
     };
   },
 };
 
 const stagflationProxy = {
   id:          "stagflation-proxy",
-  name:        "Stagflation / Oil Shock Proxy",
+  name:        "High Breakeven + Wide Credit",
   category:    "macro",
-  description: "Fires when both breakeven inflation is elevated (T10YIE >2.4%) AND " +
-               "credit spreads are wide (HY OAS >3.5%), creating the toxic stagflation " +
-               "combination: high inflation + slowing growth. Gold (SGLN) is the textbook " +
-               "stagflation hedge — it benefits from inflation while credit stress signals " +
-               "a growth slowdown. This is the worst macro backdrop for equities.",
-  invalidation: "Oil prices collapse; inflation resolves quickly below 2.5%; HY spreads tighten to <2.5%.",
-  riskNotes:    "Gold can be liquidated in a liquidity crisis (2008 scenario). Monitor cross-asset correlations.",
-  requiredData: ["T10YIE", "BAMLH0A0HYM2"],
+  description: "Fires when 10-year breakeven is above 2.4% AND HY OAS is above 3.5%. Two LEVELS; " +
+               "this does not measure growth or inflation outcomes. The view is defensive (gold). " + HEURISTIC,
+  invalidation: "Breakeven below 2.2% or HY OAS below 3.0%.",
+  riskNotes:    "Gold can fall in liquidity-driven sell-offs.",
+  requiredData: ["T10YIE", "BAMLH0A0HYM2", "SGLN price"],
 
   trigger(ctx) {
-    return ctx.rates.t10yie > 2.4 && ctx.rates.hy_spread > 3.5;
+    return fin(ctx.rates.t10yie) && fin(ctx.rates.hy_spread) && ctx.rates.t10yie > 2.4 && ctx.rates.hy_spread > 3.5;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "SGLN", 74.00);
-    const stop   = +(entry * 0.93).toFixed(2);
-    const target = +(entry * 1.14).toFixed(2);
+    const p = plan(ctx, "SGLN", 7, 14);
     return {
-      ticker:       "SGLN",
-      direction:    "LONG",
-      horizon:      "4 months",
-      confidence:   68,
-      sizePct:      4,
-      entry, stop, target,
-      entryLogic:   `Enter SGLN — stagflation proxy trigger: T10YIE ${ctx.rates.t10yie.toFixed(2)}% + HY OAS ${ctx.rates.hy_spread.toFixed(2)}%. Market pricing simultaneous inflation + credit stress.`,
-      stopLogic:    `Stop at £${stop} (7% below). Exit if either inflation normalises (<2.0%) or spreads tighten sharply.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Stagflation historically sustains gold premium for 3–6 months.`,
-      sizingRule:   `4% allocation. Stagflation is the highest-conviction gold scenario. Total SGLN should not exceed 25% (currently ${w(ctx,'SGLN').toFixed(1)}%).`,
-      rationale:    `Stagflation signal confirmed: inflation breakeven ${ctx.rates.t10yie.toFixed(2)}% AND HY OAS ${ctx.rates.hy_spread.toFixed(2)}%. This toxic combination — high inflation with slowing growth — historically produced gold's strongest outperformance periods (1974–1975, 1980, 2022). SGLN's low equity beta (−0.08) makes it an ideal portfolio shock absorber.`,
-      expectedDrivers: ["High inflation + slow growth = gold bid", "Credit stress reduces equity appetite", "Safe-haven premium"],
-      requiredDataFreshness: "T10YIE < 24h; BAMLH0A0HYM2 < 24h",
+      ticker: "SGLN", direction: "LONG", horizon: "4 months", confidence: 58, sizePct: 4,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: breakeven ${f2(ctx.rates.t10yie)}% > 2.4% and HY OAS ${bp(ctx.rates.hy_spread)}bp > 350bp.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `4% allocation. Total SGLN below 25% (currently ${w(ctx,'SGLN').toFixed(1)}%).`,
+      rationale:    `Breakeven ${f2(ctx.rates.t10yie)}% and HY OAS ${bp(ctx.rates.hy_spread)}bp are both above this app's thresholds. The combination is used as a crude stagflation-risk flag; it is not a growth measurement, and no historical-episode performance is claimed.`,
+      expectedDrivers: ["High inflation compensation", "Wide credit spreads"],
+      requiredDataFreshness: "T10YIE, BAMLH0A0HYM2 daily (FRED); SGLN price — no free feed",
     };
   },
 };
@@ -278,36 +329,31 @@ const creditSpreadWidening = {
   id:          "credit-spread-widening",
   name:        "Credit Spread Widening",
   category:    "macro",
-  description: "Fires when HY OAS exceeds 3.5% AND has widened >+15bps recently, " +
-               "signalling an accelerating risk-off move in credit markets. Credit spread " +
-               "widening historically leads equity drawdowns by 2–4 weeks — this playbook " +
-               "positions defensively ahead of potential equity weakness by adding gold.",
-  invalidation: "HY OAS reverses below 3.0% quickly; Fed intervenes with emergency rate cut or liquidity facilities.",
-  riskNotes:    "Credit spread widening can be short-lived (flash selloff). Use a tighter stop to avoid being caught in a reversal.",
-  requiredData: ["BAMLH0A0HYM2"],
+  description: "Fires when HY OAS is above 3.5% AND has widened by more than 15bp over the measured " +
+               "FRED history window. The view is defensive (gold). This app makes no claim that credit " +
+               "leads equities, or by how long — that relationship is not measured here. " + HEURISTIC,
+  invalidation: "HY OAS back below 3.0%.",
+  riskNotes:    "Spread moves can reverse quickly.",
+  requiredData: ["BAMLH0A0HYM2 (level and history)", "SGLN price"],
 
   trigger(ctx) {
-    return ctx.rates.hy_spread > 3.5 && ctx.deltas.hy_spread_d > 15;
+    return fin(ctx.rates.hy_spread) && fin(ctx.deltas?.hy_spread_d) && ctx.rates.hy_spread > 3.5 && ctx.deltas.hy_spread_d > 15;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "SGLN", 74.00);
-    const stop   = +(entry * 0.95).toFixed(2);
-    const target = +(entry * 1.09).toFixed(2);
+    const p = plan(ctx, "SGLN", 5, 9);
+    const win = ctx.deltas?.windows?.hy_spread;
+    const winText = win ? `${win.from} → ${win.to}` : "window n/a";
     return {
-      ticker:       "SGLN",
-      direction:    "LONG",
-      horizon:      "2 months",
-      confidence:   67,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Enter SGLN on accelerating credit stress — HY OAS at ${ctx.rates.hy_spread.toFixed(2)}% (+${ctx.deltas.hy_spread_d}bps). Credit leads equity by 2–4 weeks historically.`,
-      stopLogic:    `Stop at £${stop} (5% below). Tight stop reflects potential for quick reversal if credit normalises.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Exit when HY OAS stabilises or narrows below 3.2%.`,
-      sizingRule:   `3% defensive add. Do not exceed 25% total SGLN. Current: ${w(ctx,'SGLN').toFixed(1)}%.`,
-      rationale:    `HY OAS at ${ctx.rates.hy_spread.toFixed(2)}% with ${ctx.deltas.hy_spread_d}bps recent widening — credit markets leading risk-off signal. Equity markets typically reprice 2–4 weeks after credit stress of this magnitude. SGLN provides lead-time defensive positioning without equity beta.`,
-      expectedDrivers: ["Credit leading equity drawdown", "Risk-off rotation to safety", "Spread normalisation premium"],
-      requiredDataFreshness: "BAMLH0A0HYM2 < 24h",
+      ticker: "SGLN", direction: "LONG", horizon: "2 months", confidence: 57, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Trigger: HY OAS ${bp(ctx.rates.hy_spread)}bp, +${ctx.deltas.hy_spread_d}bp over ${winText}.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% defensive add. Total SGLN below 25%. Current: ${w(ctx,'SGLN').toFixed(1)}%.`,
+      rationale:    `HY OAS ${bp(ctx.rates.hy_spread)}bp after widening ${ctx.deltas.hy_spread_d}bp (${winText}, FRED). No lead-time relationship to equities is asserted.`,
+      expectedDrivers: ["Credit spread widening"],
+      requiredDataFreshness: "BAMLH0A0HYM2 daily (FRED); SGLN price — no free feed",
     };
   },
 };
@@ -318,36 +364,30 @@ const trendContinuation = {
   id:          "trend-continuation",
   name:        "Trend Continuation",
   category:    "structure",
-  description: "Fires when both the moving average signal is bullish (short MA below " +
-               "long MA — rates falling) AND momentum is positive, confirming a regime " +
-               "where equities trend higher. The trend continuation strategy adds to the " +
-               "highest-beta holding (AMD) to maximise participation in an established uptrend.",
-  invalidation: "Moving average signal reverses (rates start rising); AMD price breaks below 50-day MA equivalent.",
-  riskNotes:    "Trend-following has positive skew but can have many small losses. Use tight stops.",
-  requiredData: ["DGS10 (history)", "AMD price"],
+  description: "Fires when the rates moving-average signal is LONG (short MA of DGS10 below long MA, " +
+               "i.e. yields falling over the available FRED history) AND the momentum signal is positive. " +
+               "MA windows are counted in observations of the fetched history, not months.",
+  invalidation: "MA signal reverses.",
+  riskNotes:    "Trend-following produces many small losses.",
+  requiredData: ["DGS10 history", "AMD price"],
 
   trigger(ctx) {
     return ctx.signals.maSignal === "long" && ctx.signals.momentumSignal === "long";
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "AMD", 192.00);
-    const stop   = +(entry * 0.93).toFixed(2);
-    const target = +(entry * 1.15).toFixed(2);
+    const p = plan(ctx, "AMD", 7, 15);
+    const chg = ctx.watchlist.AMD?.chg;
     return {
-      ticker:       "AMD",
-      direction:    "LONG",
-      horizon:      "2 months",
-      confidence:   60,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Enter AMD with trend confirmation — MA signal LONG and momentum positive. Enter on next-day open or on minor pullback to ${(entry * 0.99).toFixed(2)}.`,
-      stopLogic:    `Stop at $${stop} (7% below). Trend invalidated on close below this level.`,
-      targetLogic:  `Target $${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Trail stop up once AMD gains >8%.`,
-      sizingRule:   `3% trend add. AMD beta 1.82 — trend strategies prefer smaller sizing, higher frequency. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
-      rationale:    `Both MA (rates declining = equity tailwind) and momentum (AMD +${(ctx.watchlist.AMD?.chg ?? 0).toFixed(1)}% today) signals are aligned bullish. Trend continuation is the highest probability strategy when multiple timeframe signals agree. ${ctx.regime}.`,
-      expectedDrivers: ["Rates trend declining", "Positive price momentum", "AI sector rotation"],
-      requiredDataFreshness: "DGS10 history < 24h; AMD price < 30min",
+      ticker: "AMD", direction: "LONG", horizon: "2 months", confidence: 55, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} MA signal LONG and momentum positive.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% trend add. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
+      rationale:    `Rates MA signal LONG (${ctx.signalsBasis || "history basis n/a"}) and AMD latest daily change ${fin(chg) ? `${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%` : "n/a"}. Signal agreement is not evidence of a higher hit rate; none has been measured.`,
+      expectedDrivers: ["Falling yields over the history window", "Positive latest daily change"],
+      requiredDataFreshness: "DGS10 history (FRED); AMD daily close",
     };
   },
 };
@@ -356,128 +396,100 @@ const meanReversionPlaybook = {
   id:          "mean-reversion",
   name:        "Mean Reversion",
   category:    "structure",
-  description: "Fires when the mean reversion signal is non-flat, indicating rates have " +
-               "deviated significantly from their 6-month mean (z-score ≥1.5). Rates " +
-               "mean-reversion tends to drive equity multiple expansion (when rates are " +
-               "abnormally high) or contraction (when abnormally low). The playbook acts " +
-               "in the direction of the expected reversion.",
-  invalidation: "Rates continue trending further away from mean; structural regime change confirmed by Fed statement.",
-  riskNotes:    "Mean reversion can take months to materialise. Sizing must account for the waiting time and potential drawdown.",
-  requiredData: ["DGS10 (history)", "AMD price"],
+  description: "Fires when the current 10Y yield is ≥1.5 standard deviations from the mean of the " +
+               "available FRED history window. The window is short (the snapshot fetches ~13 daily " +
+               "observations), so this is a short-horizon z-score, not a 6-month one. Long-only: a " +
+               "SHORT signal is blocked by the Shariah filter.",
+  invalidation: "Yields keep extending in the same direction.",
+  riskNotes:    "Reversion may not occur on any particular horizon.",
+  requiredData: ["DGS10 history", "AMD price"],
 
   trigger(ctx) {
     return ctx.signals.reversionSignal !== "flat";
   },
 
   template(ctx) {
-    const dir    = ctx.signals.reversionSignal; // "long" or "short"
-    const entry  = priceFmt(ctx, "AMD", 192.00);
+    const dir    = ctx.signals.reversionSignal;
     const isBull = dir === "long";
-    const stop   = isBull ? +(entry * 0.91).toFixed(2) : +(entry * 1.09).toFixed(2);
-    const target = isBull ? +(entry * 1.18).toFixed(2) : +(entry * 0.84).toFixed(2);
+    const p      = plan(ctx, "AMD", 9, 18);
     return {
-      ticker:       "AMD",
-      direction:    isBull ? "LONG" : "SHORT",
-      horizon:      "3 months",
-      confidence:   55,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Mean reversion ${dir.toUpperCase()} signal — rates z-score suggests ${isBull ? "rates are elevated vs history → compression trade" : "rates are suppressed vs history → expansion trade"}.`,
-      stopLogic:    `Stop at $${stop}. Mean reversion thesis is broken if rates keep extending in the same direction.`,
-      targetLogic:  `Target $${target} (R≈${(Math.abs(target-entry)/Math.abs(entry-stop)).toFixed(1)}×). Mean reversion to the 6-month average historically occurs within 60–90 days.`,
-      sizingRule:   `3% allocation — mean reversion is moderate-conviction. AMD beta 1.82. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
-      rationale:    `Rate z-score outside ±1.5 standard deviations from 6-month mean. ${isBull ? "Rates are elevated → likely to compress → AMD multiple expansion" : "Rates are suppressed → likely to rise → AMD multiple pressure"}. Mean reversion signal generated by quantitative analysis of RATES_HISTORY_SEED.`,
-      expectedDrivers: isBull
-        ? ["Rate z-score compression", "AMD multiple expansion", "Regression to mean"]
-        : ["Rate z-score expansion", "AMD multiple compression", "Risk premium widening"],
-      requiredDataFreshness: "DGS10 history < 24h; AMD price < 30min",
+      ticker: "AMD", direction: isBull ? "LONG" : "SHORT", horizon: "3 months", confidence: 50, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Rates z-score signal ${dir.toUpperCase()}.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×. No reversion timeline is claimed.`,
+      sizingRule:   `3% allocation. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
+      rationale:    `10Y yield ≥1.5σ from the mean of ${ctx.signalsBasis || "the available history"}. ${isBull ? "Yields high versus that window" : "Yields low versus that window"}; reversion is assumed, not forecast.`,
+      expectedDrivers: ["Assumed reversion of yields toward the window mean"],
+      requiredDataFreshness: "DGS10 history (FRED); AMD daily close",
     };
   },
 };
 
 const breakoutFailure = {
   id:          "breakout-failure",
-  name:        "Breakout Failure / Credit Reversal",
+  name:        "Credit Spread Reversal",
   category:    "structure",
-  description: "Fires when HY spreads spiked above 4.0% but are now reverting " +
-               "(recent delta < −10bps), indicating a 'breakout failure' in credit stress. " +
-               "When credit spreads fail to sustain above key levels, it often marks the " +
-               "short-term bottom in risk assets. Duration/sukuk (HBKS) benefits from the " +
-               "flight-to-quality unwind as credit normalises.",
-  invalidation: "HY OAS resumes widening above 4.0%; fundamental credit event (default) causes structural spread elevation.",
-  riskNotes:    "Breakout failures can re-test — give HBKS a wider stop to avoid being stopped by the re-test before reversal.",
-  requiredData: ["BAMLH0A0HYM2"],
+  description: "Fires when HY OAS is above 4.0% but has narrowed by more than 10bp over the FRED " +
+               "history window. HELD: its expression vehicle is HBKS, whose identity is unverified " +
+               "(see CONTESTED_INSTRUMENTS). It will not fire until the instrument is verified.",
+  invalidation: "HY OAS resumes widening above 4.0%.",
+  riskNotes:    "Instrument unverified.",
+  requiredData: ["BAMLH0A0HYM2 (level and history)"],
 
   trigger(ctx) {
-    return ctx.rates.hy_spread > 4.0 && ctx.deltas.hy_spread_d < -10;
+    if (isContested("HBKS")) return false;
+    return fin(ctx.rates.hy_spread) && fin(ctx.deltas?.hy_spread_d) && ctx.rates.hy_spread > 4.0 && ctx.deltas.hy_spread_d < -10;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "HBKS", 8.65);
-    const stop   = +(entry * 0.95).toFixed(2);
-    const target = +(entry * 1.10).toFixed(2);
+    const p = plan(ctx, "HBKS", 5, 10);
     return {
-      ticker:       "HBKS",
-      direction:    "LONG",
-      horizon:      "3 months",
-      confidence:   62,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Enter HBKS as credit breakout fails — HY OAS at ${ctx.rates.hy_spread.toFixed(2)}% but reverting (${ctx.deltas.hy_spread_d}bps). Duration benefits from flight-to-quality unwind.`,
-      stopLogic:    `Stop at £${stop} (5% below). Wider stop needed to handle re-test of credit spike.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). HBKS rebounds as credit normalises and duration is re-valued.`,
-      sizingRule:   `3% allocation. HBKS beta is 0.62 — modest equity sensitivity. Current weight ${w(ctx,'HBKS').toFixed(1)}%.`,
-      rationale:    `Credit breakout failure: HY OAS hit ${ctx.rates.hy_spread.toFixed(2)}% but has reversed ${Math.abs(ctx.deltas.hy_spread_d)}bps. Failed breakouts in credit often mark local cycle highs in stress. HBKS (sukuk/duration ETF) benefits from normalising rate expectations and credit recovery.`,
-      expectedDrivers: ["Credit spread reversal", "Duration re-rating", "Risk-off unwind"],
-      requiredDataFreshness: "BAMLH0A0HYM2 < 24h; HBKS price < 30min",
+      ticker: "HBKS", direction: "LONG", horizon: "3 months", confidence: 50, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} HY OAS ${bp(ctx.rates.hy_spread)}bp, ${ctx.deltas.hy_spread_d}bp over the window.`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% allocation. Current weight ${w(ctx,'HBKS').toFixed(1)}%.`,
+      rationale:    `HY OAS ${bp(ctx.rates.hy_spread)}bp and narrowing. Expression vehicle pending instrument verification.`,
+      expectedDrivers: ["Credit spread reversal"],
+      requiredDataFreshness: "BAMLH0A0HYM2 daily (FRED)",
     };
   },
 };
 
 const correlationBreak = {
   id:          "correlation-break",
-  name:        "Correlation Break (AMD vs NVDA)",
+  name:        "Daily Divergence (AMD vs NVDA)",
   category:    "structure",
-  description: "Fires when AMD and NVDA have diverged significantly in 1-day performance " +
-               "(gap >8%), indicating a stock-specific vs sector event. If NVDA outperforms " +
-               "AMD by >8%, this is an AMD-specific negative catalyst or a relative value " +
-               "opportunity to buy the laggard. If AMD outperforms NVDA by >8%, something " +
-               "AMD-specific (MI450 order?) is driving the stock.",
-  invalidation: "Both names continue moving in the same direction after the divergence; sector-wide event.",
-  riskNotes:    "Correlation breaks can widen before reverting. This is a higher-risk, shorter-horizon playbook.",
-  requiredData: ["AMD price (chg%)", "NVDA price (chg%)"],
+  description: "Fires when AMD's latest daily change trails NVDA's by more than 8 percentage points. " +
+               "This is a one-day divergence in daily closes, not a measured correlation break; " +
+               "convergence is assumed, not estimated. Long-only (buy the laggard).",
+  invalidation: "Divergence widens further.",
+  riskNotes:    "Divergences can persist when driven by stock-specific news.",
+  requiredData: ["AMD daily change", "NVDA daily change"],
 
   trigger(ctx) {
-    const amdChg  = ctx.watchlist.AMD?.chg  ?? 0;
-    const nvdaChg = ctx.watchlist.NVDA?.chg ?? 0;
-    // Only fire when AMD is the laggard (underperforming NVDA by >8%) — the only
-    // actionable direction given Shariah prohibition on short selling.
-    return (amdChg - nvdaChg) < -8;
+    const amd = ctx.watchlist.AMD?.chg, nvda = ctx.watchlist.NVDA?.chg;
+    if (!fin(amd) || !fin(nvda)) return false;   // missing ≠ 0% change
+    return (amd - nvda) < -8;
   },
 
   template(ctx) {
-    const amdChg  = ctx.watchlist.AMD?.chg  ?? 0;
-    const nvdaChg = ctx.watchlist.NVDA?.chg ?? 0;
-    const gap     = amdChg - nvdaChg; // negative = AMD underperforming (laggard)
-    const isBull  = false; // trigger only fires when AMD is laggard — direction always LONG
-    const dir     = "LONG"; // Buy the laggard AMD for sector-convergence mean reversion
-    const entry   = priceFmt(ctx, "AMD", 192.00);
-    const stop    = +(entry * 0.92).toFixed(2);
-    const target  = +(entry * 1.12).toFixed(2);
+    const amdChg  = ctx.watchlist.AMD.chg;
+    const nvdaChg = ctx.watchlist.NVDA.chg;
+    const gap     = amdChg - nvdaChg;
+    const p       = plan(ctx, "AMD", 8, 12);
     return {
-      ticker:       "AMD",
-      direction:    "LONG",
-      horizon:      "1 month",
-      confidence:   52,
-      sizePct:      2,
-      entry, stop, target,
-      entryLogic:   `Correlation break: AMD ${amdChg >= 0 ? '+' : ''}${amdChg.toFixed(1)}% vs NVDA ${nvdaChg >= 0 ? '+' : ''}${nvdaChg.toFixed(1)}% — gap of ${Math.abs(gap).toFixed(1)}%. ${isBull ? "AMD stock-specific catalyst." : "Relative value: AMD lagging NVDA — buy the laggard for convergence."}`,
-      stopLogic:    `Stop at $${stop} (8% below). Correlation breaks can extend — use wider stop.`,
-      targetLogic:  `Target $${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Sector correlation historically recovers within 2–3 weeks.`,
-      sizingRule:   `2% small position — correlation breaks have lower conviction. AMD beta 1.82. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
-      rationale:    `AMD/NVDA 1-day return divergence of ${Math.abs(gap).toFixed(1)}% exceeds 8% threshold. In AI semiconductor sector, high inter-stock correlation means extreme short-term divergences are typically mean-reverting. ${isBull ? "AMD outperformance may be driven by company-specific news (MI450 order, analyst upgrade)." : "AMD underperformance vs NVDA suggests stock-specific drag — relative value opportunity for AMD catch-up."}`,
-      expectedDrivers: ["Correlation reversion", isBull ? "AMD-specific catalyst momentum" : "AMD relative value vs NVDA", "Sector rotation"],
-      requiredDataFreshness: "AMD price < 30min; NVDA price < 30min",
+      ticker: "AMD", direction: "LONG", horizon: "1 month", confidence: 48, sizePct: 2,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} AMD ${amdChg >= 0 ? "+" : ""}${amdChg.toFixed(1)}% vs NVDA ${nvdaChg >= 0 ? "+" : ""}${nvdaChg.toFixed(1)}% (daily closes ${ctx.watchlist.AMD.date || "n/a"} / ${ctx.watchlist.NVDA.date || "n/a"}).`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `2% small position. Current weight ${w(ctx,'AMD').toFixed(1)}%.`,
+      rationale:    `One-day return gap of ${Math.abs(gap).toFixed(1)}pp between AMD and NVDA. Convergence is assumed; no correlation or reversion speed has been measured, and no cause is asserted.`,
+      expectedDrivers: ["Assumed convergence of a one-day divergence"],
+      requiredDataFreshness: "AMD, NVDA daily closes",
     };
   },
 };
@@ -486,39 +498,31 @@ const correlationBreak = {
 
 const highUsdHedge = {
   id:          "high-usd-hedge",
-  name:        "High USD Exposure Hedge",
+  name:        "High USD Exposure",
   category:    "portfolio",
-  description: "Fires when the portfolio's total USD-denominated exposure exceeds 55%, " +
-               "meaning the GBP value of the portfolio is heavily dependent on the USD/GBP " +
-               "rate. SGLN (gold, priced in USD via GBP hedge) provides partial currency " +
-               "diversification. This is a portfolio construction overlay, not a directional " +
-               "macro call.",
-  invalidation: "Portfolio USD exposure naturally reduces through existing position changes; GBP weakens significantly (reduces the urgency of hedging).",
-  riskNotes:    "SGLN itself is USD-denominated but inversely correlated to USD (gold/dollar relationship). Consult CCY_EXP for exact exposure math.",
-  requiredData: ["Portfolio FX exposure data"],
+  description: "Fires when the portfolio's estimated USD exposure exceeds 55%. The estimate uses " +
+               "hand-entered look-through currency weights (seeds CCY_EXP), which are assumptions. " +
+               "SGLN is used as a diversifier; its USD sensitivity is not measured here.",
+  invalidation: "Estimated USD exposure falls below 50%.",
+  riskNotes:    "Look-through currency weights are assumptions, not fund-reported data.",
+  requiredData: ["Portfolio snapshot", "CCY_EXP assumptions", "SGLN price"],
 
   trigger(ctx) {
-    return ctx.portfolio.usdPct > 55;
+    return ctx.portfolio.totalGBP > 0 && ctx.portfolio.usdPct > 55;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "SGLN", 74.00);
-    const stop   = +(entry * 0.95).toFixed(2);
-    const target = +(entry * 1.08).toFixed(2);
+    const p = plan(ctx, "SGLN", 5, 8);
     return {
-      ticker:       "SGLN",
-      direction:    "LONG",
-      horizon:      "3 months",
-      confidence:   60,
-      sizePct:      2,
-      entry, stop, target,
-      entryLogic:   `Portfolio USD exposure at ${ctx.portfolio.usdPct.toFixed(1)}% (>55% threshold). Add SGLN to partially offset USD concentration risk.`,
-      stopLogic:    `Stop at £${stop} (5% below). Review if USD exposure drops below 50% naturally.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). This is a hedge — expect muted upside vs downside protection.`,
-      sizingRule:   `2% small hedge add. Total SGLN after add: ${(w(ctx,'SGLN') + 2).toFixed(1)}%. Keep below 25%.`,
-      rationale:    `Portfolio USD exposure at ${ctx.portfolio.usdPct.toFixed(1)}% is above the 55% diversification threshold. AMD (100% USD) + HIES (25% USD) + HIUS (100% USD) = high GBP sensitivity to USD/GBP moves. Adding SGLN provides partial hedge as gold inversely correlates to broad USD strength. HHI: ${ctx.portfolio.hhi.toLocaleString()}.`,
-      expectedDrivers: ["USD/GBP diversification", "Portfolio HHI reduction", "Gold-dollar inverse correlation"],
-      requiredDataFreshness: "Portfolio data < 1h; FX_SEED usdgbp",
+      ticker: "SGLN", direction: "LONG", horizon: "3 months", confidence: 52, sizePct: 2,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Estimated USD exposure ${ctx.portfolio.usdPct.toFixed(1)}% (>55%).`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `2% add. Total SGLN after add: ${(w(ctx,'SGLN') + 2).toFixed(1)}%. Keep below 25%.`,
+      rationale:    `Estimated USD exposure ${ctx.portfolio.usdPct.toFixed(1)}% (look-through weights are assumptions). HHI ${ctx.portfolio.hhi.toLocaleString()}. Diversification benefit is not quantified.`,
+      expectedDrivers: ["Reduce estimated USD concentration"],
+      requiredDataFreshness: "Portfolio snapshot; USD/GBP daily reference rate",
     };
   },
 };
@@ -527,37 +531,30 @@ const concentrationHedge = {
   id:          "concentration-hedge",
   name:        "Concentration Hedge",
   category:    "portfolio",
-  description: "Fires when the portfolio's Herfindahl-Hirschman Index (HHI) exceeds 2000, " +
-               "indicating excessive concentration. HHI of 2000+ means the top position is " +
-               "disproportionately large relative to a diversified portfolio. Adding a low-" +
-               "correlated position (HBKS sukuk) reduces HHI and provides income ballast " +
-               "against the dominant equity positions.",
-  invalidation: "HHI naturally decreases as portfolio grows via deposits; HBKS liquidity worsens; interest rate regime changes duration attractiveness.",
-  riskNotes:    "HBKS is a halal sukuk ETF with moderate liquidity on T212. Not suitable for large positions.",
-  requiredData: ["Portfolio HHI data"],
+  description: "Fires when portfolio HHI exceeds 2000. HELD: its expression vehicle is HBKS, whose " +
+               "identity is unverified (see CONTESTED_INSTRUMENTS). The sukuk/duration description, " +
+               "beta of 0.62 and income claims previously attached to it had no source and are removed.",
+  invalidation: "HHI falls below 2000.",
+  riskNotes:    "Instrument unverified.",
+  requiredData: ["Portfolio HHI"],
 
   trigger(ctx) {
+    if (isContested("HBKS")) return false;
     return ctx.portfolio.hhi > 2000;
   },
 
   template(ctx) {
-    const entry  = priceFmt(ctx, "HBKS", 8.65);
-    const stop   = +(entry * 0.95).toFixed(2);
-    const target = +(entry * 1.09).toFixed(2);
+    const p = plan(ctx, "HBKS", 5, 9);
     return {
-      ticker:       "HBKS",
-      direction:    "LONG",
-      horizon:      "6 months",
-      confidence:   62,
-      sizePct:      3,
-      entry, stop, target,
-      entryLogic:   `Portfolio HHI at ${ctx.portfolio.hhi.toLocaleString()} (>2000 concentration warning). HBKS adds low-beta income to diversify.`,
-      stopLogic:    `Stop at £${stop} (5% below entry). Duration risk — exit if 10Y yields rise sharply above 5%.`,
-      targetLogic:  `Target £${target} (R≈${((target-entry)/(entry-stop)).toFixed(1)}×). Sukuk income + modest capital appreciation in a flat-to-declining rate environment.`,
-      sizingRule:   `3% allocation. HBKS adds diversification — low beta (0.62), income, halal-compliant. Current weight ${w(ctx,'HBKS').toFixed(1)}%.`,
-      rationale:    `HHI of ${ctx.portfolio.hhi.toLocaleString()} indicates portfolio concentration above optimal diversification levels. HBKS (sukuk ETF, beta 0.62) is the least correlated asset to existing holdings. Adding 3% reduces HHI by ~${Math.round(3 * 30)} points (estimated) and provides steady income alongside AMD growth exposure. Halal-compliant.`,
-      expectedDrivers: ["HHI reduction via diversification", "Sukuk income contribution", "Low-beta ballast vs equity volatility"],
-      requiredDataFreshness: "Portfolio HHI < 1h; HBKS price < 30min",
+      ticker: "HBKS", direction: "LONG", horizon: "6 months", confidence: 50, sizePct: 3,
+      entry: p.entry, stop: p.stop, target: p.target, priceBasis: p.priceBasis,
+      entryLogic:   `${p.entryText} Portfolio HHI ${ctx.portfolio.hhi.toLocaleString()} (>2000).`,
+      stopLogic:    p.stopText,
+      targetLogic:  `${p.targetText} Reward/risk by construction ≈ ${p.rr}×.`,
+      sizingRule:   `3% allocation. Current weight ${w(ctx,'HBKS').toFixed(1)}%.`,
+      rationale:    `HHI ${ctx.portfolio.hhi.toLocaleString()} is above 2000. Expression vehicle pending instrument verification.`,
+      expectedDrivers: ["HHI reduction"],
+      requiredDataFreshness: "Portfolio snapshot",
     };
   },
 };

@@ -36,7 +36,8 @@ const { gateIdea }  = require("./riskGate");
 const { buildLearning } = require("./learningLayer");
 const { getShariahStatus, isTransactionPermitted } = require("./shariahFilter");
 const { scanUniverse } = require("./universeScanner");
-const seeds = require("../../seeds/fallback");
+const seeds = require("../../seeds/fallback");   // CCY_EXP assumptions only
+const { classifyLevels } = require("../analytics/regime");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -87,96 +88,131 @@ function augmentConfidence(baseConfidence, direction, signals) {
 // ── Build context helpers ─────────────────────────────────────────────────────
 
 /**
- * Build a standardised ctx from raw cached/seeded data.
- * Exported so routes/tests can use it without duplicating logic.
+ * Build a standardised ctx from CACHED LIVE data only.
  *
- * @param {object} rawRates   Raw rates object (from cache or seeds)
+ * What changed, and why:
+ *  - Missing rates used to fall back to seeds.RATES_SEED (March 2026 levels),
+ *    so an outage generated trade ideas from numbers nobody had fetched. They
+ *    are now null, listed in ctx.dataQuality.missingRates, and macro/structure
+ *    playbooks do not run without them (null < 0.3 is TRUE in JavaScript, so a
+ *    missing curve would otherwise have read as "flat").
+ *  - Rate deltas and the MA/mean-reversion signals compared LIVE levels with
+ *    the hand-typed monthly RATES_HISTORY_SEED — a live 10Y minus a February
+ *    2026 number typed into a file. They now use the dated FRED history the
+ *    snapshot fetched, and state their window. No history → null / flat.
+ *  - The watchlist and FX fell back to seed prices and 0.7558.
+ *
+ * @param {object} rawRates       snapshot:rates cache value (FRED obs objects)
  * @param {object} portfolioData  { rows, totalGBP, usdgbp } or null
- * @param {object} watchlistData  Raw watchlist array or null
+ * @param {object} watchlistData  snapshot:watchlist cache value or null
+ * @param {object} [opts]         { ratesHistory, hyHistory, fx } — default to the snapshot caches
  * @returns {object} ctx
  */
-function buildCtx(rawRates, portfolioData, watchlistData) {
-  // ── Rates scalars ──
-  function rv(obs, fallback) {
-    if (obs && typeof obs.value === "number") return obs.value;
-    if (typeof obs === "number") return obs;
-    return fallback;
+function buildCtx(rawRates, portfolioData, watchlistData, opts = {}) {
+  const cache = require("../cache");
+
+  function rv(obs) {
+    if (obs && typeof obs === "object" && Number.isFinite(obs.value)) return obs.value;
+    if (Number.isFinite(obs)) return obs;
+    return null;
+  }
+  function od(obs) {
+    return (obs && typeof obs === "object") ? (obs.observedAt || obs.date || null) : null;
   }
 
   const rates = {
-    dgs10:     rv(rawRates?.dgs10,     seeds.RATES_SEED.dgs10.value),
-    dfii10:    rv(rawRates?.dfii10,    seeds.RATES_SEED.dfii10.value),
-    t10yie:    rv(rawRates?.t10yie,    seeds.RATES_SEED.t10yie.value),
-    hy_spread: rv(rawRates?.hy_spread, seeds.RATES_SEED.hy_spread.value),
-    t10y2y:    rv(rawRates?.t10y2y,    seeds.RATES_SEED.t10y2y.value),
+    dgs10:     rv(rawRates?.dgs10),
+    dfii10:    rv(rawRates?.dfii10),
+    t10yie:    rv(rawRates?.t10yie),
+    hy_spread: rv(rawRates?.hy_spread),
+    t10y2y:    rv(rawRates?.t10y2y),
   };
+  const ratesAsOf = Object.fromEntries(Object.keys(rates).map(k => [k, od(rawRates?.[k])]));
+  const missingRates = Object.entries(rates).filter(([, v]) => v == null).map(([k]) => k);
 
-  // ── Rate deltas vs history ──
-  const history   = seeds.RATES_HISTORY_SEED;
-  const hyHistory = seeds.HY_HISTORY_SEED;
-  const prev    = history.length >= 2   ? history[history.length - 2]     : null;
-  const prevHY  = hyHistory.length >= 2 ? hyHistory[hyHistory.length - 2] : null;
+  // ── Deltas from REAL dated history ──
+  const ratesHistory = opts.ratesHistory !== undefined ? opts.ratesHistory : (cache.getWithMeta("snapshot:ratesHistory")?.value || []);
+  const hyHistory    = opts.hyHistory    !== undefined ? opts.hyHistory    : (cache.getWithMeta("snapshot:hyHistory")?.value    || []);
+
+  function windowDelta(points, key) {
+    const v = (points || []).filter(p => Number.isFinite(p?.[key]) && p.m);
+    if (v.length < 2) return { bp: null, window: null };
+    const first = v[0], last = v[v.length - 1];
+    return { bp: Math.round((last[key] - first[key]) * 100), window: { from: first.m, to: last.m, observations: v.length } };
+  }
+  const d10  = windowDelta(ratesHistory, "y10");
+  const dRe  = windowDelta(ratesHistory, "real");
+  const dBe  = windowDelta(ratesHistory, "bei");
+  const dHy  = windowDelta(hyHistory,    "oas");
   const deltas = {
-    dgs10_d:     prev   ? +(rates.dgs10     - prev.y10) * 100                     : 0,   // bps
-    dfii10_d:    prev   ? +(rates.dfii10    - (prev.real ?? rates.dfii10)) * 100   : 0,
-    t10yie_d:    prev   ? +(rates.t10yie    - (prev.bei  ?? rates.t10yie)) * 100   : 0,
-    hy_spread_d: prevHY ? +(rates.hy_spread - prevHY.oas) * 100                    : 0,   // bps
-    t10y2y_d:    prev   ? +(rates.t10y2y   - (prev.y10 - (prev.real != null ? prev.y10 - (prev.y10 - 2.0) : 2.0))) * 100 : 0,
+    dgs10_d:     d10.bp,
+    dfii10_d:    dRe.bp,
+    t10yie_d:    dBe.bp,
+    hy_spread_d: dHy.bp,
+    // The curve CHANGE needs a 2Y history, which is not fetched. null means
+    // "not computable"; no playbook may describe curve direction without it.
+    t10y2y_d:    null,
+    windows: { dgs10: d10.window, dfii10: dRe.window, t10yie: dBe.window, hy_spread: dHy.window },
   };
 
-  // ── Portfolio ──
-  const rows = portfolioData?.rows ?? seeds.POSITIONS_SEED.map(p => ({
-    ticker: p.ticker, valGBP: null, chg: null,
-  }));
-  const totalGBP = portfolioData?.totalGBP ?? 1110;
-  const usdgbp   = portfolioData?.usdgbp   ?? seeds.FX_SEED.usdgbp.value;
+  // ── Portfolio ── (owner's own data; unknown stays unknown)
+  const rows     = portfolioData?.rows ?? [];
+  const totalGBP = Number.isFinite(portfolioData?.totalGBP) ? portfolioData.totalGBP : 0;
+  const fxRaw    = opts.fx !== undefined ? opts.fx : cache.getWithMeta("snapshot:fx")?.value;
+  const usdgbp   = Number.isFinite(portfolioData?.usdgbp) ? portfolioData.usdgbp
+                 : Number.isFinite(fxRaw?.value)          ? fxRaw.value
+                 : null;
 
   const weights = {};
   let usdVal = 0;
   for (const r of rows) {
     if (r.valGBP != null && totalGBP > 0) {
       weights[r.ticker] = r.valGBP / totalGBP;
+      // CCY_EXP is a hand-entered look-through ASSUMPTION, not sourced data.
       const usdFrac = (seeds.CCY_EXP[r.ticker]?.USD ?? 0) / 100;
       usdVal += r.valGBP * usdFrac;
     }
   }
-
-  const hhi = Math.round(
-    Object.values(weights).reduce((s, w) => s + w * w, 0) * 10_000
-  );
+  const hhi = Math.round(Object.values(weights).reduce((s, w) => s + w * w, 0) * 10_000);
   const usdPct = totalGBP > 0 ? (usdVal / totalGBP) * 100 : 0;
 
-  // ── Watchlist ──
+  // ── Watchlist: daily closes with their dates — never executable prices ──
   const watchlist = {};
-  const wl = watchlistData ?? seeds.WATCHLIST_SEED;
-  for (const item of wl) {
-    watchlist[item.sym ?? item.ticker] = { price: item.price, chg: item.chg };
+  for (const item of (Array.isArray(watchlistData) ? watchlistData : [])) {
+    if (!Number.isFinite(item?.price)) continue;
+    watchlist[item.sym ?? item.ticker] = {
+      price: item.price, chg: Number.isFinite(item.chg) ? item.chg : null,
+      date: item.date || null, source: item.source || null, currency: "USD", executable: false,
+    };
   }
 
-  // ── Signals ──
-  const ratesHistory = seeds.RATES_HISTORY_SEED;
-  const signals = computeSignals(rates, ratesHistory, watchlist);
+  // ── Signals (only on real history) ──
+  const signals = missingRates.length
+    ? { maSignal: "flat", maConviction: 0, momentumSignal: "flat", momentumConviction: 0, reversionSignal: "flat", reversionConviction: 0,
+        details: { note: `Signals not computed — missing rates: ${missingRates.join(", ")}.` } }
+    : computeSignals(rates, ratesHistory, watchlist);
+  const signalsBasis = ratesHistory.length
+    ? `FRED DGS10 daily history, ${ratesHistory.length} observations ${ratesHistory[0]?.m} → ${ratesHistory[ratesHistory.length - 1]?.m}. MA windows are observations, not months.`
+    : "No rate history available — MA and mean-reversion signals are flat by construction.";
 
-  // ── Regime (mirrors classifyRegime from brief.js) ──
-  const regimeLabels = [];
-  if      (rates.t10y2y < 0)   regimeLabels.push("Inverted curve");
-  else if (rates.t10y2y < 0.3) regimeLabels.push("Flat curve");
-  else                          regimeLabels.push("Bear steepener");
-  if      (rates.dfii10 > 2.0) regimeLabels.push("High real yields");
-  else if (rates.dfii10 > 1.5) regimeLabels.push("Elevated real yields");
-  if      (rates.hy_spread > 4.5)                            regimeLabels.push("Credit stress");
-  else if (rates.hy_spread > 3.5)                            regimeLabels.push("Risk-off");
-  else if (rates.hy_spread > 3.0 && rates.dfii10 > 1.5)     regimeLabels.push("Bear flattener");
-  if (rates.dgs10 > 4.5) regimeLabels.push("Rates restrictive");
-  const regime = regimeLabels.length ? regimeLabels.join(" + ") : "Broadly neutral";
+  // ── Regime: shape and level only (see analytics/regime.js) ──
+  const levels = classifyLevels(rates);
 
   return {
     rates,
+    ratesAsOf,
     deltas,
     portfolio: { rows, totalGBP, weights, hhi, usdPct },
     watchlist,
-    regime,
+    regime: levels.regime,
     signals,
+    signalsBasis,
+    dataQuality: {
+      missingRates,
+      ratesComplete: missingRates.length === 0,
+      historyObservations: ratesHistory.length,
+      fxAvailable: usdgbp != null,
+    },
     today: new Date(),
     _usdgbp: usdgbp,
   };
@@ -196,13 +232,22 @@ function generateIdeas(ctx, opts = {}) {
   const allowedCategories = opts.allowedCategories ?? ["macro", "structure", "portfolio"];
 
   const portfolioRows = ctx.portfolio?.rows ?? [];
-  const totalGBP      = ctx.portfolio?.totalGBP ?? 1110;
-  const usdgbp        = ctx._usdgbp ?? seeds.FX_SEED.usdgbp.value;
+  // 0, not £1,110. Sizing rules downstream treat a non-positive total as
+  // "weight unknown" rather than computing a percentage of a book that
+  // does not exist.
+  const totalGBP      = Number.isFinite(ctx.portfolio?.totalGBP) ? ctx.portfolio.totalGBP : 0;
+  const usdgbp        = Number.isFinite(ctx._usdgbp) ? ctx._usdgbp : null;
+  // Macro and structure playbooks compare rates against thresholds. With a
+  // rate missing, `null < 0.3` is true in JavaScript — a missing curve reads
+  // as "flat". They do not run on incomplete data.
+  const ratesComplete = ctx.dataQuality ? ctx.dataQuality.ratesComplete
+                      : ["dgs10", "dfii10", "t10yie", "hy_spread", "t10y2y"].every(k => Number.isFinite(ctx.rates?.[k]));
 
   const tickets = [];
 
   for (const playbook of PLAYBOOKS) {
     if (!allowedCategories.includes(playbook.category)) continue;
+    if ((playbook.category === "macro" || playbook.category === "structure") && !ratesComplete) continue;
 
     // Check trigger
     let triggered = false;
@@ -298,6 +343,12 @@ function generateIdeas(ctx, opts = {}) {
       expectedDrivers:         partial.expectedDrivers  ?? [],
       requiredDataFreshness:   partial.requiredDataFreshness ?? "Daily",
       sourceMode:              "deterministic",
+      // Where the levels came from. null levels mean no sourced price existed;
+      // they are never back-filled. No price here is an executable quote.
+      priceBasis:              partial.priceBasis ?? null,
+      priced:                  partial.entry != null,
+      dataAsOf:                ctx.ratesAsOf ?? null,
+      signalsBasis:            ctx.signalsBasis ?? null,
       shariahStatus,            // { compliant, status, name, sector, index, note? }
       learning:                null, // filled below
     };
@@ -311,6 +362,7 @@ function generateIdeas(ctx, opts = {}) {
   // Only add tickers not already covered by a playbook idea.
   const coveredTickers = new Set(tickets.map(t => t.ticker));
   try {
+    if (!ratesComplete) throw new Error("rates incomplete — universe scan skipped");
     const scanCandidates = scanUniverse(ctx, {
       minScore:      1,
       maxResults:    Math.min(maxIdeas * 3, 20),
@@ -381,6 +433,12 @@ function generateIdeas(ctx, opts = {}) {
         expectedDrivers:       candidate.macroAlignment,
         requiredDataFreshness: "Daily",
         sourceMode:            "deterministic",
+        priceBasis:            entry != null
+          ? { available: true, price: entry, currency: "USD", date: ctx.watchlist?.[candidate.ticker]?.date ?? null,
+              source: ctx.watchlist?.[candidate.ticker]?.source ?? null, priceType: "daily close (not an executable quote)" }
+          : { available: false, reason: `No price feed for ${candidate.ticker}.` },
+        priced:                entry != null,
+        dataAsOf:              ctx.ratesAsOf ?? null,
         shariahStatus,
         learning:              null,
       };

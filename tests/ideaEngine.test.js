@@ -276,13 +276,16 @@ describe("Playbook triggers", () => {
     expect(findPlaybook("mean-reversion").trigger(ctx)).toBe(false);
   });
 
-  // breakout-failure: hy_spread > 4.0 AND hy_spread_d < -10
-  test("breakout-failure triggers when hy_spread > 4.0 and hy_spread_d < -10", () => {
+  // breakout-failure is HELD: it expresses its view through HBKS, whose asset
+  // class is asserted inconsistently (UK equity ETF in the Shariah catalogue,
+  // sukuk/duration ETF in the playbook). It must not emit a ticket on a
+  // qualifying credit signal until the instrument is verified.
+  test("breakout-failure does NOT trigger while HBKS identity is contested", () => {
     const ctx = baseCtx({
       rates:  { dgs10: 4.2, dfii10: 1.85, t10yie: 2.38, hy_spread: 4.2, t10y2y: 0.51 },
-      deltas: { dgs10_d: 0, dfii10_d: 0, t10yie_d: 0, hy_spread_d: -15, t10y2y_d: 0 },
+      deltas: { dgs10_d: 0, dfii10_d: 0, t10yie_d: 0, hy_spread_d: -15, t10y2y_d: null },
     });
-    expect(findPlaybook("breakout-failure").trigger(ctx)).toBe(true);
+    expect(findPlaybook("breakout-failure").trigger(ctx)).toBe(false);
   });
   test("breakout-failure does NOT trigger when hy_spread <= 4.0", () => {
     const ctx = baseCtx({
@@ -317,9 +320,11 @@ describe("Playbook triggers", () => {
   });
 
   // concentration-hedge: hhi > 2000
-  test("concentration-hedge triggers when hhi > 2000", () => {
-    const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 2500, usdPct: 30 } });
-    expect(findPlaybook("concentration-hedge").trigger(ctx)).toBe(true);
+  test("concentration-hedge does NOT trigger while HBKS identity is unverified", () => {
+    // Its only vehicle is HBKS, whose asset class is contested (equity ETF vs
+    // sukuk fund) and cannot be verified from here. Held, like breakout-failure.
+    const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 2500, usdPct: 0 } });
+    expect(findPlaybook("concentration-hedge").trigger(ctx)).toBe(false);
   });
   test("concentration-hedge does NOT trigger when hhi <= 2000", () => {
     const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 1500, usdPct: 30 } });

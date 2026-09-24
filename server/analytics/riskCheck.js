@@ -2,7 +2,10 @@
  * server/analytics/riskCheck.js
  * ─────────────────────────────────────────────────────────────────────────────
  * Pre-trade risk checks — pure functions, no I/O.
- * Reuses seeds.BETAS, seeds.CCY_EXP, seeds.EARNINGS_CAL, seeds.MACRO_CAL.
+ * Currency look-through weights come from seeds.CCY_EXP — hand-entered
+ * ASSUMPTIONS about fund holdings, not sourced data; checks that use them say so.
+ * The event calendar is passed in (see analytics/eventCalendar.js); the old
+ * year-less seed calendar is no longer read here.
  *
  * Usage:
  *   const { runPreTradeCheck } = require("../analytics/riskCheck");
@@ -182,18 +185,27 @@ function checkRRatio(idea) {
 }
 
 /** Check 5: Material events within the idea horizon */
-function checkEventRisk(idea) {
+function checkEventRisk(idea, calendar) {
+  // No calendar is not the same as no events. It used to read a year-less seed
+  // list that recurred every spring; now an absent calendar is a WARN that says
+  // exactly that, so the check cannot silently pass on missing data.
+  if (!calendar || !calendar.available) {
+    return {
+      name:   "Event Risk",
+      status: "WARN",
+      detail: `Event calendar unavailable — cannot rule out scheduled events within ${idea.horizon}. ${calendar?.reason || ""}`.trim(),
+    };
+  }
   const horizonDays = horizonToDays(idea.horizon);
-  const cutoff      = new Date(Date.now() + horizonDays * 86_400_000);
-  const allEvents   = [...(seeds.EARNINGS_CAL ?? []), ...(seeds.MACRO_CAL ?? [])];
+  const now         = Date.now();
+  const cutoff      = new Date(now + horizonDays * 86_400_000);
   const hits        = [];
 
-  for (const ev of allEvents) {
-    const d = parseEventDate(ev.date);
-    if (!d || d > cutoff) continue;
-    // Flag if ticker matches OR if it's a HIGH-importance macro event
+  for (const ev of calendar.events) {
+    const d = ev.at instanceof Date ? ev.at : new Date(ev.date);
+    if (Number.isNaN(d.getTime()) || d < new Date(now - 86_400_000) || d > cutoff) continue;
     if (ev.ticker === idea.ticker || ev.importance === "HIGH") {
-      hits.push(`${ev.date}: ${ev.event} (${ev.ticker}, ${ev.importance})`);
+      hits.push(`${ev.date}: ${ev.event} (${ev.ticker}, ${ev.importance}${ev.kind === "demo" ? ", DEMO" : ""})`);
     }
   }
 
@@ -202,8 +214,8 @@ function checkEventRisk(idea) {
     name:   "Event Risk",
     status,
     detail: hits.length > 0
-      ? `${hits.length} event(s) within ${idea.horizon}: ${hits.slice(0, 3).join(" | ")}`
-      : `No material events within ${idea.horizon} horizon.`,
+      ? `${hits.length} event(s) within ${idea.horizon}: ${hits.slice(0, 3).join(" | ")} [calendar: ${calendar.source}]`
+      : `No material events within ${idea.horizon} horizon [calendar: ${calendar.source}].`,
   };
 }
 
@@ -218,13 +230,18 @@ function checkEventRisk(idea) {
  * @param {number}   usdgbp         Current USD/GBP rate
  * @returns {{ pass: boolean, level: "OK"|"WARN"|"BLOCK", checks: Array }}
  */
-function runPreTradeCheck(idea, portfolioRows = [], totalGBP = 0, usdgbp = 0.76) {
+/**
+ * @param {object} [opts.calendar]  from analytics/eventCalendar.getCalendar();
+ *   defaults to the live cached calendar.
+ */
+function runPreTradeCheck(idea, portfolioRows = [], totalGBP = 0, usdgbp = null, opts = {}) {
+  const calendar = opts.calendar !== undefined ? opts.calendar : require("./eventCalendar").getCalendar();
   const checks = [
     checkPositionSize(idea, portfolioRows, totalGBP),
     checkHHI(idea, portfolioRows, totalGBP),
     checkFxExposure(idea, portfolioRows, totalGBP),
     checkRRatio(idea),
-    checkEventRisk(idea),
+    checkEventRisk(idea, calendar),
   ];
 
   const hasBlock = checks.some(c => c.status === "BLOCK");

@@ -19,6 +19,35 @@ const { fetchWithTimeout, withRetry, isRetryable } = require("../retry");
 
 const BASE_URL = "https://api.stlouisfed.org/fred";
 
+/**
+ * Per-series metadata we know from FRED's series pages. `unit` is FRED's own
+ * unit, not a display unit: BAMLH0A0HYM2 is PERCENT (3.17 means 317bp), which
+ * callers must convert explicitly if they want basis points.
+ *
+ * `profile` selects the freshness rule in server/provenance.js. Spot oil and
+ * H.10 FX publish daily observations in weekly batches, so a week of lag there
+ * is normal publication, not a provider failure.
+ */
+const SERIES_META = {
+  DGS10:        { unit: "percent",     profile: "fred-daily" },
+  DFII10:       { unit: "percent",     profile: "fred-daily" },
+  T10YIE:       { unit: "percent",     profile: "fred-daily" },
+  T10Y2Y:       { unit: "percent",     profile: "fred-daily" },
+  DGS2:         { unit: "percent",     profile: "fred-daily" },
+  DFF:          { unit: "percent",     profile: "fred-daily" },
+  BAMLH0A0HYM2: { unit: "percent",     profile: "fred-daily" },
+  VIXCLS:       { unit: "index",       profile: "fred-daily" },
+  DCOILBRENTEU: { unit: "USD/bbl",     profile: "fred-daily-weekly-release" },
+  DCOILWTICO:   { unit: "USD/bbl",     profile: "fred-daily-weekly-release" },
+  DEXUSEU:      { unit: "USD per EUR", profile: "fred-daily-weekly-release" },
+};
+
+// How many recent rows to request so the newest VALID observation can be
+// recovered. FRED marks holidays and not-yet-published days with ".", so
+// asking for only the latest row (limit=1) returned "." and threw, and the
+// caller lost a series that had a perfectly good observation one row back.
+const LATEST_LOOKBACK_ROWS = 10;
+
 function apiKey() {
   const k = process.env.FRED_API_KEY;
   if (!k) {
@@ -27,11 +56,20 @@ function apiKey() {
   return k;
 }
 
+function seriesMeta(seriesId) {
+  return SERIES_META[seriesId] || { unit: null, profile: null };
+}
+
 /**
- * getLatestObservation — fetch the most recent value for a FRED series.
+ * getLatestObservation — the most recent VALID value for a FRED series.
+ *
+ * Returns a Fact-shaped object. `date` is the observation date FRED reports;
+ * `retrievedAt` is when we asked. Nothing downstream should treat retrievedAt
+ * as evidence that the figure is current.
  *
  * @param {string} seriesId  e.g. "DGS10"
- * @returns {{ seriesId, value, date, source }}
+ * @returns {{ seriesId, value, date, observedAt, observedAtPrecision, retrievedAt,
+ *             unit, profile, kind, source, skippedMissing }}
  */
 async function getLatestObservation(seriesId) {
   const url = new URL(`${BASE_URL}/series/observations`);
@@ -39,9 +77,7 @@ async function getLatestObservation(seriesId) {
   url.searchParams.set("api_key",     apiKey());
   url.searchParams.set("file_type",   "json");
   url.searchParams.set("sort_order",  "desc");
-  url.searchParams.set("limit",       "1");
-  // Exclude observations with missing values (period before series starts, etc.)
-  url.searchParams.set("observation_start", "2020-01-01");
+  url.searchParams.set("limit",       String(LATEST_LOOKBACK_ROWS));
 
   const json = await withRetry(
     async () => {
@@ -55,19 +91,33 @@ async function getLatestObservation(seriesId) {
     },
     { attempts: 3, shouldRetry: (e) => isRetryable(e) }
   );
+  const retrievedAt = new Date().toISOString();
 
   const obs = json.observations;
   if (!obs || obs.length === 0) throw new Error(`No observations for ${seriesId}`);
 
-  // FRED uses "." for missing values
-  const latest = obs.find(o => o.value !== ".");
-  if (!latest) throw new Error(`Only missing values for ${seriesId}`);
+  // Rows arrive newest-first. "." is FRED's missing-value marker.
+  const idx = obs.findIndex(o => o.value !== "." && Number.isFinite(parseFloat(o.value)));
+  if (idx === -1) {
+    throw new Error(`No valid value in the latest ${obs.length} ${seriesId} rows (all ".")`);
+  }
+  const latest = obs[idx];
+  const meta   = seriesMeta(seriesId);
 
   return {
     seriesId,
-    value:  parseFloat(latest.value),
-    date:   latest.date,
-    source: "FRED",
+    value:               parseFloat(latest.value),
+    date:                latest.date,
+    observedAt:          latest.date,
+    observedAtPrecision: "date",
+    retrievedAt,
+    unit:                meta.unit,
+    profile:             meta.profile,
+    kind:                "observed",
+    source:              "FRED",
+    // How many newer rows were "." — non-zero means the newest calendar day
+    // had no value (holiday or not yet published), which is visible, not hidden.
+    skippedMissing:      idx,
   };
 }
 
@@ -101,11 +151,17 @@ async function getRecentHistory(seriesId, limit = 7) {
   );
 
   const obs = (json.observations || [])
-    .filter(o => o.value !== ".")
+    .filter(o => o.value !== "." && Number.isFinite(parseFloat(o.value)))
     .map(o => ({ date: o.date, value: parseFloat(o.value) }))
     .reverse(); // ascending order
 
-  return { seriesId, observations: obs, source: "FRED" };
+  return {
+    seriesId,
+    observations: obs,
+    source:       "FRED",
+    unit:         seriesMeta(seriesId).unit,
+    retrievedAt:  new Date().toISOString(),
+  };
 }
 
 /**
@@ -132,7 +188,8 @@ async function getAllRates() {
     if (res.status === "fulfilled") {
       rates[field] = res.value;
     } else {
-      // Log and mark as missing — caller uses seed fallback for missing fields
+      // Missing stays missing. The caller renders it as unavailable; it must
+      // not be back-filled with a seed or a remembered level.
       console.error(`[FRED] ${id} failed:`, res.reason?.message);
       rates[field] = null;
     }
@@ -140,4 +197,4 @@ async function getAllRates() {
   return rates;
 }
 
-module.exports = { getLatestObservation, getRecentHistory, getAllRates };
+module.exports = { getLatestObservation, getRecentHistory, getAllRates, SERIES_META, LATEST_LOOKBACK_ROWS };

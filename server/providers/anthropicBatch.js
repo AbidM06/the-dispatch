@@ -19,6 +19,7 @@
 "use strict";
 
 const { fetchWithTimeout, withRetry, isRetryable } = require("../retry");
+const { extractSearchSources } = require("./anthropic");
 
 const BATCH_URL = "https://api.anthropic.com/v1/messages/batches";
 
@@ -106,7 +107,9 @@ async function getBatchStatus(batchId) {
  * fetchResults — pull the JSONL result stream and key it by custom_id.
  *
  * Results arrive in arbitrary order, so they must be keyed rather than indexed.
- * Each entry is `{ text, error }` — exactly one of the two is set.
+ * Each entry is `{ text, sources, error }`. `sources` carries the pages
+ * web_search actually returned, so batched reports can resolve their cite
+ * tags exactly as synchronously-generated ones do.
  */
 async function fetchResults(resultsUrl) {
   const res = await fetchWithTimeout(resultsUrl, { headers: headers() }, 120_000);
@@ -127,14 +130,20 @@ async function fetchResults(resultsUrl) {
     if (!id) continue;
 
     if (entry.result?.type === "succeeded") {
-      const text = (entry.result.message?.content || [])
+      const content = entry.result.message?.content || [];
+      const text = content
         .filter(b => b.type === "text")
         .map(b => b.text)
         .join("\n");
-      out[id] = { text, error: null };
+      // Keep the web_search_tool_result blocks. Filtering to text-only discarded
+      // them, so every batched report finalised with an empty sources array and
+      // its cite tags unresolvable — while still being marked grounded:true.
+      // Same parser the synchronous path uses, so the two cannot drift.
+      const sources = extractSearchSources(content);
+      out[id] = { text, sources, error: null };
     } else {
       const reason = entry.result?.error?.message || entry.result?.type || "unknown";
-      out[id] = { text: null, error: reason };
+      out[id] = { text: null, sources: [], error: reason };
       console.warn(`[batch] request ${id} did not succeed: ${reason}`);
     }
   }

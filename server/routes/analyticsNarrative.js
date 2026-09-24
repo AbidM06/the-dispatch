@@ -197,7 +197,7 @@ function buildFallbackNarrative(pairs, regime) {
       `10Y real yield at ${regime?.metrics?.dfii10 ?? "?"}% — ${(regime?.metrics?.dfii10 || 0) > 1.5 ? "high real rates continue to apply discount-rate pressure on growth equity and gold" : "supportive for risk assets if growth holds"}`,
       `Regime: ${regime?.label || "Uncertain"} — position accordingly across rates, credit, and commodity exposure`,
     ],
-    watch_list: ["Next FOMC meeting — dot plot revision", "CPI print — breakeven inflation confirmation", "HY spread direction — credit leads equity vol by 4-8 weeks"],
+    watch_list: ["Next FOMC meeting — dot plot revision", "CPI print — breakeven inflation confirmation", "HY spread direction (lead/lag vs equity vol is a hypothesis to test, not assumed)"],
   };
 }
 

@@ -21,25 +21,73 @@ const TTL_CLIENT_MS  = 4 * 60 * 60 * 1000;
 function now() { return new Date().toISOString(); }
 
 /**
- * Extract numeric rate value from a FRED observation object.
- * getAllRates() returns { field: { seriesId, observations: [{date, value}], source } }.
- * We need the latest observation's value (a number), not the whole object.
+ * Extract the numeric value from a FRED Fact.
+ *
+ * getAllRates() resolves { seriesId, value, date, source } — it has never
+ * returned an `observations` array. The old implementation probed for one,
+ * missed, and returned its caller-supplied fallback every single time, so the
+ * Sales tab ran on the hardcoded constants 4.2 / 1.85 / 2.38 / 3.2 / 0.5 and
+ * passed them to the model described as "latest FRED data". That is worse than
+ * having no data: it is invented data wearing a source label.
+ *
+ * There is no fallback parameter any more. Missing means null, and callers must
+ * say so rather than substitute a plausible number.
  */
-function rateVal(obs, fallback = null) {
-  if (typeof obs === "number") return obs;
-  if (obs && Array.isArray(obs.observations) && obs.observations.length > 0) {
-    return obs.observations[0].value;
-  }
-  return fallback;
+function rateVal(fact) {
+  if (typeof fact === "number") return Number.isFinite(fact) ? fact : null;
+  if (fact && typeof fact === "object" && Number.isFinite(fact.value)) return fact.value;
+  return null;
+}
+
+/** Observation date of a Fact — when measured, not when fetched. */
+function rateDate(fact) {
+  return (fact && typeof fact === "object" && fact.date) ? fact.date : null;
 }
 function envelope(data, source = "live", stale = false) {
   return { source, fetchedAt: now(), stale, data };
 }
 
+/**
+ * describeRegime — name the curve SHAPE from a level, never a direction.
+ *
+ * "Steepener" and "flattener" describe how a curve is MOVING. A single level
+ * cannot support either word: 10Y-2Y at +0.5% tells you the curve is positively
+ * sloped, not whether it steepened or flattened to get there. The previous
+ * logic also derived "Bear Flattener" from the HY spread, which is a credit
+ * measure and says nothing about the curve at all.
+ *
+ * Until a prior observation is available to difference against, this reports
+ * shape and credit conditions as separate, separately-sourced facts.
+ */
+function describeRegime(rates = {}) {
+  const parts = [];
+  const { t10y2y, hy_spread, dfii10 } = rates;
+
+  if (t10y2y != null) {
+    if (t10y2y < 0)        parts.push("Inverted curve");
+    else if (t10y2y < 0.3) parts.push("Flat curve");
+    else                   parts.push("Positively sloped curve");
+  }
+  if (hy_spread != null) {
+    if (hy_spread > 4.5)      parts.push("credit stress");
+    else if (hy_spread > 3.5) parts.push("credit widening");
+    else                      parts.push("credit calm");
+  }
+  if (dfii10 != null && dfii10 > 2.0)      parts.push("high real yields");
+  else if (dfii10 != null && dfii10 > 1.5) parts.push("elevated real yields");
+
+  return parts.length ? parts.join(" + ") : "Regime undetermined — inputs unavailable";
+}
+
 // ── Deterministic cross-asset matrix from FRED rates ──────────────────────────
 // Used as fallback when AI unavailable. Scores -2 (very bearish) to +2 (very bullish).
 function buildCrossAssetMatrix(rates = {}) {
-  const { dgs10 = 4.2, dfii10 = 1.85, t10y2y = 0.5, hy_spread = 3.2, t10y_ie = 2.38 } = rates;
+  // No invented inputs. These defaults used to be 4.2 / 1.85 / 0.5 / 3.2 / 2.38,
+  // so a FRED outage produced a fully-scored BULLISH/BEARISH matrix built out of
+  // constants — signals with no measurement behind them. If the inputs the
+  // matrix depends on are missing, it returns nothing and the caller says so.
+  const { dgs10 = null, dfii10 = null, t10y2y = null, hy_spread = null, t10y_ie = null } = rates;
+  if ([dfii10, t10y2y, hy_spread, t10y_ie].some(v => v == null)) return [];
 
   function score(val, [ vbear, bear, neutral, bull, vbull ]) {
     if (val <= vbear)  return -2;
@@ -103,7 +151,7 @@ function buildCrossAssetMatrix(rates = {}) {
       asset: "US Equities — Value / Cyclical",
       signal: label(curveScore + 1),
       score: Math.max(-2, Math.min(2, curveScore + 1)),
-      rationale: `Yield curve at +${t10y2y}% — ${t10y2y > 0.5 ? "mild steepener supports banks and cyclicals; financials, energy, industrials in focus" : t10y2y > 0 ? "flat curve limits bank margin expansion; value vs growth rotation cautious" : "inverted curve pressures cyclicals and raises recession risk"}.`,
+      rationale: `Yield curve at +${t10y2y}% — ${t10y2y > 0.5 ? "positively sloped (a level, not a steepening) — conventionally read as supportive of bank net interest margins" : t10y2y > 0 ? "flat — conventionally read as a constraint on bank margins" : "inverted — historically associated with later recessions, with long and variable lags"}.`,
     },
     {
       asset: "EM Equities",
@@ -133,192 +181,39 @@ function buildCrossAssetMatrix(rates = {}) {
 }
 
 // ── Deterministic client impact fallback ──────────────────────────────────────
-function buildClientFallback(rates = {}, regime = "") {
-  const { dfii10 = 1.85, hy_spread = 3.2, t10y2y = 0.5, dgs10 = 4.2, t10y_ie = 2.38 } = rates;
-  const riskOff = hy_spread > 3.5;
-  const yieldHigh = dgs10 > 4.5;
-  const realYieldHigh = dfii10 > 1.8;
+/*
+ * buildClientFallback() and buildMacroViewFallback() used to live here.
+ *
+ * They were the same failure class as the six fabricated research reports that
+ * were deleted in the cross-asset rewrite — and were missed at the time, while
+ * CLAUDE.md claimed the class was gone. Between them they asserted a Fed level
+ * of "4.25-4.50%", scenario probabilities of 60/20/20, a complete trade idea
+ * with entry, stop and target, CPI/FOMC/NFP catalysts dated April and May 2026,
+ * and client talking points claiming real yields were "the highest since
+ * 2007-era". None of it was measured; all of it rendered exactly like live
+ * desk output.
+ *
+ * On AI failure these routes now return HTTP 503 with available:false, the same
+ * contract /api/research uses. A Sales tab that says nothing is worth more than
+ * one that invents a catalyst calendar.
+ */
 
-  return [
-    {
-      type: "Pension Fund",
-      icon: "🏛️",
-      urgency: realYieldHigh ? "HIGH" : "MEDIUM",
-      primaryConcern: realYieldHigh
-        ? `Rising real yields (${dfii10}%) are improving funding ratios but marking down long-duration bond portfolios — LDI hedges are underwater.`
-        : `Funded status management in a volatile rate environment — balancing liability hedging with return-seeking allocations.`,
-      portfolioImpact: `Long-duration bonds down as real yields rise to ${dfii10}%. Equity allocation performing ${riskOff ? "poorly in risk-off" : "reasonably"}, creating mixed signals for de-risking triggers. LDI overlay cost has increased.`,
-      theyAreAsking: [
-        "Should we be adding to our rate hedge given where real yields are?",
-        "How does the current spread environment affect our credit allocation?",
-        "Are there any solutions to lock in current yields on the liability side?",
-      ],
-      talkingPoint: `With real yields at ${dfii10}% — the highest since 2007-era — many pension schemes are seeing funding ratios improve but mark-to-market losses on legacy bond positions. The opportunity is to discuss liability immunisation using interest rate swaps or long-dated gilts/Treasuries at these yields before the next leg of rate cuts.`,
-      productOpportunity: `Long-dated interest rate swaps or inflation-linked bonds to lock in real yields for liability matching.`,
-    },
-    {
-      type: "Hedge Fund (Global Macro)",
-      icon: "⚡",
-      urgency: "HIGH",
-      primaryConcern: `Positioning crowding in rates shorts and USD longs — risk of violent unwind if Fed pivots or geopolitical risk premium collapses suddenly.`,
-      portfolioImpact: `Rates short (paid fixed) positions profitable with 10Y at ${dgs10}%. USD longs working with real yield support. HY spread widening to ${hy_spread}% creating credit short opportunities. Macro vol elevated.`,
-      theyAreAsking: [
-        "What's your desk's view on when the Fed pivots and how sharp the move will be?",
-        "Are you seeing any systematic unwind in rate shorts that could squeeze the trade?",
-        "What's the cleanest expression of a hard landing / soft landing bet right now?",
-      ],
-      talkingPoint: `The macro setup is clear: real yields at ${dfii10}% with HY spreads at ${hy_spread}% is a risk-off configuration that historically precedes either a Fed pivot or credit stress. The key question is timing — we're watching the ${t10y2y > 0 ? "mild steepening" : "flat"} curve for signals that the market is pricing a growth slowdown. Our desk is positioned for rates vol given the asymmetric payoff.`,
-      productOpportunity: `Rates vol strategies (receiver swaptions or rate cap/floor structures) to express central bank pivot uncertainty.`,
-    },
-    {
-      type: "Asset Manager (Long-Only)",
-      icon: "📊",
-      urgency: riskOff ? "HIGH" : "MEDIUM",
-      primaryConcern: `Benchmark underperformance risk as HY spreads widen to ${hy_spread}% and growth equity multiples compress — active managers under pressure to justify fees.`,
-      portfolioImpact: `Credit allocation dragging on returns with HY OAS at ${hy_spread}%. Rate-sensitive sectors (utilities, REITs) underperforming. Value vs growth rotation ongoing. ${realYieldHigh ? "High real yields structurally challenging for long-duration equity multiples." : "Real yields moderate — growth equities holding up."}`,
-      theyAreAsking: [
-        "What sectors are positioned to outperform in a higher-for-longer environment?",
-        "How are your flows looking — are other managers reducing risk here?",
-        "Is there a case for rotating from growth into value/cyclicals at current spreads?",
-      ],
-      talkingPoint: `With HY spreads at ${hy_spread}% and real yields at ${dfii10}%, the market is telling you to be selective. The case for value over growth strengthens in this environment — financials benefit from a ${t10y2y > 0 ? "positive yield curve" : "flat curve recovery"}, and energy names provide inflation linkage. We'd be showing you ideas in dividend-paying cyclicals with strong balance sheets that are less sensitive to duration.`,
-      productOpportunity: `Sector rotation strategies — long value/cyclicals vs short growth/high-duration equities via basket swaps or ETF overlays.`,
-    },
-    {
-      type: "Insurance Company",
-      icon: "🛡️",
-      urgency: "MEDIUM",
-      primaryConcern: `Reinvestment rate opportunity is improving but legacy portfolio mark-to-market losses and Solvency II / NAIC capital constraints limit ability to realise gains.`,
-      portfolioImpact: `New money yields at ${dgs10}% are attractive for reinvestment. Existing long-duration bond book marked down. IG credit allocations at ${hy_spread > 3 ? "elevated" : "normal"} spread levels. Real yield at ${dfii10}% improves ALM economics for new business.`,
-      theyAreAsking: [
-        "What's the optimal duration to reinvest at in the current environment?",
-        "Are IG spreads wide enough to add credit vs Treasuries for new money allocation?",
-        "How should we think about our Solvency II SCR with rates at this level?",
-      ],
-      talkingPoint: `For insurers, ${dgs10}% on 10Y Treasuries is compelling for new liability matching — the question is duration and quality. We're seeing appetite for 7-10Y IG credit at ${hy_spread > 3 ? "spreads that offer 150bps+ over Treasuries" : "current spread levels"}, which provides carry while staying within Solvency II credit quality constraints. Happy to model the impact on your SCR.`,
-      productOpportunity: `7-10Y IG credit or structured credit (CLO AAA tranches) offering enhanced yield within regulatory capital constraints.`,
-    },
-    {
-      type: "Private Bank / Wealth Manager",
-      icon: "💎",
-      urgency: riskOff ? "HIGH" : "MEDIUM",
-      primaryConcern: `HNW client portfolios showing volatility with multi-asset drawdown — clients asking about capital preservation and whether to rotate into cash/short-term bonds at ${dgs10}% yield.`,
-      portfolioImpact: `International clients exposed to USD/GBP FX moves (current context: GBP/USD and USD rates divergence). Equity holdings under pressure. Alternative allocations (PE, real estate) facing valuation pressure from higher rates. Cash and short-term bonds now attractive at ${dgs10}%.`,
-      theyAreAsking: [
-        "Should we be moving into cash and T-bills given 5%+ short rates?",
-        "How are our alternative allocations affected by higher discount rates?",
-        "What's the FX exposure on our US holdings — should we hedge?",
-      ],
-      talkingPoint: `For HNW clients, the message is nuanced: yes, cash and T-bills at ${dgs10}% are the most attractive they've been in 15 years, but sitting in cash means missing a potential rate rally when the Fed cuts. The sweet spot is laddering into 2-5Y Treasuries or IG credit — capturing carry while maintaining flexibility. On FX, with GBP/USD at current levels, USD-denominated assets for UK-based clients have an extra FX headwind worth addressing.`,
-      productOpportunity: `Treasury ladder strategies (2-5Y) or principal-protected structured notes with rates participation — capital preservation with upside optionality.`,
-    },
-    {
-      type: "Mutual Fund",
-      icon: "🌊",
-      urgency: "MEDIUM",
-      primaryConcern: `Retail investor redemption pressure as market volatility rises — fund managers forced to hold cash buffers that drag on performance vs benchmark.`,
-      portfolioImpact: `${riskOff ? "Risk-off environment triggering retail redemptions" : "Flows broadly stable but rotation away from growth funds"}. Equity funds seeing rotation toward dividend/income strategies. Bond fund managers face duration dilemma with ${dgs10}% yields. Liquidity management paramount.`,
-      theyAreAsking: [
-        "Are you seeing unusual sector flow patterns that could move markets?",
-        "What's the retail investor sentiment on equities right now?",
-        "How are other fund managers positioning for the next FOMC meeting?",
-      ],
-      talkingPoint: `Retail flows are a contrarian signal worth watching — ${riskOff ? "current redemption pressure often marks bottoms in risk assets, particularly in high-quality IG credit where technicals can overshoot fundamentals" : "steady inflows into income strategies suggest the duration trade is broadening to retail, which historically precedes a rates rally"}. For fund managers needing liquidity, we can show short-dated IG credit that offers yield without duration risk.`,
-      productOpportunity: `Short-duration IG credit funds or income-focused equity strategies with high dividend yield and low rate sensitivity.`,
-    },
-  ];
-}
-
-// ── Deterministic macro view fallback ────────────────────────────────────────
-function buildMacroViewFallback(rates = {}) {
-  const { dgs10 = 4.2, dfii10 = 1.85, t10y2y = 0.5, hy_spread = 3.2, t10y_ie = 2.38 } = rates;
-  const matrix = buildCrossAssetMatrix(rates);
-
+/**
+ * unavailablePayload — what the client renders instead of an invented view.
+ * Names the last successful run without serving its (now stale) content.
+ */
+function unavailablePayload(surface, cacheKey, reason, detail) {
+  const stale = cache.getWithMeta(cacheKey);
   return {
-    headline:    `Real yields at ${dfii10}% and HY spreads widening to ${hy_spread}% signal a risk-off macro environment — higher-for-longer rates are the dominant regime.`,
-    regimeLabel: t10y2y > 0 ? "Bear Steepener / Risk-Off" : "Bear Flattener / Risk-Off",
-    scenarios: {
-      base: {
-        probability: 60,
-        title: "Higher For Longer",
-        narrative:   `Fed holds rates at 4.25-4.50% through mid-year as inflation remains sticky above 2.5%. Growth slows but avoids recession; risk assets range-bound with elevated volatility.`,
-        keyAssets:   "Short-duration credit, value equities, USD, TIPS",
-      },
-      bull: {
-        probability: 20,
-        title: "Soft Landing / Rate Cuts",
-        narrative:   `Inflation falls faster than expected, enabling Fed to cut 75bps by year-end. Credit spreads tighten sharply, equities rally led by growth/tech, USD weakens.`,
-        keyAssets:   "Long duration Treasuries, growth equities, EM assets, gold",
-      },
-      bear: {
-        probability: 20,
-        title: "Credit Crunch / Hard Landing",
-        narrative:   `HY spreads blow out through 500bps as credit conditions tighten. Corporate earnings disappoint; recession probability spikes. Fed forced to cut but equities still sell off.`,
-        keyAssets:   "Treasuries (safe haven), gold, defensive equities, short HY credit",
-      },
-    },
-    crossAsset:  matrix,
-    centralBank: {
-      fed: `Fed on hold at 4.25-4.50% with bias to keep rates elevated while inflation above target. Dot plot likely shows fewer cuts than market pricing; watch for any pivot in forward guidance at upcoming FOMC.`,
-      boe: `Bank of England facing stagflationary mix — high wage growth vs. slowing activity. Rate path uncertain; GBP sensitive to any dovish pivot.`,
-      ecb: `ECB in gradual cutting cycle; eurozone growth weak. Divergence from Fed policy creating EUR/USD downside pressure.`,
-    },
-    catalysts: [
-      {
-        event:  "US CPI Release",
-        date:   "2026-04-10",
-        impact: "A hot print (>3%) would force the market to price out any 2026 Fed cuts, pushing real yields higher and compressing equity multiples — sell growth, buy USD.",
-      },
-      {
-        event:  "FOMC Meeting",
-        date:   "2026-05-07",
-        impact: "Dot plot and press conference key — any hint of cuts in H2 2026 could spark a sharp rally in duration and risk assets; hold language extends the current bear-flattener regime.",
-      },
-      {
-        event:  "Non-Farm Payrolls",
-        date:   "2026-04-04",
-        impact: "A weak jobs number (<100k) would shift the Fed reaction function toward cuts, rally bonds and EM — the cleanest long signal in the current regime.",
-      },
-    ],
-    morningNote: `Real yields at ${dfii10}% and HY OAS at ${hy_spread}% paint a clear picture: the market is in a risk-off, higher-for-longer regime that favours quality over duration and value over growth. With the yield curve at +${t10y2y}% and breakevens at ${t10y_ie}%, there is no imminent recession signal but there is meaningful compression in risk premium. Our top trade implication: long USD vs. EM FX baskets and reduce HY allocation toward IG quality — wait for a catalyst before adding duration.`,
-    // ── Institutional fields (deterministic estimates) ────────────────────────
-    overnightRecap: {
-      asia:          "Asian markets closed mixed; check live data for exact levels — this is a deterministic fallback.",
-      europe:        "European session open direction unclear without live data — refresh for AI-generated levels.",
-      dominantTheme: `Higher-for-longer rates regime: 10Y at ~${dgs10}%, real yield at ${dfii10}%, HY OAS at ${hy_spread}% — risk assets under pressure from cost-of-capital repricing.`,
-    },
-    keyLevels: {
-      spxFutures: "N/A (refresh for live data)",
-      us10y:      `~${dgs10}%`,
-      us2y:       "N/A (refresh for live data)",
-      dxy:        "N/A (refresh for live data)",
-      cable:      "N/A (refresh for live data)",
-      brent:      "N/A (refresh for live data)",
-      gold:       "N/A (refresh for live data)",
-      vix:        "N/A (refresh for live data)",
-      hyOas:      `~${hy_spread * 100}bps`,
-      vix3m:      "N/A (refresh for live data)",
-      skew:       "N/A (refresh for live data)",
-    },
-    salesNote: `Real yields at ${dfii10}% and HY OAS at ${hy_spread}% are flashing a clear risk-off signal — this is a higher-for-longer regime until the data breaks. The yield curve at +${t10y2y}% is not pricing recession yet, but credit is starting to widen in a way that historically leads equity weakness by 4-6 weeks. Our message to clients today: reduce HY exposure to IG quality, get long USD vs EM FX on rate differentials, and do not add duration until you see the Fed soften language. The first data point to watch is the next CPI print — a hot number above 3% reprices the whole curve.`,
-    tradeIdea: {
-      instrument: "IG vs HY credit spread trade (CDX IG long / CDX HY short)",
-      direction:  "LONG",
-      rationale:  `HY OAS at ${hy_spread}% vs IG — the spread between quality tiers is compressing relative to historical norms given real yields at ${dfii10}%. A risk-off catalyst (weak NFP, hot CPI, or credit event) would widen this spread sharply.`,
-      entry:      `Current: HY OAS ~${hy_spread}%, IG OAS tighter — enter on any further HY spread widening`,
-      stop:       "Stop: HY OAS compresses back through 3.0% (credit re-risk signal)",
-      target:     "Target: HY OAS widens to 4.5%+ on credit stress scenario",
-      timeframe:  "4-8 weeks",
-    },
-    clientTalkingPoints: [
-      `With real yields at ${dfii10}% — the highest in over a decade — we're telling clients to lock in IG credit duration now before the next macro shock resets spreads wider.`,
-      `The yield curve at +${t10y2y}% is not pricing a hard landing, but HY spreads at ${hy_spread}% are starting to move — that divergence historically resolves to the downside for risk assets within 6-8 weeks.`,
-      `For pension clients, this is the environment to have that LDI conversation — ${dgs10}% on 10Y Treasuries is the most compelling liability-matching entry point since 2007, and we'd be showing receiver swaptions to lock it in.`,
-    ],
-    fetchedAt:   new Date().toISOString(),
-    source:      "seeded",
+    available:     false,
+    surface,
+    reason,
+    detail,
+    lastSuccessAt: stale?.value?.fetchedAt || null,
+    checkedAt:     now(),
   };
 }
+
 
 // ── GET /api/macro/view ───────────────────────────────────────────────────────
 router.get("/view", async (req, res) => {
@@ -332,7 +227,8 @@ router.get("/view", async (req, res) => {
     }
   }
 
-  // Build rates context from FRED + vol surface (parallel, best-effort)
+  // Build rates context from FRED + vol surface (parallel, best-effort).
+  // Only figures actually returned are described; nothing is substituted.
   let rates = {};
   let ratesStr = "";
   let volSurface = { vix3m: null, skew: null };
@@ -342,41 +238,54 @@ router.get("/view", async (req, res) => {
       getVolSurface().catch(() => ({ vix3m: null, skew: null })),
     ]);
     rates = {
-      dgs10:     rateVal(r.dgs10, 4.2),
-      dfii10:    rateVal(r.dfii10, 1.85),
-      t10y_ie:   rateVal(r.t10yie, 2.38),
-      hy_spread: rateVal(r.hy_spread, 3.2),
-      t10y2y:    rateVal(r.t10y2y, 0.5),
+      dgs10:     rateVal(r.dgs10),
+      dfii10:    rateVal(r.dfii10),
+      t10y_ie:   rateVal(r.t10yie),
+      hy_spread: rateVal(r.hy_spread),
+      t10y2y:    rateVal(r.t10y2y),
     };
     volSurface = vol;
+    // Each figure carries its own observation date. The old string appended
+    // only the NEWEST date, so an older series read as current.
+    const d = f => rateDate(f) ? ` (${rateDate(f)})` : " (date n/a)";
+    const parts = [
+      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%${d(r.dgs10)}`                     : null,
+      rates.dfii10    != null ? `real yield: ${rates.dfii10}%${d(r.dfii10)}`                    : null,
+      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%${d(r.t10yie)}`          : null,
+      rates.hy_spread != null ? `HY OAS: ${Math.round(rates.hy_spread * 100)}bp${d(r.hy_spread)}` : null,
+      rates.t10y2y    != null ? `yield curve (10Y-2Y): ${rates.t10y2y}pp${d(r.t10y2y)}`         : null,
+    ].filter(Boolean);
     const volStr = [
-      vol.vix3m ? `VIX3M: ${vol.vix3m.value}` : null,
-      vol.skew  ? `CBOE SKEW: ${vol.skew.value}` : null,
+      vol.vix3m ? `VIX3M: ${vol.vix3m.value} (${vol.vix3m.source}, ${vol.vix3m.date})` : null,
+      vol.skew  ? `CBOE SKEW: ${vol.skew.value} (${vol.skew.source}, ${vol.skew.date})` : null,
     ].filter(Boolean).join(", ");
-    ratesStr = `10Y nominal: ${rates.dgs10}%, real yield: ${rates.dfii10}%, breakeven inflation: ${rates.t10y_ie}%, HY OAS: ${rates.hy_spread}%, yield curve (10Y-2Y): ${rates.t10y2y}%`
-      + (volStr ? `. Vol surface: ${volStr}` : "");
-  } catch (_) {
-    ratesStr = "latest FRED data unavailable — use web search for current rates";
+    ratesStr = parts.length
+      ? `FRED end-of-day observations — ${parts.join(", ")}`
+        + (volStr ? `. Vol surface: ${volStr}` : "")
+      : "";
+  } catch (err) {
+    console.warn("[macro/view] FRED unavailable:", err.message);
   }
+  if (!ratesStr) ratesStr = "No verified rate data available this run — do not assert levels you cannot source.";
 
-  // Try AI first, fall back to deterministic
   let viewData;
-  let source = "live";
   try {
-    const lowCost = process.env.LOW_COST_MODE === "true";
-    if (lowCost) throw new Error("LOW_COST_MODE");
+    if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
     viewData = await anthropic.fetchMacroView(ratesStr, volSurface);
     viewData.crossAsset = viewData.crossAsset && viewData.crossAsset.length > 0
       ? viewData.crossAsset
       : buildCrossAssetMatrix(rates);
   } catch (err) {
-    console.warn("[macro/view] AI unavailable, using deterministic fallback:", err.message);
-    viewData = buildMacroViewFallback(rates);
-    source   = "seeded";
+    // No fabricated substitute. See the note above unavailablePayload().
+    console.warn("[macro/view] unavailable:", err.message);
+    return res.status(503).json(envelope(
+      unavailablePayload("macro-view", cacheKey, err.code || "AI_UNAVAILABLE", err.message),
+      "unavailable", false,
+    ));
   }
 
   cache.set(cacheKey, viewData, TTL_MACRO_MS);
-  res.json(envelope(viewData, source, false));
+  res.json(envelope(viewData, "live", false));
 });
 
 // ── GET /api/macro/clients ────────────────────────────────────────────────────
@@ -397,30 +306,42 @@ router.get("/clients", async (req, res) => {
   try {
     const r = await fred.getAllRates();
     rates = {
-      dgs10:     rateVal(r.dgs10, 4.2),
-      dfii10:    rateVal(r.dfii10, 1.85),
-      t10y_ie:   rateVal(r.t10yie, 2.38),
-      hy_spread: rateVal(r.hy_spread, 3.2),
-      t10y2y:    rateVal(r.t10y2y, 0.5),
+      dgs10:     rateVal(r.dgs10),
+      dfii10:    rateVal(r.dfii10),
+      t10y_ie:   rateVal(r.t10yie),
+      hy_spread: rateVal(r.hy_spread),
+      t10y2y:    rateVal(r.t10y2y),
     };
-    ratesStr = `10Y nominal: ${rates.dgs10}%, real yield: ${rates.dfii10}%, breakeven inflation: ${rates.t10y_ie}%, HY OAS: ${rates.hy_spread}%, yield curve: ${rates.t10y2y}%`;
-    regime   = rates.hy_spread > 3.5 ? "Bear Flattener / Risk-Off" : rates.t10y2y > 0.5 ? "Bear Steepener" : "Uncertain";
-  } catch (_) {}
+    const d = f => rateDate(f) ? ` (${rateDate(f)})` : " (date n/a)";
+    const parts = [
+      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%${d(r.dgs10)}`                     : null,
+      rates.dfii10    != null ? `real yield: ${rates.dfii10}%${d(r.dfii10)}`                    : null,
+      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%${d(r.t10yie)}`          : null,
+      rates.hy_spread != null ? `HY OAS: ${Math.round(rates.hy_spread * 100)}bp${d(r.hy_spread)}` : null,
+      rates.t10y2y    != null ? `yield curve (10Y-2Y): ${rates.t10y2y}pp${d(r.t10y2y)}`         : null,
+    ].filter(Boolean);
+    ratesStr = parts.length ? `FRED end-of-day observations — ${parts.join(", ")}` : "";
+    // Only label a regime when the inputs it depends on were actually measured.
+    regime = describeRegime(rates);
+  } catch (err) {
+    console.warn("[macro/clients] FRED unavailable:", err.message);
+  }
+  if (!ratesStr) ratesStr = "No verified rate data available this run — do not assert levels you cannot source.";
 
   let clients;
-  let source = "live";
   try {
-    const lowCost = process.env.LOW_COST_MODE === "true";
-    if (lowCost) throw new Error("LOW_COST_MODE");
+    if (process.env.LOW_COST_MODE === "true") throw new Error("LOW_COST_MODE");
     clients = await anthropic.fetchClientImpact(ratesStr, regime);
   } catch (err) {
-    console.warn("[macro/clients] AI unavailable, using deterministic fallback:", err.message);
-    clients = buildClientFallback(rates, regime);
-    source  = "seeded";
+    console.warn("[macro/clients] unavailable:", err.message);
+    return res.status(503).json(envelope(
+      unavailablePayload("macro-clients", cacheKey, err.code || "AI_UNAVAILABLE", err.message),
+      "unavailable", false,
+    ));
   }
 
   cache.set(cacheKey, clients, TTL_CLIENT_MS);
-  res.json(envelope(clients, source, false));
+  res.json(envelope(clients, "live", false));
 });
 
 module.exports = router;

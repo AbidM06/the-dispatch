@@ -44,7 +44,13 @@ function getOrInitState() {
 
 /**
  * Check if an execution is allowed by policy.
- * @param {{ ticker?, notionalGBP?, openPositions?, portfolioGBP? }} params
+ *
+ * FAILS CLOSED on missing inputs. It used to read a missing notional as 0 (so
+ * the notional cap passed), a missing open-position count as 0 (so the
+ * position cap passed) and a missing portfolio value as "skip the single-ticker
+ * cap". A caller that forgot an input therefore disabled a breaker silently.
+ *
+ * @param {{ ticker, notionalGBP, openPositions, portfolioGBP, existingTickerGBP? }} params
  * @returns {{ allowed: boolean, reasons: string[] }}
  */
 function checkPolicy(params = {}) {
@@ -56,25 +62,35 @@ function checkPolicy(params = {}) {
     reasons.push("TRADING_ENABLED is not 'true' — all execution disabled by default. Set TRADING_ENABLED=true to enable.");
   }
 
+  const missing = [];
+  if (!params.ticker)                                                     missing.push("ticker");
+  if (!(Number.isFinite(params.notionalGBP) && params.notionalGBP > 0))   missing.push("notionalGBP");
+  if (!Number.isFinite(params.openPositions))                             missing.push("openPositions");
+  if (!(Number.isFinite(params.portfolioGBP) && params.portfolioGBP > 0)) missing.push("portfolioGBP");
+  if (missing.length) {
+    reasons.push(`Policy inputs missing or invalid (${missing.join(", ")}) — circuit breakers cannot be evaluated.`);
+    return { allowed: false, reasons };
+  }
+
   if (state.tradesPlaced >= cfg.maxTradesPerDay) {
     reasons.push(`Daily trade limit: ${state.tradesPlaced}/${cfg.maxTradesPerDay} trades placed today.`);
   }
 
-  const projectedNotional = state.notionalGBP + (params.notionalGBP || 0);
+  const projectedNotional = state.notionalGBP + params.notionalGBP;
   if (projectedNotional > cfg.maxNotionalGBPPerDay) {
-    reasons.push(`Daily notional cap: \u00a3${state.notionalGBP.toFixed(0)} used + \u00a3${(params.notionalGBP || 0).toFixed(0)} projected > \u00a3${cfg.maxNotionalGBPPerDay} cap.`);
+    reasons.push(`Daily notional cap: \u00a3${state.notionalGBP.toFixed(0)} used + \u00a3${params.notionalGBP.toFixed(0)} projected > \u00a3${cfg.maxNotionalGBPPerDay} cap.`);
   }
 
-  if ((params.openPositions || 0) >= cfg.maxOpenPositions) {
+  if (params.openPositions >= cfg.maxOpenPositions) {
     reasons.push(`Open position limit: ${params.openPositions}/${cfg.maxOpenPositions} positions open.`);
   }
 
-  if (params.ticker && params.notionalGBP && params.portfolioGBP) {
-    const tickerNotional = (state.tickers[params.ticker] || 0) + params.notionalGBP;
-    const tickerPct      = tickerNotional / params.portfolioGBP * 100;
-    if (tickerPct > cfg.maxSingleTickerPct) {
-      reasons.push(`Single ticker cap: ${params.ticker} at ${tickerPct.toFixed(1)}% > ${cfg.maxSingleTickerPct}% max.`);
-    }
+  // Exposure = what is already held + what was bought today + this order.
+  const held = Number.isFinite(params.existingTickerGBP) ? params.existingTickerGBP : 0;
+  const tickerNotional = held + (state.tickers[params.ticker] || 0) + params.notionalGBP;
+  const tickerPct      = tickerNotional / params.portfolioGBP * 100;
+  if (tickerPct > cfg.maxSingleTickerPct) {
+    reasons.push(`Single ticker cap: ${params.ticker} at ${tickerPct.toFixed(1)}% > ${cfg.maxSingleTickerPct}% max.`);
   }
 
   return { allowed: reasons.length === 0, reasons };

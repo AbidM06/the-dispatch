@@ -8,7 +8,7 @@ React frontend (`client/index.html`). Tracks a watchlist of equity positions, ov
 ```bash
 npm start          # production
 npm run dev        # nodemon-style watch (node --watch)
-npm test           # Jest, 94 tests, ~2s
+npm test           # Jest, 342 tests, ~10s
 npm run test:coverage
 ```
 
@@ -21,7 +21,8 @@ npm run test:coverage
 | `POLYGON_API_KEY` | 6 watchlist peers: NVDA, MSFT, TSLA, MU, AMAT, LRCX |
 | `FINNHUB_API_KEY` | News headlines, earnings/economic calendar, sentiment |
 | `PORT` | Default 3001 |
-| `LOW_COST_MODE=true` | Disables all AI calls; returns deterministic narrative |
+| `LOW_COST_MODE=true` | Disables all AI calls; returns deterministic, level-only narrative |
+| `DEMO_MODE=true` | Serve hand-entered seed fixtures (tagged `kind:"demo"`) when providers fail. Off by default |
 | `ANTHROPIC_DAILY_CAP` | USD budget cap per day (default $5) |
 | `ANTHROPIC_MONTHLY_CAP` | USD budget cap per month (default $50) |
 
@@ -58,16 +59,22 @@ server/providers/
   anthropic.js             fetchAllAnalysis(), fetchTickerExplain(), callClaude()
   finnhub.js               News, earnings calendar, economic calendar, sentiment
   budget.js                Per-day/month spend tracking + auto API-fallback state machine
+server/provenance.js       Fact constructor, KIND vocabulary, per-source freshness rules
+server/demoMode.js         DEMO_MODE switch — the only path by which seeds are served
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry(), fetchWithTimeout(), isRetryable()
 server/schemas/index.js    Zod schemas — validate() wrapper
 server/jobs/
   researchBatchJob.js      Daily batched generation of all six research reports
 server/analytics/
-  narrativeEngine.js       Deterministic fallback narrative (no AI)
+  narrativeEngine.js       Deterministic, level-only narrative from dated facts (no AI)
+  analysisStore.js         events/risk/econ cache that keeps how each item was produced
+  regime.js                Level labels + curveMove() (needs both legs' changes)
+  eventCalendar.js         Dated event calendar from cached Finnhub data, else unavailable
 server/importers/
   t212.js                  Trading 212 CSV parser
 server/engine/
+  executionGate.js         prepareOrder(): the one fail-closed path to an order
   glossary.js              80+ trading terms across 7 categories with definitions,
                            examples, Islamic notes, and S&T interview angles
   universeScanner.js       Scans all 33 Shariah-compliant tickers against macro regime
@@ -146,6 +153,48 @@ computes 2Y UST minus effective fed funds (DGS2 − DFF) and reports a DIRECTION
 ±25bp neutral band. Every field says it is a proxy and the prompt forbids restating it as
 market-implied odds. Do not relabel this as a probability.
 
+## Provenance model — read this before touching any data path
+
+`server/provenance.js` is the vocabulary. Every displayed number is exactly one KIND:
+
+| kind | meaning |
+|---|---|
+| `observed` | a provider value for a stated observation date |
+| `calculated` | arithmetic on observed inputs; carries `inputs[]` with their dates |
+| `estimate` | a model forecast or an assumption (research `estimates[]`) |
+| `unavailable` | we do not have it; `reason` says why |
+| `demo` | hand-entered fixture, only in `DEMO_MODE` |
+
+Two clocks, never merged: **`observedAt`** (when the market produced it — decides
+freshness) and **`retrievedAt`** (when we fetched it — decides nothing). Precision is
+never invented: a date-only observation is `observedAtPrecision: "date"`.
+
+Freshness is judged per source by `assessFreshness()` on the OBSERVATION date, at READ
+time, in business days (weekends skipped; holidays not modelled): `current` → `lagging`
+(normal slack, e.g. a holiday) → `stale` (provider/cache problem). Summaries report the
+**oldest** observation (`summariseComponents`), never the newest.
+
+| Source | Actual frequency | Observation date handling | Expected lag | Permitted uses |
+|---|---|---|---|---|
+| FRED rates, OAS, DFF, VIX | daily | FRED `date`; latest *valid* row of the last 10 (`.` skipped) | 1 business day | display, prompts, signals, regime labels |
+| FRED Brent/WTI, EUR/USD (H.10) | daily obs, weekly release | FRED `date` | ~6 business days (normal) | display, prompts |
+| EIA petroleum | weekly | period | ~8 business days | commodities charts |
+| Polygon `/v2/aggs` (free) | daily bar | bar date | 1 business day | display, idea reference levels — **never execution** |
+| Alpha Vantage `GLOBAL_QUOTE` | daily quote | `latest trading day` | 1 business day | display, idea reference levels — **never execution** |
+| ExchangeRate-API (keyless) | ~daily reference rate | provider `time_last_update_unix` (not our clock) | 1 business day | GBP conversion, display |
+| Alpha Vantage FX (fallback) | provider refresh | `Last Refreshed` + `Time Zone` | — | as above |
+| Finnhub calendars | per event | full `YYYY-MM-DD` only; year-less dates rejected | — | event-risk checks, brief |
+| Anthropic `web_search` | per report | cited page; `grounding` block | — | research prose only; not verified facts |
+| seeds/fallback.js | fixed (Mar 2026) | n/a — `kind:"demo"` | n/a | `DEMO_MODE` display only |
+
+**Executable price:** none of the free feeds provides one. `executionGate` requires a
+timestamped quote ≤ `TRADING_PRICE_MAX_AGE_MIN` minutes old; daily closes never qualify,
+so execution is blocked by design. Do not relax this to make execution "work".
+
+Zod response schemas use `.passthrough()` on every provenance-bearing object. Zod strips
+unknown keys by default and `validate()` returns the parsed copy, so a schema without it
+silently deleted provenance fields on the way to the client.
+
 ## No fabricated fallbacks — deliberate
 
 `server/routes/research.js` used to carry six hand-written "deterministic" reports served
@@ -157,6 +206,40 @@ They are gone and must not come back. On failure the route returns HTTP 503 with
 `available: false`, the reason, and the timestamp of the last successful run; the client
 renders an unavailable panel. A report that invents a crisis is worse than no report.
 A test asserts the seed builders stay deleted.
+
+**The same class was still live in the Sales tab, and this file wrongly said it was not.**
+`server/routes/macro.js` carried `buildMacroViewFallback()` and `buildClientFallback()`,
+which between them asserted a Fed level of "4.25-4.50%", scenario probabilities of
+60/20/20, a complete trade idea with entry/stop/target, CPI/FOMC/NFP catalysts dated
+April and May 2026, and client talking points claiming real yields were "the highest
+since 2007-era". Both are deleted; `/api/macro/view` and `/api/macro/clients` now return
+503 with the same contract as research, and the client renders the same unavailable panel.
+
+Worse, the Sales tab never had live data to begin with. `rateVal()` probed for an
+`observations` array that `fred.getAllRates()` has never returned, so it fell through to
+its hardcoded fallback (4.2 / 1.85 / 2.38 / 3.2 / 0.5) on every single call — and those
+constants were passed to the model described as "latest FRED data". Invented data wearing
+a source label is worse than no data. `rateVal(fact)` now reads `.value` and has no
+fallback parameter; missing means null, and callers say so.
+
+The lesson generalises: **fixing one instance of a failure class is not fixing the class.**
+When you delete a fabricated fallback, grep the repo for its siblings before writing here
+that the class is gone. The provenance audit found and removed the siblings:
+
+- `narrativeEngine.js` (LOW_COST prose): back-filled missing rates with hardcoded levels,
+  dated every card TODAY, and served a war, a tariff package, a GPU order and P/E
+  elasticities as current. Rewritten to use only dated facts; items are `kind:"calculated"`.
+- `events.js` / `risk.js`: cached the deterministic narrative under the AI keys and read it
+  back as `analysisMode:"ai"`. `analytics/analysisStore.js` now stores the mode with the
+  items. Seed events/risks are `DEMO_MODE`-only; otherwise `unavailable`.
+- `brief.js`: computed "what changed" against a hardcoded `PREV_RATES` forever. Deltas now
+  come from dated FRED history.
+- `ideas.js` `deterministicIdeas()` (hardcoded entries 192/74/8.65, a 19 Mar FOMC catalyst)
+  and a hardcoded "KEY EVENTS" line sent to the AI prompt — deleted.
+- Playbooks priced every idea off `priceFmt(ctx, "SGLN", 74.00)` fallbacks. Unpriced ideas
+  now carry `entry/stop/target: null` and say so.
+- AI prompts presupposed events ("US/Israel-Iran War" as risk #1 every run) and carried
+  worked examples with concrete figures. Both removed.
 
 Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
 produces comes from training data — that path sets `grounded: false` and the client shows
@@ -181,6 +264,17 @@ came back asserting exactly 46%. Do not reintroduce concrete example figures.
 measured data; the client renders it as a separate table. `unverified[]` is what it could
 not confirm — surfacing that is the point, not a defect.
 
+## Research grounding and citations
+
+Both the synchronous and batch paths exit through `finalizeResearchReport()`, which
+validates against `ResearchSchemas` in `server/schemas` (each type's prompt contract,
+including `estimates[]` and `unverified[]`) and attaches a `grounding` block:
+`{ searchEnabled, tier, sourcesReturned, resolvedCitations, unresolvedCitations, grounded,
+meaning }`. A cite marker whose index points at no returned source is kept visibly as
+`[citation unresolved]` rather than stripped. `report.dataAsOf` is the OBSERVATION span of
+the FRED inputs plus a separate `retrievedAt` — regenerating a report does not make its
+data newer.
+
 ## Research batching
 `server/jobs/researchBatchJob.js` pre-generates all six reports daily via the Message
 Batches API at 50% of the synchronous rate (`RESEARCH_BATCH_TIME`, default 06:40).
@@ -191,12 +285,98 @@ so batching affects cost only, never availability.
 Interactive paths (explain, thesis, bulletin) stay synchronous — batch latency is measured
 in minutes and would be visible there.
 
+## Execution controls — the callers, not the policy
+
+`executionPolicy.checkPolicy()` was correct. Both of its callers defeated it.
+
+- It was invoked with a **placeholder** `notionalGBP: 100` *before* sizing ran, so the
+  £250 daily notional cap was tested against £100 regardless of the real order. A ticket
+  sizing to £6,000 passed a £250 cap.
+- `const qty = (!sizing.blocked && sizing.qty > 0) ? sizing.qty : 1` turned every sizing
+  **rejection** into a one-share order. An entry of 100 against a stop of 110 is an
+  invalid LONG; it still submitted.
+- `openPositions` and `portfolioGBP` were never passed, and `checkPolicy` treats a missing
+  `openPositions` as 0 and skips the single-ticker cap entirely without `portfolioGBP` —
+  so two of the four advertised circuit breakers could never fire.
+- Account equity defaulted to £75,000 (auto path) and £1,110 (approve path) when the
+  fetch failed, sizing real orders against a portfolio that did not exist.
+
+Both callers now go through **`server/engine/executionGate.js` → `prepareOrder()`**, which
+fails closed in this order: direction (LONG only) → executable price (timestamped quote,
+≤ `TRADING_PRICE_MAX_AGE_MIN`; daily closes rejected) → account equity → open positions →
+FX (dated, ≤ `TRADING_FX_MAX_AGE_HOURS`) → sizing (from the executable price, not the
+idea's planning `entry`) → policy with final qty, GBP notional, position count, equity and
+existing ticker exposure. `checkPolicy()` itself now refuses missing inputs instead of
+reading them as zero. **Never reintroduce a placeholder notional, a quantity fallback,
+or a default FX/equity.** Tests exercise this with a mocked broker and injected quotes.
+
+`checkFreshness()` also measured the wrong thing: `fetchedAt` is when we wrote the cache,
+not when the market measured the figure, so a freshly-cached 2020 observation satisfied
+the 20-minute rule. It now additionally bounds the newest observation date
+(`TRADING_DATA_MAX_OBS_AGE_DAYS`, default 4 — FRED series are daily, so the window is in
+days, not minutes).
+
+## Disclosure is enforced, not requested
+
+`estimates[]` (figures the model produced itself) and `unverified[]` (what it could not
+confirm) were prompt-only instructions on one report type out of six. A report that
+ignored them validated fine and rendered as though every figure were measured —
+`{"title":"Incomplete","epsOutlook":{}}` passed the equity gate.
+
+The disclosure contract now lives in `ACCURACY_RULES`, so every report type is asked for
+both arrays, and `REPORT_VALIDATORS` rejects any report that omits them. Equity
+additionally requires `crossAssetContext`, `scenarios`, `invalidation` and a non-empty
+`risks[]`.
+
+Validation cannot prove a report is truthful. It can refuse one that declines to say
+which parts are guesses, and that is the difference between a disclosure mechanism and a
+disclosure aspiration.
+
+## Levels are not changes
+
+"Steepener" and "flattener" describe how a curve is **moving**. A level cannot support
+either word. `buildCtx()` emitted "Bear steepener" from a curve level and "Bear flattener"
+from the HY spread and real yields — two mutually exclusive directions, neither derived
+from a curve movement, both able to land in the same string. `t10y2y: 0.8` produced
+"Bear steepener + Elevated real yields + Bear flattener".
+
+Regime labels now name shape and level only, from one module: `server/analytics/regime.js`
+(`classifyLevels`). `curveMove(d2yBp, d10yBp)` names bull/bear steepener/flattener and
+returns `null` unless BOTH legs' changes are supplied. `deltas.t10y2y_d` is `null`: no 2Y
+history is fetched. Missing rates are named in `missing`, never compared — `null < 0.3` is
+`true` in JavaScript, which once made a missing curve read as "flat".
+
+Deltas and MA/mean-reversion signals use the dated FRED history in the snapshot cache and
+state their window. They never compare a live level with `RATES_HISTORY_SEED`.
+
+## Contested instruments
+
+`CONTESTED_INSTRUMENTS` in `server/engine/playbooks.js` lists tickers whose asset class is
+asserted inconsistently inside this repo. A playbook naming one will not fire.
+
+HBKS is currently held (breakout-failure AND concentration-hedge): `shariahFilter.js`
+catalogues it as "iShares MSCI UK Islamic UCITS ETF" (an equity index name), while
+playbooks, the learning layer and the glossary called it a sukuk/duration fund with a
+0.62 beta and ~3-year duration. All asset-class claims about it are removed; its Shariah
+status carries `identityVerified: false`. Resolve against the fund factsheet by ISIN (the
+ticker collides across venues), fix whichever record is wrong, then remove the entry. Do
+not guess which one is right.
+
+Shariah screening: the universe is the owner's hand-curated list. No screening date,
+index-membership record or ratio is stored, so every status carries `SCREENING_BASIS`
+(`kind:"unverified"`). Do not present it as a current screening result, and do not add
+new religious-compliance claims.
+
 ## Cache strategy
-All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
-1. Warm cache → serve immediately (no fetch)
-2. Live fetch → cache it
-3. Stale cache (expired but present) → serve with `stale: true`
-4. Seed fallback → last resort, always available
+Snapshot data flows through `resolveWithFallback(key, fetchFn, ttl, demoValue)`:
+1. Warm cache → serve immediately (no fetch); `retrievedAt` is the ORIGINAL fetch time
+2. Live fetch → cache it (only live provider results are ever cached)
+3. Expired cache → serve the last value actually fetched, `cacheExpired: true`
+4. No value → `DEMO_MODE` fixture tagged `kind:"demo"`, otherwise `unavailable`
+
+Facts (with freshness) are built from cached raw values on every READ, so a value cached
+on Friday is judged against Tuesday. An all-empty provider response is a failure, not a
+cacheable "live" result. `snapshot:data` carries facts plus the component summary.
 
 TTLs:
 - FRED data: 60 min (`CACHE_TTL_FRED` env override)
@@ -278,10 +458,13 @@ Key conventions:
 - `providers.test.js` Polygon suite: one `mockFetch` call per ticker (parallel calls),
   using `aggsResponse(sym, bars)` helper with `bar(close, epochMs)` shape
 
-Current status: **260 passing.** `tests/research.test.js` covers the cross-asset layer,
-the policy proxy, provenance, the batch adapter, and the no-fabrication guarantee.
-One pre-existing failure in `tests/phase1.test.js` — a date-dependent event-horizon
-assertion — is unrelated to this work and fails on a clean checkout too.
+Current status: **342 passing, 0 failing.** `tests/dataProvenance.test.js` covers the eight
+provenance defect classes (old observations stay old, seeds never become live, bulletin
+Fact handling, batch/sync equivalence, schema rejection, curve-change inputs, blocked
+sizing, notional cap) with a mocked broker and real sizing/policy.
+`tests/reviewFindings.test.js` carries tests named after the external review's IDs.
+The old date-dependent failure in `tests/phase1.test.js` was the year-less seed calendar;
+the calendar is now injected with full dates and the test passes all year.
 
 ---
 
@@ -358,10 +541,12 @@ No-op when `WEBHOOK_URL` is not set.
 Uses AV for AMD, Polygon for peers, falls back to cached `idea.entry` for LSE ETFs.
 Response includes `priceSource` and `livePrice` fields.
 
-### Historical backtester (`server/engine/backtester.js`)
-Pure computation on seeded data (RATES_HISTORY_SEED + HY_HISTORY_SEED). Tests each playbook
-against each historical monthly context. Returns trigger rates, regime distribution, and
-top setups. No API calls.
+### Trigger-frequency counter (`server/engine/backtester.js`)
+NOT a backtest of returns. Counts how often each playbook's trigger was true on seven
+hand-typed monthly demo points (`kind:"demo"`, `measures:"trigger-frequency"`). No prices,
+fills, hit rates or P&L. It used to synthesise the 2Y as `y10 − 2.00`, fill gaps with
+constants and use a £1,110 book; missing inputs are now null. Orders carry it as
+`triggerFrequencyDemo`, never as performance evidence.
 
 ---
 
@@ -385,10 +570,14 @@ exactly 2 AV calls (AMD + FX) + 6 Polygon calls.
 5. **Cite-tag stripping is server-side** — React renderer cannot parse HTML in string nodes
 6. **Budget fallback is 60 min** — matches AV's rate-limit cooldown window
 7. **All execution disabled by default** — requires TRADING_ENABLED + ALPACA_AUTO_EXECUTE + AUTO_APPROVE_PAPER
-8. **Freshness gate** — auto-execution skipped if snapshot data > 20 min old
+8. **Freshness gate** — execution requires the traded instrument's executable quote ≤ 20 min
+   old and FRED observations ≤ 4 days old; retrieval time never counts as freshness
 9. **Alpaca allowed hosts** — only `paper-api.alpaca.markets` by default (configurable via ALPACA_ALLOWED_HOSTS)
 10. **SHORT ideas rejected** — Shariah gharar prohibition on manual idea creation
 11. **Scenario uses T212 snapshot** — falls back to seeded positions when no snapshot
 12. **Bracket orders default off** — `USE_BRACKET_ORDERS=true` required (market orders are simpler)
 13. **Webhook is fire-and-forget** — does not block response path; failures logged to console
-14. **Backtester uses seeded data only** — no API calls; pure deterministic computation
+14. **"Backtester" is a trigger-frequency count on demo data** — not performance evidence
+15. **Seeds are demo-only** — outside `DEMO_MODE` a missing provider is `unavailable`
+16. **Research reports validate against Zod contracts on BOTH paths** — `finalizeResearchReport`
+    is the single exit; `grounded` means "search ran and returned sources", not "verified"

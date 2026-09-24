@@ -9,13 +9,18 @@
 const { Router } = require("express");
 const cache      = require("../cache");
 const finnhub    = require("../providers/finnhub");
+const { isDemoMode } = require("../demoMode");
 
 const router = Router();
 
 /**
- * Seeded macro calendar — used when Finnhub /calendar/economic returns 403
- * (premium endpoint, not available on free tier).
- * Dates sourced from Fed Reserve, BLS, and BEA release schedules.
+ * DEMO-ONLY macro calendar. Served only when DEMO_MODE=true.
+ *
+ * It claimed to be "sourced from Fed Reserve, BLS, and BEA release schedules",
+ * but its FOMC dates (19 Mar, 7 May, 18 Jun, 30 Jul, 17 Sep 2026) appear to
+ * follow the Fed's 2025 meeting pattern, and nothing here could be checked
+ * against the published schedules from this environment. A calendar that may
+ * be a year out is worse than an empty one labelled unavailable.
  */
 const MACRO_CALENDAR_SEED = [
   // ── FOMC meetings (Fed decision days) ──────────────────────────────────────
@@ -45,12 +50,13 @@ const MACRO_CALENDAR_SEED = [
   // ── UK events ──────────────────────────────────────────────────────────────
   { event: "BoE Rate Decision",     country: "GB", date: "2026-05-08", impact: "high",   estimate: null,         previous: "4.50%" },
   { event: "UK CPI (YoY)",          country: "GB", date: "2026-04-16", impact: "medium", estimate: null,         previous: "2.8%" },
-].map(e => ({ ...e, seeded: true }));
+].map(e => ({ ...e, seeded: true, kind: "demo" }));
 
 /**
  * Filter seeded calendar to upcoming events within daysAhead window.
  */
 function upcomingSeededEvents(daysAhead = 30) {
+  if (!isDemoMode()) return [];
   const now    = new Date();
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() + daysAhead);
@@ -76,7 +82,7 @@ async function resolveWithFallback(cacheKey, fetchFn, ttlMs, fallback) {
   } catch (err) {
     console.warn(`[news] fetch failed (${cacheKey}):`, err.message);
     if (cached) return { data: cached.value, source: "cache", stale: true };
-    return { data: fallback, source: "seeded", stale: true };
+    return { data: fallback, source: "unavailable", stale: true };
   }
 }
 
@@ -100,12 +106,18 @@ router.get("/", async (req, res) => {
   const economic = (economicRaw && economicRaw.length > 0)
     ? economicRaw
     : upcomingSeededEvents(30);
-  const econFallback = econSource === "seeded" || economic[0]?.seeded;
+  const econSourceLabel =
+    economic[0]?.seeded ? "demo" :
+    economic.length     ? (econSource === "unavailable" ? "unavailable" : "live") :
+                          "unavailable";
 
   res.json(envelope({
     headlines,
     economicCalendar: economic,
-    econCalendarSource: econFallback ? "seeded" : "live",
+    econCalendarSource: econSourceLabel,
+    ...(econSourceLabel === "unavailable" ? {
+      econCalendarNote: "Economic calendar unavailable: Finnhub's economic calendar is a premium endpoint on the free tier, and no hand-entered calendar is shown outside DEMO_MODE.",
+    } : {}),
     configured: finnhub.isConfigured(),
   }, source, stale));
 });
@@ -134,7 +146,10 @@ router.get("/calendar", async (req, res) => {
   // Fall back to seeded calendar when Finnhub premium endpoint unavailable
   const economic  = (econRaw && econRaw.length > 0) ? econRaw : upcomingSeededEvents(daysAhead);
 
-  res.json(envelope({ earnings, economic, daysAhead }));
+  res.json(envelope({
+    earnings, economic, daysAhead,
+    economicSource: economic[0]?.seeded ? "demo" : economic.length ? "live" : "unavailable",
+  }));
 });
 
 // GET /api/news/:ticker
