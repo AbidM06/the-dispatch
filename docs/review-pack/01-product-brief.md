@@ -141,13 +141,13 @@ number from an invented one. What exists now:
    non-numeric input, and honours a deliberate `0`.
 3. **`web_search` has no `max_uses` cap.** Per-report search cost is unbounded.
    Still unfixed, and known.
-4. **One test fails on a clean checkout.** A date-dependent event-horizon
-   assertion in `tests/phase1.test.js`. 291 of 292 pass.
-4b. **`narrativeEngine.js` still hardcodes market claims.** Its invented
-   *portfolio* figures are gone, but the LOW_COST_MODE prose still asserts
-   specific things about the world — a named GPU order, a quarterly revenue
-   guide — with no source and no as-of date. Same failure class as the deleted
-   fallbacks; not yet fixed.
+4. ~~**One test fails on a clean checkout.**~~ Fixed — it was a year-less seed
+   calendar. 342 of 342 pass.
+4b. ~~**`narrativeEngine.js` still hardcodes market claims.**~~ Fixed in the
+   provenance audit; it now narrates only dated FRED levels.
+4d. **No executable price feed.** Every price in the app is a daily close or a
+   daily quote. The execution gate requires a timestamped quote, so paper
+   execution is blocked by design with the free feeds.
 4c. **One instrument's asset class is contested inside the repo.** HBKS is
    catalogued as a UK equity ETF in the Shariah filter and traded as a duration
    instrument by a playbook. The playbook is held rather than guessed at.

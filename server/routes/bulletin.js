@@ -72,35 +72,41 @@ function factDate(fact) {
   return (fact && typeof fact === "object" && fact.date) ? fact.date : null;
 }
 
-/** Fetch current FRED rates and format as a grounding data block for the prompt. */
+/**
+ * fetchMacroContext — FRED end-of-day observations as a prompt block.
+ *
+ * Each line carries ITS OWN observation date. The block header used to read
+ * "LIVE MACRO DATA (FRED, as of <today>)", which stamped today's date on
+ * figures FRED published for an earlier day (a Friday close on a Monday
+ * bulletin), and the model repeated it. HY OAS is converted explicitly: FRED
+ * publishes BAMLH0A0HYM2 in PERCENT, so 3.17 is 317bp.
+ */
 async function fetchMacroContext() {
   try {
     const rates = await fred.getAllRates();
     if (!rates) return null;
 
-    const dgs10  = factValue(rates.dgs10);
-    const dfii10 = factValue(rates.dfii10);
-    const t10yie = factValue(rates.t10yie);
-    const hyPct  = factValue(rates.hy_spread);
-    const t10y2y = factValue(rates.t10y2y);
-
-    const lines = [];
-    if (dgs10  != null) lines.push(`10Y UST Nominal Yield (DGS10):     ${dgs10.toFixed(2)}%`);
-    if (dfii10 != null) lines.push(`10Y Real Yield (DFII10):           ${dfii10.toFixed(2)}%`);
-    if (t10yie != null) lines.push(`10Y Breakeven Inflation (T10YIE):  ${t10yie.toFixed(2)}%`);
-    // BAMLH0A0HYM2 is published in PERCENT. The old line rounded it as though it
-    // were already basis points, so a 3.17% spread rendered as "3bps".
-    if (hyPct  != null) lines.push(`US HY OAS Spread (BAML):           ${Math.round(hyPct * 100)}bps (${hyPct.toFixed(2)}%)`);
-    if (t10y2y != null) lines.push(`Yield Curve 10Y-2Y (T10Y2Y):       ${t10y2y.toFixed(2)}%`);
+    const line = (label, fact, render) => {
+      const v = factValue(fact);
+      if (v == null) return null;
+      const d = factDate(fact);
+      return `${label.padEnd(36)} ${render(v)}  [FRED ${fact.seriesId || ""}, observation date ${d || "not supplied"}]`;
+    };
+    const lines = [
+      line("10Y UST Nominal Yield (DGS10):",    rates.dgs10,     v => `${v.toFixed(2)}%`),
+      line("10Y Real Yield (DFII10):",          rates.dfii10,    v => `${v.toFixed(2)}%`),
+      line("10Y Breakeven Inflation (T10YIE):", rates.t10yie,    v => `${v.toFixed(2)}%`),
+      line("US HY OAS (BAMLH0A0HYM2):",         rates.hy_spread, v => `${Math.round(v * 100)}bp (${v.toFixed(2)}%)`),
+      line("Yield Curve 10Y-2Y (T10Y2Y):",      rates.t10y2y,    v => `${v >= 0 ? "+" : ""}${v.toFixed(2)}pp`),
+    ].filter(Boolean);
 
     if (!lines.length) return null;
 
-    // Observation dates, so the model states when the data was measured rather
-    // than implying it is live.
     const dates = [rates.dgs10, rates.dfii10, rates.t10yie, rates.hy_spread, rates.t10y2y]
       .map(factDate).filter(Boolean).sort();
-    if (dates.length) lines.push(`(FRED observation date: ${dates[dates.length - 1]}, source: FRED)`);
-
+    if (dates.length && dates[0] !== dates[dates.length - 1]) {
+      lines.push(`(Observation dates differ: ${dates[0]} to ${dates[dates.length - 1]}.)`);
+    }
     return lines.join("\n");
   } catch (err) {
     console.warn("[bulletin] FRED macro context unavailable:", err.message);
@@ -154,7 +160,7 @@ async function fetchTwitterContext(headline) {
 const SYSTEM_PROMPT = `You are a dual-role expert: (1) a senior macro economist at a major research house, and (2) a senior S&T professional at JPMorgan briefing buy-side clients before market open. You produce morning bulletins combining rigorous economic analysis with immediately actionable cross-asset trading ideas. Your audience is an Economics student preparing for JPMorgan Spring Week.
 
 ACCURACY RULES — NON-NEGOTIABLE:
-- Only cite specific figures (yields, spreads, price levels, bps moves, % changes) that appear in the source article or in the LIVE MACRO DATA block below. Never invent statistics.
+- Only cite specific figures (yields, spreads, price levels, bps moves, % changes) that appear in the source article or in the MACRO DATA block below (with its observation dates). Never invent statistics.
 - For historical parallels: you may reference well-established episodes by name (e.g. 2013 Taper Tantrum, 2022 Fed hiking cycle, 2015 CNY devaluation) but do not fabricate specific bps moves or percentage drawdowns unless they are universally established facts.
 - If the source article lacks a specific number, describe direction and mechanism — never substitute an invented figure.
 - Trade rationales must follow a direct, mechanistic causal chain from the article to the asset. No speculative leaps without a stated transmission mechanism.
@@ -162,11 +168,11 @@ ACCURACY RULES — NON-NEGOTIABLE:
 
 function buildUserPrompt(articleList, macroContext, xContext) {
   const macroBlock = macroContext
-    ? `LIVE MACRO DATA (FRED, as of ${todayStr()}):\n${macroContext}\n\n`
-    : "";
+    ? `MACRO DATA (FRED end-of-day observations — each line shows its own observation date, which may be earlier than today; quote that date, not today's, when you cite a figure):\n${macroContext}\n\n`
+    : "MACRO DATA: unavailable this run. Do not state current yield or spread levels unless the article gives them.\n\n";
 
   const xBlock = xContext
-    ? `X / SOCIAL CONTEXT (verified live posts related to today's top story — each tagged with a reliability verdict):\n${xContext}\n\nUse this only as supplementary color for clientExposure/clientConcerns or sentiment framing. Treat "plausible-unverified" as opinion, not fact. Never use this block as the source of any specific figure — figures must come from the article or the live macro data above.\n\n`
+    ? `X / SOCIAL CONTEXT (verified live posts related to today's top story — each tagged with a reliability verdict):\n${xContext}\n\nUse this only as supplementary color for clientExposure/clientConcerns or sentiment framing. Treat "plausible-unverified" as opinion, not fact. Never use this block as the source of any specific figure — figures must come from the article or the dated macro data above.\n\n`
     : "";
 
   return `Today is ${todayStr()}.
@@ -375,9 +381,11 @@ function buildFallbackBulletin(top, articles) {
   const source   = top?.source   || "Unknown";
   const url      = top?.url      || "";
   const summary  = top?.summary  || "";
+  // No publication time means unknown — not "now", which would date an old
+  // article as breaking news.
   const pubAt    = top?.datetime
     ? new Date(typeof top.datetime === "number" ? top.datetime * 1000 : top.datetime).toISOString()
-    : now();
+    : null;
 
   return {
     date:        todayStr(),
@@ -385,7 +393,7 @@ function buildFallbackBulletin(top, articles) {
     generatedAt: now(),
     dataSource:  "finnhub",
     article: { headline, source, url, publishedAt: pubAt, summary },
-    pitchScript: `"${headline}" — reported by ${source}. ${summary} This story is relevant because it may affect cross-asset positioning across rates, equities, and credit. Monitor closely for follow-through in European and US session.`,
+    pitchScript: `"${headline}" — reported by ${source}${pubAt ? ` (${pubAt.slice(0, 10)})` : ""}. ${summary} Deterministic mode: no market impact has been assessed.`,
     analysis: {
       economistView: {
         macroRegime:              "Regime classification unavailable — AI offline. Enable ANTHROPIC_API_KEY.",
@@ -395,17 +403,16 @@ function buildFallbackBulletin(top, articles) {
         tailRisks:                "Tail risk analysis requires AI. Monitor for follow-up data releases.",
       },
       tradingView: {
-        clientExposure:  "Hedge funds, long-only asset managers, and credit investors are likely exposed to this development.",
-        clientConcerns:  "Volatility, liquidity, and correlation risk in a risk-off environment.",
-        opportunities: [
-          { asset: "10Y UST", direction: "Neutral", conviction: "Low", hedge: "Standalone", rationale: "Monitor yield moves for rates signal" },
-          { asset: "Gold",    direction: "Long",    conviction: "Low", hedge: "Standalone", rationale: "Flight-to-safety hedge in uncertainty" },
-        ],
+        clientExposure:  "Not assessed in deterministic mode.",
+        clientConcerns:  "Not assessed in deterministic mode.",
+        // Previously a fixed "Gold: Long — flight-to-safety" on every story,
+        // whatever the story was. No view is better than a canned one.
+        opportunities: [],
       },
       risks: [
         "AI analysis unavailable — enable ANTHROPIC_API_KEY for full risk assessment.",
         "Data surprises could invalidate any preliminary directional view.",
-        "Geopolitical escalation risk not captured in deterministic mode.",
+        "No risk assessment is made in deterministic mode.",
       ],
     },
     metadata: {

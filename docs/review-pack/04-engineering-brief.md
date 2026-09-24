@@ -67,22 +67,20 @@ reviewers and have since been fixed; the ones that remain are still live.
    deliberate `0`.
 2. **`web_search` has no `max_uses`.** Per-report search cost is unbounded.
    Still known and deferred.
-3. **`client/index.html:6392` and `:6417`** call `snapshotMeta.source.toUpperCase()`
-   with no guard. Any snapshot payload missing `source` white-screens the entire
-   app — there is no error boundary. Still live. (Line numbers moved with the
-   unavailable-panel work; the defect did not.)
-4. **One failing test on a clean checkout.** `tests/phase1.test.js`, "event
-   within horizon returns WARN on event risk check" — a date-dependent
-   assertion. 291 of 292 pass. It fails on `main` too.
+3. ~~**Unguarded `snapshotMeta.source.toUpperCase()`**~~ Fixed in the provenance
+   audit: the header badge is built from a guarded status string. There is still
+   no React error boundary.
+4. ~~**One failing test on a clean checkout.**~~ Fixed. It failed because the
+   event-risk check read a hand-typed calendar with no year ("19 Mar"), which
+   only put an event inside the horizon in spring. The calendar is now injected
+   with full dates; 342 of 342 pass.
 5. **No CI.** No `.github/workflows`. Adding one would go red immediately on
    defect 4.
 6. **`README.md` is stale** in two places: it states 227 tests (there are 292)
    and lists five research report types (there are six — it omits equity and
    commodities).
-7. **`narrativeEngine.js` hardcodes market claims.** The LOW_COST_MODE narrative
-   still asserts specific facts about the world — a named GPU order, a quarterly
-   revenue guide — unsourced and undated. Its invented portfolio figures have
-   been removed; these have not. Same class as the deleted research fallbacks.
+7. ~~**`narrativeEngine.js` hardcodes market claims.**~~ Fixed in the provenance
+   audit — rewritten to use only dated facts. See "Provenance audit" below.
 8. **HBKS's asset class is contested inside the repo.** The Shariah filter
    catalogues it as a UK equity ETF; a playbook traded it as a duration hedge
    and quoted an unsourced beta. The playbook is held by `CONTESTED_INSTRUMENTS`
@@ -133,6 +131,32 @@ Two defects the review did not find, discovered while fixing the ones it did:
 One reviewer claim was **not reproduced**: a reported test count of 257 with 4
 failures. A clean checkout gave 260 of 261, and now 291 of 292, with the single
 date-dependent failure above.
+
+## Provenance audit (after the external review)
+
+A second pass audited every displayed number for whether a reader can tell a
+sourced observation (with its date) from a calculation, a model estimate, an
+unavailable value or demo data. Summary of what changed:
+
+- `server/provenance.js`: one Fact shape with `observedAt` vs `retrievedAt`, a
+  `kind`, and per-source freshness judged on observation date at read time.
+- Snapshot: oldest-component freshness (was newest), provenance kept through the
+  combined cache and through Zod (which had been stripping unknown keys), FX
+  observation time from the provider (was our clock), FRED recovers the latest
+  valid value past `.` rows, intl/RSI included in the summary as unavailable.
+- Seeds are `DEMO_MODE`-only. Deterministic narrative, brief, engine inputs,
+  event calendar and AI prompts no longer carry hand-typed current claims.
+- Research: both paths validate against per-type Zod contracts; `grounding`
+  metadata; unresolved citations stay visible; `dataAsOf` is an observation span.
+- Market meaning: level vs change labelling centralised in `analytics/regime.js`;
+  glossary yield/coupon and bear-flattener definitions corrected; HBKS held on
+  every path; Shariah screening marked unverified; backtester relabelled as a
+  trigger-frequency count on demo data.
+- Execution: `executionGate.prepareOrder()` shared by both callers; requires an
+  executable timestamped quote (none of the free feeds qualifies), dated FX,
+  broker equity and positions; policy refuses missing inputs.
+
+Tests: `tests/dataProvenance.test.js`.
 
 ## Recently changed, and the most useful thing to review
 

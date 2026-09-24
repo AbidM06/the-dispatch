@@ -1,9 +1,18 @@
 /**
  * server/engine/backtester.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Deterministic historical backtest using RATES_HISTORY_SEED.
- * Scores each playbook against each historical monthly context.
- * No API calls — pure computation on seeded data.
+ * TRIGGER-FREQUENCY count on hand-entered demo data. NOT a backtest of returns.
+ *
+ * It counts how often each playbook's trigger condition would have been true
+ * on the seven hand-typed monthly points in RATES_HISTORY_SEED. It never
+ * computes a return, a fill, a hit rate or a P&L, so nothing it produces is
+ * evidence of trading performance — and it must not be presented as such.
+ *
+ * Removed fabrications: the 2Y yield used to be synthesised as `y10 − 2.00`
+ * (so the curve was always exactly +2.00pp before rounding), missing inputs
+ * were filled with 2.3 / 3.0, the book was set to £1,110 with HHI 2000, and
+ * seed watchlist prices stood in for market data. Missing inputs are now null,
+ * so playbooks that need them do not trigger.
  *
  * runBacktest(options) → BacktestResult
  *
@@ -24,23 +33,9 @@
 const seeds         = require("../../seeds/fallback");
 const { PLAYBOOKS } = require("./playbooks");
 const { computeSignals } = require("./strategies");
+const { classifyLevels } = require("../analytics/regime");
 
-/**
- * Classify regime from a rates snapshot.
- */
-function classifyRegime(r) {
-  const labels = [];
-  if      (r.t10y2y < 0)   labels.push("Inverted curve");
-  else if (r.t10y2y < 0.3) labels.push("Flat curve");
-  else                      labels.push("Bear steepener");
-  if      (r.dfii10 > 2.0) labels.push("High real yields");
-  else if (r.dfii10 > 1.5) labels.push("Elevated real yields");
-  if      (r.hy_spread > 4.5)                             labels.push("Credit stress");
-  else if (r.hy_spread > 3.5)                             labels.push("Risk-off");
-  else if (r.hy_spread > 3.0 && r.dfii10 > 1.5)          labels.push("Bear flattener");
-  if (r.dgs10 > 4.5) labels.push("Rates restrictive");
-  return labels.length ? labels.join(" + ") : "Broadly neutral";
-}
+const WHAT_THIS_IS = "Trigger frequency on hand-entered monthly demo data (seeds RATES_HISTORY_SEED / HY_HISTORY_SEED). Counts how often each trigger condition was true. It does not compute returns, fills or hit rates and is not evidence of trading performance.";
 
 /**
  * Run backtesting across all historical months in RATES_HISTORY_SEED.
@@ -74,45 +69,37 @@ function runBacktest(options = {}) {
 
     // Build rates scalars
     const rates = {
-      dgs10:     ratesPoint.y10,
-      dfii10:    ratesPoint.real ?? ratesPoint.y10 - 2.0,
-      t10yie:    ratesPoint.bei  ?? 2.3,
-      hy_spread: hyPoint?.oas    ?? 3.0,
-      t10y2y:    ratesPoint.y10 - 2.0,  // approximate 2Y as y10 - 2.0 spread
+      dgs10:     Number.isFinite(ratesPoint.y10)  ? ratesPoint.y10  : null,
+      dfii10:    Number.isFinite(ratesPoint.real) ? ratesPoint.real : null,
+      t10yie:    Number.isFinite(ratesPoint.bei)  ? ratesPoint.bei  : null,
+      hy_spread: Number.isFinite(hyPoint?.oas)    ? hyPoint.oas     : null,
+      t10y2y:    null,   // no 2Y in the seed history; never synthesised
     };
 
     // Build history slice for signals
     const historySlice = ratesHistory.slice(0, i + 1);
 
-    const watchlistMap = seeds.WATCHLIST_SEED.reduce((acc, w) => {
-      acc[w.sym] = { price: w.price, chg: w.chg };
-      return acc;
-    }, {});
+    const watchlistMap = {};   // no historical prices; price-based triggers do not fire
 
     const signals = computeSignals(rates, historySlice, watchlistMap);
-    const regime  = classifyRegime(rates);
+    const regime  = classifyLevels(rates).regime;
 
     const ctx = {
       rates,
       deltas: {
-        dgs10_d:     i > 0 ? +(rates.dgs10 - ratesHistory[i-1].y10) * 100 : 0,
-        dfii10_d:    0,
-        t10yie_d:    0,
-        hy_spread_d: 0,
-        t10y2y_d:    0,
+        dgs10_d:     i > 0 ? Math.round((rates.dgs10 - ratesHistory[i-1].y10) * 100) : null,
+        dfii10_d:    i > 0 && Number.isFinite(ratesHistory[i-1].real) && rates.dfii10 != null ? Math.round((rates.dfii10 - ratesHistory[i-1].real) * 100) : null,
+        t10yie_d:    i > 0 && Number.isFinite(ratesHistory[i-1].bei)  && rates.t10yie != null ? Math.round((rates.t10yie - ratesHistory[i-1].bei) * 100)  : null,
+        hy_spread_d: i > 0 && Number.isFinite(hyHistory[i-1]?.oas)    && rates.hy_spread != null ? Math.round((rates.hy_spread - hyHistory[i-1].oas) * 100) : null,
+        t10y2y_d:    null,
       },
-      portfolio: {
-        rows:     seeds.POSITIONS_SEED.map(p => ({ ticker: p.ticker, valGBP: null })),
-        totalGBP: 1110,
-        weights:  {},
-        hhi:      2000,
-        usdPct:   12.5,
-      },
+      portfolio: { rows: [], totalGBP: 0, weights: {}, hhi: 0, usdPct: 0 },
       watchlist: watchlistMap,
+      ratesAsOf: {},
       regime,
       signals,
       today: new Date(2026, i, 1),
-      _usdgbp: seeds.FX_SEED.usdgbp.value,
+      _usdgbp: null,
     };
 
     const monthTriggered = [];
@@ -177,6 +164,15 @@ function runBacktest(options = {}) {
   const topSetups = byPlaybook.slice(0, 3).map(p => p.playbookId);
 
   return {
+    kind:        "demo",
+    measures:    "trigger-frequency",
+    whatThisIs:  WHAT_THIS_IS,
+    limitations: [
+      "Seven hand-typed monthly observations — far too few to estimate anything.",
+      "No 2Y history, so curve-level and curve-change triggers cannot fire.",
+      "No historical prices, so no returns, stops, targets or hit rates are evaluated.",
+      "Trigger thresholds were chosen with the same data in view (look-ahead).",
+    ],
     runs:        totalRuns,
     months:      ratesHistory.length,
     byPlaybook,

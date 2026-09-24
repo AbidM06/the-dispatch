@@ -320,9 +320,11 @@ describe("Playbook triggers", () => {
   });
 
   // concentration-hedge: hhi > 2000
-  test("concentration-hedge triggers when hhi > 2000", () => {
-    const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 2500, usdPct: 30 } });
-    expect(findPlaybook("concentration-hedge").trigger(ctx)).toBe(true);
+  test("concentration-hedge does NOT trigger while HBKS identity is unverified", () => {
+    // Its only vehicle is HBKS, whose asset class is contested (equity ETF vs
+    // sukuk fund) and cannot be verified from here. Held, like breakout-failure.
+    const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 2500, usdPct: 0 } });
+    expect(findPlaybook("concentration-hedge").trigger(ctx)).toBe(false);
   });
   test("concentration-hedge does NOT trigger when hhi <= 2000", () => {
     const ctx = baseCtx({ portfolio: { rows: [], totalGBP: 1000, weights: {}, hhi: 1500, usdPct: 30 } });

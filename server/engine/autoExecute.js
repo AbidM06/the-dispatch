@@ -7,12 +7,12 @@
  *
  * Takes a list of engine-generated tickets + execution context, runs each
  * through the Alpaca paper-trading pipeline:
- *   1. Freshness gate (data age check)
- *   2. Policy check (daily limits, notional cap, open positions)
- *   3. Risk-based position sizing
- *   4. Alpaca order placement
- *   5. Execution log + policy counter update
- *   6. Webhook fire-and-forget
+ *   1. Rates freshness gate (FRED observation dates)
+ *   2. executionGate.prepareOrder: executable price → account → positions →
+ *      FX → sizing → policy (see executionGate.js)
+ *   3. Alpaca order placement (LONG only)
+ *   4. Execution log + policy counter update
+ *   5. Webhook fire-and-forget
  *
  * Returns: { orders: AlpacaOrder[], skipped: SkippedOrder[], freshness: object }
  * ─────────────────────────────────────────────────────────────────────────────
@@ -21,12 +21,11 @@
 
 const alpaca          = require("../providers/alpaca");
 const executionPolicy = require("../analytics/executionPolicy");
-const { computeSize } = require("./positionSizing");
+const { prepareOrder } = require("./executionGate");
 const { appendExecutionLog } = require("../importers/ideaLog");
 const { fireWebhook } = require("../providers/webhook");
 const cache           = require("../cache");
 
-const DEFAULT_USDGBP      = 0.7558;
 const MAX_ORDERS_PER_RUN  = 3;
 
 /**
@@ -99,165 +98,114 @@ function shouldAutoExecute(dataFresh) {
  * @param {object}   [playbookPerf]  Optional backtest evidence per playbook ID
  * @returns {Promise<{ orders, skipped, freshness, enabled }>}
  */
-async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}) {
+/**
+ * defaultPriceFeed — the executable price for a ticker, from the data this app
+ * has. Watchlist entries are DAILY CLOSES (executable:false), so with the free
+ * feeds this returns non-executable facts and the gate blocks. A caller with a
+ * real quote source injects `deps.getExecutablePrice`.
+ */
+function defaultPriceFeed(ctx) {
+  return async (ticker) => {
+    const q = ctx?.watchlist?.[ticker];
+    if (!q || !Number.isFinite(q.price)) return null;
+    return { value: q.price, executable: false, priceType: "daily close", observedAt: q.date || null,
+             observedAtPrecision: "date", source: q.source || null };
+  };
+}
+
+function logSkip(ticket, decision, reasons, freshness) {
+  appendExecutionLog({
+    ideaId: ticket.id, ticker: ticket.ticker, direction: ticket.direction,
+    decision, reasons,
+    freshnessSnapshot: { dataFresh: freshness.dataFresh },
+    orderPayload: null, result: null, error: decision === "FAILED" ? reasons.join("; ") : null,
+  });
+}
+
+/**
+ * Execute a list of engine tickets against Alpaca paper trading.
+ *
+ * Every ticket passes through executionGate.prepareOrder — the same gate the
+ * manual approve route uses. Broker (alpaca) and price feed are boundaries;
+ * tests mock them while exercising the real sizing and policy logic.
+ *
+ * @param {object[]} tickets
+ * @param {object}   ctx            engine context (watchlist, _usdgbp)
+ * @param {object}   [playbookPerf] trigger-frequency counts on demo data
+ * @param {object}   [deps]         { getExecutablePrice(ticker), fx, now }
+ * @returns {Promise<{ enabled, freshness, orders, skipped }>}
+ */
+async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}, deps = {}) {
   const freshness = checkFreshness();
 
   if (!shouldAutoExecute(freshness.dataFresh)) {
-    return {
-      enabled:  false,
-      freshness,
-      orders:   [],
-      skipped:  [],
-    };
+    return { enabled: false, freshness, orders: [], skipped: [] };
   }
 
-  const usdgbp       = ctx._usdgbp ?? DEFAULT_USDGBP;
-  const maxOrders    = alpaca.getMaxOrdersPerRun
-    ? alpaca.getMaxOrdersPerRun()
-    : MAX_ORDERS_PER_RUN;
+  const getPrice = deps.getExecutablePrice || defaultPriceFeed(ctx);
+  const fx       = deps.fx !== undefined ? deps.fx : (cache.getWithMeta("snapshot:fx")?.value || null);
+  const now      = deps.now || new Date();
+  const maxOrders = alpaca.getMaxOrdersPerRun ? alpaca.getMaxOrdersPerRun() : MAX_ORDERS_PER_RUN;
 
-  // Account equity for position sizing. This used to default to £75,000 and
-  // carry on when the fetch failed, so an Alpaca outage sized real orders
-  // against an invented portfolio. Risk-per-trade is a percentage of equity; if
-  // equity is unknown, every downstream number is meaningless. Abort instead.
-  let accountEquityGBP = null;
+  // Broker state. A failure here is not "zero" — it is unknown, and unknown
+  // blocks every order below (account equity used to default to £75,000).
+  let account = null, positions = null;
   try {
     const acct = await alpaca.getAccount();
-    const pv = parseFloat(acct.portfolio_value);
-    if (Number.isFinite(pv) && pv > 0) accountEquityGBP = pv * usdgbp;
+    const eq = parseFloat(acct?.equity ?? acct?.portfolio_value);
+    account = Number.isFinite(eq) && eq > 0 ? { equity: eq, currency: acct?.currency || "USD" } : null;
   } catch (err) {
-    console.warn("[autoExecute] Could not fetch Alpaca account for sizing:", err.message);
+    console.warn("[autoExecute] Could not fetch Alpaca account:", err.message);
   }
-  if (accountEquityGBP == null) {
-    const reason = "Account equity unavailable — cannot size positions; skipping execution.";
-    console.warn(`[autoExecute] ${reason}`);
-    return { executed: false, reason, orders: [], skipped: [] };
-  }
-
-  // Open-position count and portfolio value feed the exposure limits below.
-  // checkPolicy() treats a missing openPositions as 0 and skips the
-  // single-ticker cap entirely when portfolioGBP is absent, so omitting these
-  // silently disabled two of the four advertised circuit breakers.
-  let openPositions = 0;
   try {
-    const positions = await alpaca.getPositions();
-    if (Array.isArray(positions)) openPositions = positions.length;
+    const p = await alpaca.getPositions();
+    positions = Array.isArray(p) ? p : null;
   } catch (err) {
-    const reason = `Could not fetch open positions (${err.message}) — cannot enforce exposure limits; skipping execution.`;
-    console.warn(`[autoExecute] ${reason}`);
-    return { executed: false, reason, orders: [], skipped: [] };
+    console.warn("[autoExecute] Could not fetch Alpaca positions:", err.message);
   }
 
   const orders  = [];
   const skipped = [];
 
   for (const ticket of tickets.slice(0, maxOrders)) {
-    const executableDecision =
-      ticket.engineDecision === "allowed" || ticket.engineDecision === "caution";
-
+    const executableDecision = ticket.engineDecision === "allowed" || ticket.engineDecision === "caution";
     if (!executableDecision || !alpaca.isSupported(ticket.ticker)) {
-      const reason = !executableDecision
-        ? `Engine decision: ${ticket.engineDecision}`
-        : `${ticket.ticker} not in ALPACA_SUPPORTED`;
-      skipped.push({ ticker: ticket.ticker, reason });
-      appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "FAILED",
-        reasons:   [reason],
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: null, result: null, error: reason,
-      });
+      const reason = !executableDecision ? `Engine decision: ${ticket.engineDecision}` : `${ticket.ticker} not in ALPACA_SUPPORTED`;
+      skipped.push({ ticker: ticket.ticker, stage: "eligibility", reason });
+      logSkip(ticket, "FAILED", [reason], freshness);
       continue;
     }
 
-    // Size FIRST, then check policy against the real notional.
-    //
-    // The old order was inverted: checkPolicy ran with a placeholder
-    // notionalGBP of 100 and sizing happened afterwards, so the £250 daily
-    // notional cap was tested against £100 no matter how large the order
-    // turned out to be. A valid ticket sizing to £6,000 passed a £250 cap.
-    const priceUSD = ticket.entry ?? ctx.watchlist?.[ticket.ticker]?.price ?? null;
-    const priceGBP = priceUSD ? priceUSD * usdgbp : null;
-    const sizing   = computeSize(ticket.entry, ticket.stop, accountEquityGBP, priceGBP);
+    let priceFact = null;
+    try { priceFact = await getPrice(ticket.ticker); } catch (err) { priceFact = null; }
 
-    // Blocked sizing means "do not trade this", not "trade one share of it".
-    // `qty = sizing.blocked ? 1 : sizing.qty` turned every rejection into a
-    // small order — an entry of 100 against a stop of 110 is an invalid LONG,
-    // and it still submitted.
-    if (sizing.blocked || !(sizing.qty > 0)) {
-      const reason = sizing.blockReason || sizing.sizingReason || "Position sizing returned no quantity.";
-      skipped.push({ ticker: ticket.ticker, reason });
-      appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "SKIPPED",
-        reasons:   [reason],
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: null, result: null, error: null,
-      });
-      continue;
-    }
-
-    const qty = sizing.qty;
-    const notionalGBP = priceGBP ? +(qty * priceGBP).toFixed(2) : null;
-
-    // Without a notional we cannot evaluate the caps, so we do not trade.
-    if (notionalGBP == null) {
-      const reason = `No price available for ${ticket.ticker} — cannot compute notional; skipping.`;
-      skipped.push({ ticker: ticket.ticker, reason });
-      appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "SKIPPED",
-        reasons:   [reason],
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: null, result: null, error: null,
-      });
-      continue;
-    }
-
-    const policyCheck = executionPolicy.checkPolicy({
-      ticker:       ticket.ticker,
-      notionalGBP,                    // the real order size, not a placeholder
-      openPositions,                  // enables the max-open-positions cap
-      portfolioGBP: accountEquityGBP, // enables the single-ticker exposure cap
-    });
-    if (!policyCheck.allowed) {
-      skipped.push({ ticker: ticket.ticker, reason: policyCheck.reasons.join("; ") });
-      appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "SKIPPED",
-        reasons:   policyCheck.reasons,
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: null, result: null, error: null,
-      });
+    const prep = prepareOrder({ ticket, priceFact, fx, account, positions, now });
+    if (!prep.ok) {
+      skipped.push({ ticker: ticket.ticker, stage: prep.stage, reason: prep.reasons.join("; ") });
+      logSkip(ticket, "SKIPPED", prep.reasons, freshness);
       continue;
     }
 
     try {
-      const dateStr       = new Date().toISOString().slice(0, 10);
+      const dateStr       = now.toISOString().slice(0, 10);
       const clientOrderId = `dispatch-${ticket.ticker.toLowerCase()}-${dateStr}`;
-      const side          = ticket.direction === "LONG" ? "buy" : "sell";
+      const order = await alpaca.placeOrder(ticket.ticker, "buy", prep.qty, "market", clientOrderId);
 
-      const order = await alpaca.placeOrder(ticket.ticker, side, qty, "market", clientOrderId);
-
-      executionPolicy.recordTrade(ticket.ticker, notionalGBP);
+      executionPolicy.recordTrade(ticket.ticker, prep.notionalGBP);
+      // Count this order toward the next ticket's position and exposure caps
+      // (market_value in the broker's native currency, like Alpaca's own).
+      if (Array.isArray(positions)) positions = [...positions, { symbol: ticket.ticker, market_value: prep.qty * prep.price }];
 
       const btEvidence = playbookPerf[ticket.playbook] ?? null;
-
       orders.push({
         ticker:        ticket.ticker,
         direction:     ticket.direction,
         orderId:       order.id,
-        qty,
-        notionalGBP,
-        accountEquityGBP: +accountEquityGBP.toFixed(0),
+        qty:           prep.qty,
+        notionalGBP:   prep.notionalGBP,
+        accountEquityGBP: +prep.equityGBP.toFixed(0),
+        executionPrice: prep.price,
+        priceAgeMin:   prep.priceAgeMin,
         playbook:      ticket.playbook,
         rationale:     ticket.rationale,
         confidence:    ticket.confidence,
@@ -265,54 +213,37 @@ async function autoExecuteIdeas(tickets, ctx, playbookPerf = {}) {
         entry:         ticket.entry,
         stop:          ticket.stop,
         target:        ticket.target,
-        riskPerShare:  sizing.riskPerShare,
-        riskGBP:       sizing.riskGBP,
-        sizingReason:  sizing.sizingReason,
+        riskPerShare:  prep.sizing.riskPerShare,
+        riskGBP:       prep.sizing.riskGBP,
+        sizingReason:  prep.sizing.sizingReason,
         caution:       ticket.engineDecision === "caution" ? ticket.engineReasons : [],
-        backtestEvidence: btEvidence ? {
+        // Renamed from `backtestEvidence`: it is a trigger count on demo data,
+        // not evidence that the playbook makes money.
+        triggerFrequencyDemo: btEvidence ? {
           triggerRate:    btEvidence.triggerRate,
-          avgConfidence:  btEvidence.avgConfidence,
           timesTriggered: btEvidence.timesTriggered,
+          note:           "Trigger frequency on hand-entered demo data — not performance evidence.",
         } : null,
       });
 
       appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "EXECUTED",
-        reasons:   [],
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: { ticker: ticket.ticker, side, qty },
-        result:    { orderId: order.id },
-        error:     null,
+        ideaId: ticket.id, ticker: ticket.ticker, direction: ticket.direction,
+        decision: "EXECUTED", reasons: [],
+        freshnessSnapshot: { dataFresh: freshness.dataFresh, priceAgeMin: prep.priceAgeMin },
+        orderPayload: { ticker: ticket.ticker, side: "buy", qty: prep.qty, notionalGBP: prep.notionalGBP },
+        result: { orderId: order.id }, error: null,
       });
 
-      // Webhook — fire and forget
       fireWebhook("idea.executed", {
-        ticker:     ticket.ticker,
-        direction:  ticket.direction,
-        orderId:    order.id,
-        qty,
-        notionalGBP,
-        playbook:   ticket.playbook,
-        confidence: ticket.confidence,
+        ticker: ticket.ticker, direction: ticket.direction, orderId: order.id,
+        qty: prep.qty, notionalGBP: prep.notionalGBP, playbook: ticket.playbook, confidence: ticket.confidence,
       }).catch(() => {});
 
-      console.log(`[autoExecute] ✓ ${side.toUpperCase()} ${qty}×${ticket.ticker} — orderId=${order.id}`);
-
+      console.log(`[autoExecute] ✓ BUY ${prep.qty}×${ticket.ticker} — orderId=${order.id}`);
     } catch (err) {
       console.error(`[autoExecute] ${ticket.ticker} failed:`, err.message);
-      skipped.push({ ticker: ticket.ticker, reason: err.message });
-      appendExecutionLog({
-        ideaId:    ticket.id,
-        ticker:    ticket.ticker,
-        direction: ticket.direction,
-        decision:  "FAILED",
-        reasons:   [err.message],
-        freshnessSnapshot: { dataFresh: freshness.dataFresh },
-        orderPayload: null, result: null, error: err.message,
-      });
+      skipped.push({ ticker: ticket.ticker, stage: "broker", reason: err.message });
+      logSkip(ticket, "FAILED", [err.message], freshness);
     }
   }
 

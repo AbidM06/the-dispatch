@@ -68,12 +68,19 @@ describe("F03a / T06 — bulletin must not silently drop FRED data", () => {
 
   test("converts HY OAS from percent to basis points", async () => {
     const out = await bulletin._fetchMacroContext();
-    expect(out).toMatch(/317bps/);            // 3.17% — not "3bps"
+    expect(out).toMatch(/317bp \(3\.17%\)/);  // 3.17% — not "3bps"
   });
 
-  test("states the observation date, not the fetch time", async () => {
+  test("each line states its own observation date, not the fetch time", async () => {
     const out = await bulletin._fetchMacroContext();
-    expect(out).toMatch(/observation date: 2026-09-18/);
+    const lines = out.split("\n").filter(l => /FRED/.test(l));
+    expect(lines).toHaveLength(5);
+    for (const l of lines) expect(l).toMatch(/observation date 2026-09-18/);
+  });
+
+  test("the prompt no longer stamps today's date on FRED data", () => {
+    const src = read("routes/bulletin.js");
+    expect(src).not.toMatch(/LIVE MACRO DATA \(FRED, as of \$\{todayStr\(\)\}\)/);
   });
 });
 
@@ -93,10 +100,11 @@ describe("F04 / T02 — disclosure arrays are enforced, not merely requested", (
 
   test("every report type requires estimates[] and unverified[]", () => {
     const V = anthropic.REPORT_VALIDATORS;
-    expect(V.macro({ title: "t", scenarios: {} })).toBe(false);
-    expect(V.macro({ title: "t", scenarios: {}, estimates: [], unverified: [] })).toBe(true);
-    expect(V.fx({ title: "t", pairViews: [] })).toBe(false);
-    expect(V.commodities({ title: "t", keyTakeaways: [] })).toBe(false);
+    const macro = { title: "t", abstract: ["a"], scenarios: { baseline: {}, stress: {} } };
+    expect(V.macro(macro)).toBe(false);
+    expect(V.macro({ ...macro, estimates: [], unverified: [] })).toBe(true);
+    expect(V.fx({ title: "t", pairViews: [{ pair: "EUR/USD", direction: "LONG" }], risks: ["r"] })).toBe(false);
+    expect(V.commodities({ title: "t", keyTakeaways: ["k"], scenarios: {} })).toBe(false);
   });
 
   test("equity additionally requires its risk surface", () => {
@@ -105,8 +113,22 @@ describe("F04 / T02 — disclosure arrays are enforced, not merely requested", (
     expect(V.equity(withDisclosures)).toBe(false);          // no scenarios/risks
     expect(V.equity({
       ...withDisclosures,
-      crossAssetContext: {}, scenarios: {}, invalidation: {}, risks: [{ risk: "r" }],
+      crossAssetContext: {}, rateSensitivity: {}, scenarios: { bear: {}, bull: {} },
+      invalidation: {}, risks: [{ risk: "r" }],
     })).toBe(true);
+    // One scenario is not a scenario analysis.
+    expect(V.equity({
+      ...withDisclosures,
+      crossAssetContext: {}, rateSensitivity: {}, scenarios: { base: {} },
+      invalidation: {}, risks: [{ risk: "r" }],
+    })).toBe(false);
+  });
+
+  test("every synchronous branch exits through finalizeResearchReport", () => {
+    const src = read("providers/anthropic.js");
+    for (const t of ["fx", "rates", "thematic", "equity", "commodities", "macro"]) {
+      expect(src).toMatch(new RegExp(`finalizeResearchReport\\("${t}", raw, sources`));
+    }
   });
 
   test("the disclosure contract is stated in the shared prompt rules", () => {
@@ -153,7 +175,16 @@ describe("F03b / T07 — batched reports keep their provenance", () => {
   test("the batch job no longer hardcodes empty sources with grounded:true", () => {
     const src = fs.readFileSync(path.join(SERVER, "jobs", "researchBatchJob.js"), "utf8");
     expect(src).not.toMatch(/finalizeResearchReport\(type, hit\.text, \[\], true\)/);
-    expect(src).toMatch(/sources\.length > 0/);
+    expect(src).toMatch(/finalizeResearchReport\(type, hit\.text, sources,/);
+  });
+
+  test("a search-enabled report with no sources is not grounded", () => {
+    const anthropic = require("../server/providers/anthropic");
+    const raw = JSON.stringify({ title: "t", abstract: ["a"], scenarios: { baseline: {}, stress: {} }, estimates: [], unverified: [] });
+    const out = anthropic.finalizeResearchReport("macro", raw, [], { searchEnabled: true, tier: "batch" });
+    expect(out.grounded).toBe(false);
+    expect(out.grounding.sourcesReturned).toBe(0);
+    expect(out.grounding.meaning).toMatch(/does not mean every claim was verified/);
   });
 });
 
@@ -218,35 +249,53 @@ describe("T03 — regime labels describe shape, never an uncomputed direction", 
 
 // ─────────────────────────────────────────────────────────────────────────────
 describe("F02 — execution controls cannot be bypassed by their callers", () => {
-  const autoSrc = read("engine/autoExecute.js");
-  const ideasSrc = read("routes/ideas.js");
+  // Behavioural now: both callers share executionGate.prepareOrder, so the
+  // gate itself is exercised (see tests/dataProvenance.test.js for the full
+  // auto-execute path with a mocked broker).
+  let gate, now, execPrice, fx;
+  beforeEach(() => {
+    jest.resetModules();
+    process.env.TRADING_ENABLED = "true";
+    gate = require("../server/engine/executionGate");
+    now = new Date("2026-09-24T15:00:00Z");
+    execPrice = { value: 100, executable: true, observedAt: "2026-09-24T14:55:00Z", observedAtPrecision: "timestamp", source: "test quote" };
+    fx = { value: 0.8, observedAt: "2026-09-24T08:00:00Z" };
+  });
+  afterEach(() => { delete process.env.TRADING_ENABLED; });
 
   test("T04: blocked sizing never degrades to a one-share order", () => {
-    expect(autoSrc).not.toMatch(/sizing\.qty > 0\) \? sizing\.qty : 1/);
-    expect(ideasSrc).not.toMatch(/sizing\.qty \|\| 1/);
-    expect(autoSrc).toMatch(/sizing\.blocked \|\| !\(sizing\.qty > 0\)/);
+    const out = gate.prepareOrder({ ticket: { ticker: "AMD", direction: "LONG", stop: 110 },
+      priceFact: execPrice, fx, account: { equity: 10000, currency: "USD" }, positions: [], now });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("sizing");
+    expect(out.qty).toBeUndefined();
   });
 
-  test("T05: policy is checked against the real notional, not a placeholder", () => {
-    expect(autoSrc).not.toMatch(/notionalGBP: 100/);
-    expect(ideasSrc).not.toMatch(/sizePct \* 10 : 100/);
-    expect(autoSrc).toMatch(/notionalGBP,\s*\/\/ the real order size/);
+  test("T05: policy sees the real notional — an oversized order is refused", () => {
+    const out = gate.prepareOrder({ ticket: { ticker: "AMD", direction: "LONG", stop: 95 },
+      priceFact: execPrice, fx, account: { equity: 100000, currency: "USD" }, positions: [], now });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("policy");
+    expect(out.notionalGBP).toBeGreaterThan(250);
+    expect(out.reasons.join(" ")).toMatch(/notional/i);
   });
 
-  test("exposure limits receive the inputs they need to fire", () => {
-    for (const src of [autoSrc, ideasSrc]) {
-      expect(src).toMatch(/openPositions/);
-      expect(src).toMatch(/portfolioGBP/);
-    }
+  test("policy refuses to evaluate with missing inputs instead of assuming zero", () => {
+    const policy = require("../server/analytics/executionPolicy");
+    const res = policy.checkPolicy({ ticker: "AMD", notionalGBP: 10 });
+    expect(res.allowed).toBe(false);
+    expect(res.reasons.join(" ")).toMatch(/openPositions, portfolioGBP/);
   });
 
   test("no invented account equity sizes a real order", () => {
-    expect(autoSrc).not.toMatch(/accountEquityGBP = 75_000/);
-    expect(ideasSrc).not.toMatch(/totalGBP \?\? 1110;\s*$/m);
+    const out = gate.prepareOrder({ ticket: { ticker: "AMD", direction: "LONG", stop: 95 },
+      priceFact: execPrice, fx, account: null, positions: [], now });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("account");
+    expect(read("engine/autoExecute.js")).not.toMatch(/75_000/);
   });
 
   test("the daily notional cap actually rejects an oversized order", () => {
-    jest.resetModules();
     const policy = require("../server/analytics/executionPolicy");
     const res = policy.checkPolicy({ ticker: "AMD", notionalGBP: 6000, openPositions: 0, portfolioGBP: 100000 });
     expect(res.allowed).toBe(false);

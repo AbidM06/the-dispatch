@@ -58,8 +58,11 @@ const PAIRS_CONFIG = [
     driverSeries: "BAMLH0A0HYM2",
     targetSeries: "VIXCLS",
     direction:    +1,
-    mechanism:    "Credit markets are more fundamentally driven than equity markets, which can remain euphoric via momentum and flows. HY spreads widen when corporate refinancing risk rises and when investor risk appetite deteriorates — typically 4–8 weeks before equity volatility spikes. The relationship is particularly strong in late-cycle environments when credit quality is under stress.",
-    salesPoint:   "Credit leads equity vol — this is the canary in the coalmine argument. When HY OAS starts widening as it has recently (3.17%), the historically reliable playbook is to add equity vol protection before the VIX spike materialises. Particularly relevant for clients who are long high-beta equities and underhedged on vol. VIX sub-20 with HY spreads above 3% is a historical setup for vol expansion.",
+    // The old text asserted a fixed 4–8 week lead of credit over equity vol, and
+    // a "recent" widening to 3.17% (a March 2026 seed value) as current. Neither
+    // was measured here. The lead/lag is what the correlation lab should TEST.
+    mechanism:    "Hypothesis to test: HY spreads and equity volatility both respond to risk appetite and default risk, and some practitioners argue credit moves first. Whether a lead exists, and how long it is, is an empirical question for the lag analysis in this lab — no lead time is assumed.",
+    salesPoint:   "Pitch framing: 'Is credit telling us something equity vol is not?' Support it with the measured correlation and lag from this lab and dated levels of HY OAS and VIX — not with a remembered rule of thumb.",
     clientRelevance: ["Hedge Fund (Global Macro)", "Asset Manager (Long-Only)", "Mutual Fund"],
   },
   {
@@ -604,7 +607,9 @@ function getCurrentRegime(allSeries) {
   const highBEI    = t10y_ie !== null && t10y_ie > 2.4;
 
   let label = "Uncertain";
-  if (riskOff && highReal)   label = "Bear Flattener / Risk-Off";
+  // Was "Bear Flattener / Risk-Off": a curve direction named from a credit
+  // spread and a real-yield level, neither of which is a curve movement.
+  if (riskOff && highReal)   label = "Wide Credit + High Real Yields";
   else if (riskOff)           label = "Credit Stress / Risk-Off";
   else if (highReal && highBEI) label = "Stagflationary Pressure";
   else if (highReal)          label = "Higher-For-Longer";

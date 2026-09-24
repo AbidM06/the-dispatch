@@ -179,7 +179,10 @@ async function generateReport(type, topic = "") {
   // unlike anything the model wrote, which is tagged separately.
   report.marketData     = macroContext.toMarketDataRows(macroCtx);
   report.policyPath     = macroCtx?.policyPath || null;
-  report.dataAsOf       = macroCtx?.fetchedAt || null;
+  // Observation dates, not fetch time. `dataAsOf` used to be the moment the
+  // context was assembled, so regenerating a report made week-old FRED data
+  // read as fresh. Retrieval is reported separately and labelled as such.
+  report.dataAsOf       = macroContext.observationSpan(macroCtx);
   report.missingSeries  = macroCtx?.missing || [];
 
   return { ok: true, report };

@@ -74,8 +74,11 @@ const GLOSSARY = [
     slug: "beta",
     category: "basics",
     definition: "Measures how much an asset moves relative to the market (S&P 500). Beta = 1 moves with market. Beta > 1 amplifies moves. Beta < 1 dampens moves.",
-    example: "AMD beta ≈ 1.82 — if S&P 500 falls 5%, AMD typically falls ~9.1%. SGLN (gold) beta ≈ -0.08 — barely correlated with equities.",
-    interviewAngle: "Portfolio beta is the weighted average of position betas. Your portfolio beta = 0.896 currently — slightly defensive.",
+    // The old example stated AMD beta 1.82, SGLN −0.08 and "your portfolio beta
+    // = 0.896 currently" — values from a hand-typed seed table with no source,
+    // window or benchmark, presented as current.
+    example: "A stock with beta 1.5 to the S&P 500 would be expected to fall about 7.5% in a 5% index decline, on average — betas depend on the estimation window and are noisy. Beta near 0 means little linear co-movement, not no risk.",
+    interviewAngle: "Portfolio beta is the weighted average of position betas. Always state the benchmark, the return frequency and the window a beta was estimated over.",
   },
   {
     term: "Alpha",
@@ -107,8 +110,8 @@ const GLOSSARY = [
     term: "Federal Funds Rate",
     slug: "fed-funds-rate",
     category: "macro",
-    definition: "The interest rate at which US banks lend reserves to each other overnight. Set by the FOMC. The base rate for all US borrowing costs.",
-    example: "Current target: 4.25–4.50%. When the Fed hikes, mortgages, credit cards, and corporate borrowing all get more expensive.",
+    definition: "The overnight rate on unsecured interbank lending of reserves. The FOMC sets a TARGET RANGE; the effective rate (EFFR, FRED series DFF) is the market-determined volume-weighted rate within it. It anchors US short-term borrowing costs.",
+    example: "See FRED DFF for the latest effective rate and its date — this glossary does not quote a current level, because a typed-in level goes stale. When the target range rises, floating-rate borrowing costs generally follow.",
     interviewAngle: "Every asset class is priced relative to the risk-free rate. When the Fed hikes: bonds fall, growth stocks compress, dollar strengthens. When it cuts: the opposite.",
   },
   {
@@ -116,7 +119,7 @@ const GLOSSARY = [
     slug: "fomc",
     category: "macro",
     definition: "Federal Open Market Committee — the Fed committee that sets monetary policy. Meets 8 times per year. Decisions on interest rates, QE/QT, and forward guidance.",
-    example: "19 Mar 2026 meeting: market expects hold at 4.25–4.50%. The dot plot (individual member forecasts) often moves markets more than the rate decision itself.",
+    example: "At a meeting where no change is expected, the statement wording, the Summary of Economic Projections (quarterly) and the press conference can move markets more than the decision itself. Check the Fed's published calendar for meeting dates.",
     interviewAngle: "FOMC day is the highest-impact event for rates traders. Key things to watch: statement language changes, dot plot shifts, and the press conference tone.",
   },
   {
@@ -125,15 +128,19 @@ const GLOSSARY = [
     category: "macro",
     definition: "A chart showing each FOMC member's anonymous projection of where the Fed funds rate will be at year-end for the next 3 years. Released quarterly.",
     example: "If the median dot shifts from 3 cuts to 2 cuts for 2026, markets may reprice rates higher — bond yields rise, equities fall.",
-    interviewAngle: "The dot plot is forward guidance made visual. Watch for: how many members are outliers, the long-run neutral rate dot (currently ~2.9%), and shifts from previous meeting.",
+    interviewAngle: "The dot plot is forward guidance made visual. Watch for: how many members are outliers, the long-run median dot (check the latest SEP for its level), and shifts from the previous projection.",
   },
   {
     term: "10-Year Treasury Yield (DGS10)",
     slug: "dgs10",
     category: "macro",
     definition: "The annualised interest rate on 10-year US government bonds. The global risk-free reference rate. Drives mortgage rates, corporate borrowing, and equity valuations.",
-    example: "DGS10 at 4.21%: a £10,000 10-year Treasury bond pays ~£421/year in interest.",
-    interviewAngle: "DGS10 = real yield (DFII10) + inflation expectation (T10YIE). Understanding this decomposition is fundamental to rates trading.",
+    // Yield is not coupon. The old example said a bond "pays ~£421/year" at a
+    // 4.21% yield — that confuses the yield (return if bought at today's price
+    // and held to maturity) with the coupon (fixed cash payment set at issue),
+    // and priced a US Treasury in sterling.
+    example: "A 10-year Treasury bought at a 4.21% yield returns about 4.21% a year if held to maturity with coupons reinvested at that yield. Its cash coupon is fixed at issue and may be higher or lower: a bond with a 3% coupon bought when the yield is 4.21% trades below par, and the pull to par makes up the difference.",
+    interviewAngle: "Nominal 10Y ≈ real yield (DFII10) + breakeven (T10YIE). The breakeven also contains inflation-risk and liquidity premia, so it is not a pure inflation forecast.",
   },
   {
     term: "Real Yield (DFII10)",
@@ -165,7 +172,7 @@ const GLOSSARY = [
     category: "macro",
     definition: "The yield premium (spread) investors demand to hold sub-investment-grade (junk) bonds over equivalent-maturity Treasuries. Measured as Option-Adjusted Spread (OAS).",
     example: "HY OAS = 3.17%: junk bonds yield 3.17% more than Treasuries. Above 4.5% = credit stress. Below 2.5% = risk-on / complacency.",
-    interviewAngle: "HY spreads often lead equity corrections by 4–8 weeks. A spread widening above 4% is the single best early-warning credit indicator. Watch BAMLH0A0HYM2 on FRED.",
+    interviewAngle: "Practitioners often argue credit spreads move before equities in stress; treat the lead time as something to test on data (see the correlation lab), not a rule. FRED publishes BAMLH0A0HYM2 in percent: 4.00 = 400bp.",
   },
   {
     term: "Quantitative Easing (QE)",
@@ -347,16 +354,16 @@ const GLOSSARY = [
     slug: "carry",
     category: "portfolio",
     definition: "Income earned from holding an asset: coupon for bonds, dividends for equities, interest rate differential for FX. Positive carry = asset pays more than it costs to hold.",
-    example: "HBKS sukuk ETF provides carry (income) from sukuk coupons. Positive carry means you earn while waiting for price appreciation.",
+    example: "A bond yielding 5% financed at 3% has positive carry of about 2% a year before price changes. A fund's distribution yield is a separate measure again.",
     islamicNote: "Conventional bond carry involves riba (interest). Sukuk carry is from profit-sharing or lease payments (ijara), which is Shariah-compliant as it represents real economic activity.",
-    interviewAngle: "FX carry trade: borrow in low-rate currency (JPY at 0.1%), invest in high-rate currency (USD at 4.5%), pocket the 4.4% differential. Works until it doesn't — carry unwinds are violent.",
+    interviewAngle: "FX carry trade (illustrative rates): borrow in a low-rate currency at 0.5%, invest in a high-rate currency at 4.5%, earn the ~4% differential while the exchange rate holds. Works until it doesn't — carry unwinds can be violent.",
   },
   {
     term: "Duration",
     slug: "duration",
     category: "portfolio",
     definition: "A bond's price sensitivity to a 1% change in interest rates. Modified duration = % price change per 100bps rate move. A 7-year duration bond falls ~7% if rates rise 1%.",
-    example: "HBKS has ~3-year duration. If rates rise 1%, HBKS falls ~3% from duration alone. The higher the duration, the more interest rate risk.",
+    example: "A bond with a modified duration of 3 falls about 3% if its yield rises by 1 percentage point, before convexity. The higher the duration, the more interest-rate risk.",
     islamicNote: "Duration is purely a risk measurement concept — applicable to both conventional bonds and sukuk equally. Longer-duration sukuk has the same interest rate sensitivity.",
     interviewAngle: "In a rates rising environment: reduce duration (sell long bonds, buy short-term). In a rates falling environment: add duration to maximise price appreciation.",
   },
@@ -451,8 +458,12 @@ const GLOSSARY = [
     slug: "sukuk",
     category: "islamic",
     definition: "Islamic bonds structured as ownership certificates in an underlying asset (ijara/lease) rather than debt. Holders receive rental income rather than interest. Shariah-compliant fixed income.",
-    example: "HBKS: iShares MSCI UK Islamic UCITS ETF holds sukuk — the fund owns real assets leased back to issuers. The 'coupon' is rental income, not interest.",
-    interviewAngle: "Sukuk global market: ~$3.5 trillion outstanding. GCC sovereign issuers (Saudi Arabia, UAE, Malaysia) are the largest. Sukuk spreads trade similarly to conventional bonds but with Islamic jurisprudence overlay.",
+    // The old example named HBKS — catalogued elsewhere as an MSCI UK Islamic
+    // EQUITY ETF — as a sukuk holder, and quoted "~$3.5 trillion outstanding",
+    // a figure closer to total Islamic-finance assets than to sukuk. Neither
+    // was sourced; both are removed.
+    example: "In an ijara sukuk, holders own an interest in an asset leased to the issuer; periodic distributions come from the lease payments rather than interest on a loan.",
+    interviewAngle: "Sovereign and quasi-sovereign issuers in the GCC and Malaysia are major sukuk issuers. Sukuk prices respond to rates and credit spreads much as conventional bonds do. Check a current industry source for market size — no figure is quoted here.",
   },
   {
     term: "Murabaha",
@@ -517,7 +528,7 @@ const GLOSSARY = [
     slug: "investment-thesis",
     category: "interview",
     definition: "A structured argument for why a particular investment will outperform. Requires: what you're buying/selling, why it's mispriced, what the catalyst is, what would invalidate the thesis, and entry/exit levels.",
-    example: "AMD LONG thesis: Real yields compressing on FOMC dovish shift → P/E expansion; MI450 GPU ramp underpriced by market; Q1 guide beat likely; stop at 200-day MA.",
+    example: "Structure (illustrative, not a current view): 'LONG X — catalyst: <dated event>; mechanism: <how it moves the price>; risk: <what invalidates it>; stop: <level and why>; size: <% of book>.'",
     interviewAngle: "Every S&T / AM interview ends with 'give me your best trade idea.' Structure: 1) What 2) Why now (catalyst) 3) What's the risk (stop/invalidation) 4) Size/conviction. Practice until it's 90 seconds and crisp.",
   },
   {
@@ -525,7 +536,7 @@ const GLOSSARY = [
     slug: "macro-regime",
     category: "interview",
     definition: "The prevailing macroeconomic environment that determines which assets and strategies tend to perform. Classified by growth trajectory, inflation, and monetary policy stance.",
-    example: "Current regime: Bear flattener + Risk-off (HY OAS rising, real yields elevated). Playbook: gold, defensive equities, reduce growth stock exposure.",
+    example: "Level-based labels this app can support from FRED data: 'Inverted curve + High real yields + Wide credit spreads'. Direction labels such as 'bear flattener' need yield changes in both legs of the curve, not a single spread level.",
     interviewAngle: "Bridgewater's framework: 4 regimes based on Growth and Inflation (above/below expectations). Each regime has a characteristic 'all-weather' asset allocation. This is the conceptual underpinning of The Dispatch's engine.",
   },
   {

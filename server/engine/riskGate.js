@@ -14,8 +14,8 @@
 
 "use strict";
 
-const { runPreTradeCheck, parseEventDate } = require("../analytics/riskCheck");
-const seeds = require("../../seeds/fallback");
+const { runPreTradeCheck } = require("../analytics/riskCheck");
+const { getCalendar } = require("../analytics/eventCalendar");
 
 // LSE ETFs not listed on Alpaca — flag liquidity note
 const LOW_LIQUIDITY_TICKERS = new Set(["HBKS", "HIJS", "HIES", "HIUS", "SGLN"]);
@@ -32,7 +32,7 @@ const EVENT_LOCKOUT_DAYS = 3;
  * @param {number}   usdgbp         Current USD/GBP rate
  * @returns {{ decision: "allowed"|"caution"|"blocked", reasons: string[], checks: object[], riskFlags: object[] }}
  */
-function gateIdea(ticket, portfolioRows = [], totalGBP = 0, usdgbp = 0.76) {
+function gateIdea(ticket, portfolioRows = [], totalGBP = 0, usdgbp = null, opts = {}) {
   // Build a pseudo-idea object for riskCheck — entry/stop/target may be null
   const pseudoIdea = {
     ticker:    ticket.ticker,
@@ -44,7 +44,8 @@ function gateIdea(ticket, portfolioRows = [], totalGBP = 0, usdgbp = 0.76) {
     horizon:   ticket.horizon ?? "3 months",
   };
 
-  const result   = runPreTradeCheck(pseudoIdea, portfolioRows, totalGBP, usdgbp);
+  const calendar = opts.calendar !== undefined ? opts.calendar : getCalendar();
+  const result   = runPreTradeCheck(pseudoIdea, portfolioRows, totalGBP, usdgbp, { calendar });
   const reasons  = [];
   const riskFlags = result.checks.filter(c => c.status !== "OK");
 
@@ -63,10 +64,9 @@ function gateIdea(ticket, portfolioRows = [], totalGBP = 0, usdgbp = 0.76) {
   // ── Additional engine-level checks ─────────────────────────────────────────
 
   // 1. Event-risk near-term lockout (< 3 days)
-  const allEvents = [...(seeds.EARNINGS_CAL ?? []), ...(seeds.MACRO_CAL ?? [])];
-  for (const ev of allEvents) {
-    const d = parseEventDate(ev.date);
-    if (!d) continue;
+  for (const ev of (calendar?.available ? calendar.events : [])) {
+    const d = ev.at instanceof Date ? ev.at : new Date(ev.date);
+    if (Number.isNaN(d.getTime())) continue;
     const daysAway = (d - Date.now()) / 86_400_000;
     if (daysAway < 0 || daysAway > EVENT_LOCKOUT_DAYS) continue;
     if (ev.ticker === ticket.ticker || ev.importance === "HIGH") {

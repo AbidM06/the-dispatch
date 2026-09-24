@@ -1048,16 +1048,30 @@ async function apiFetch(path, opts) {
 
 // ─── SOURCE BADGE HELPER ─────────────────────────────────────────────────────
 // Returns a React element showing provenance: source, timestamp, stale flag.
-function SourceBadge({ source, fetchedAt, stale }) {
+// `fetchedAt` is RETRIEVAL time. Observation dates are shown on each figure;
+// this badge never implies the market data is as recent as the fetch.
+const SOURCE_LABELS = { live:'FETCHED', cache:'CACHED', seeded:'SEEDED', demo:'DEMO', partial:'PARTIAL', unavailable:'UNAVAILABLE', computed:'COMPUTED' };
+function SourceBadge({ source, fetchedAt, stale, freshness }) {
   if (!source) return null;
   const cls = source === 'live' ? 'src-live' : source === 'cache' ? 'src-cache' : 'src-seeded';
   const dotCls = source === 'live' ? 'src-dot-live' : source === 'cache' ? 'src-dot-cache' : 'src-dot-seeded';
-  const label = source === 'live' ? 'LIVE' : source === 'cache' ? 'CACHED' : 'SEEDED';
+  const label = SOURCE_LABELS[source] || String(source).toUpperCase();
   const ts    = fetchedAt ? new Date(fetchedAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
-  return React.createElement('span', { className:`src-badge ${cls}`, title: fetchedAt || source },
+  const obs   = freshness && freshness.oldestObservation ? ' · OLDEST OBS ' + freshness.oldestObservation.observedAt : '';
+  return React.createElement('span', { className:`src-badge ${cls}`,
+      title: (fetchedAt ? 'Retrieved ' + fetchedAt : source) + (freshness ? ' · freshness: ' + freshness.status : '') },
     React.createElement('span', { className:`src-dot ${dotCls}` }),
-    `${label}${ts ? ' · ' + ts : ''}${stale && source !== 'seeded' ? ' ⚠' : ''}`
+    `${label}${ts ? ' · ' + ts : ''}${obs}${stale ? ' ⚠' : ''}`
   );
+}
+
+// Provenance line for one Fact: observation date, source, freshness.
+function factNote(f, fallbackLabel) {
+  if (!f) return 'Loading…';
+  if (f.kind === 'unavailable' || f.value == null) return 'Unavailable' + (f.reason ? ' — ' + f.reason : '');
+  if (f.kind === 'demo') return 'DEMO data — not a market observation';
+  const st = f.freshness && f.freshness.status && f.freshness.status !== 'current' ? ' · ' + f.freshness.status.toUpperCase() : '';
+  return (fallbackLabel ? fallbackLabel + ' · ' : '') + (f.source || '') + ' obs ' + (f.observedAt ? String(f.observedAt).slice(0, 10) : (f.date || 'n/a')) + st;
 }
 
 // ─── AI COST BADGE ────────────────────────────────────────────────────────────
@@ -1085,15 +1099,15 @@ function StatCard(title, val, label, cls, explainer) {
 
 // ─── EXPLAINER DATA (educational context for each metric) ────────────────────
 const EXPLAINERS = {
-  dgs10:   { term:'10-Year Treasury Yield', what:"The annualised return investors demand to lend to the US government for 10 years. The benchmark 'risk-free rate' against which all assets are priced.", port:"Every equity in your portfolio is discounted against this rate. AMD, as a high-growth stock with earnings weighted far into the future, is most sensitive — a 50bp rise in the 10Y historically reduces growth stock P/Es by 6–10%." },
-  dfii10:  { term:'Real Yield (10Y TIPS)', what:"The return on inflation-protected Treasuries. Real yield = Nominal yield − Breakeven inflation. The true risk-free real return with zero credit risk and zero inflation risk.", port:"AMD is a 'long-duration equity': most of its value comes from earnings projected 5–10 years out. Every 25bp rise in real yields reduces the present value of those future earnings by roughly 1–2 P/E turns." },
-  t10yie:  { term:'Breakeven Inflation Rate', what:"Nominal 10Y yield minus TIPS 10Y yield — the market's implied 10-year average inflation forecast. If actual inflation matches the breakeven exactly, nominal bonds and TIPS earn identical returns.", port:"High breakevens structurally support SGLN (gold as inflation hedge). They are negative for HBKS (nominal bonds lose purchasing power) and AMD (persistent inflation keeps the Fed hawkish, deferring re-rating)." },
-  hyspread:{ term:'High Yield OAS', what:"Option-Adjusted Spread: the extra yield investors demand over Treasuries to hold sub-investment-grade bonds. It's the credit market's real-time fear gauge.", port:"HY spreads are a leading indicator — they typically widen 2–4 months before equity drawdowns materialise. A rapid widening from 3% to 5%+ would signal a risk-off shift pressuring HIUS and AMD." },
-  t10y2y:  { term:'10Y–2Y Yield Curve', what:"Spread between 10-year and 2-year Treasury yields. An inverted curve (negative) has preceded every US recession since the 1970s — inversion signals markets expect the Fed to cut, implying a slowdown today.", port:"A bear steepener (long rates rising faster than short-end) simultaneously hurts long-duration equities (AMD) and bond funds (HBKS). HIJS faces additional pressure as BoJ allows JGB yields to rise." },
+  dgs10:   { term:'10-Year Treasury Yield', what:"The annualised return investors demand to lend to the US government for 10 years. The benchmark 'risk-free rate' against which all assets are priced.", port:"Equity valuations discount future cash flows at rates linked to this yield, so long-duration growth stocks are generally more rate-sensitive. How much a given move changes any valuation is not estimated here." },
+  dfii10:  { term:'Real Yield (10Y TIPS)', what:"The return on inflation-protected Treasuries. Real yield = Nominal yield − Breakeven inflation. The true risk-free real return with zero credit risk and zero inflation risk.", port:"Growth stocks whose value rests on distant earnings are 'long-duration': higher real yields lower the present value of those earnings. The size of the effect varies by stock and period; no fixed P/E sensitivity is claimed." },
+  t10yie:  { term:'Breakeven Inflation Rate', what:"Nominal 10Y yield minus TIPS 10Y yield — market-implied average inflation over ten years plus inflation-risk and liquidity premia. It is a price, not a CPI forecast or release.", port:"The breakeven is market-implied inflation compensation, including risk premia — not a CPI forecast or release. Treating gold as an inflation hedge is an assumption; its relationship with breakevens varies over time." },
+  hyspread:{ term:'High Yield OAS', what:"Option-Adjusted Spread: the extra yield investors demand over Treasuries to hold sub-investment-grade bonds. It's the credit market's real-time fear gauge.", port:"A high spread level means more compensation for default and liquidity risk; widening is a change and needs a prior observation. Whether credit leads equities, and by how long, is not measured here. FRED publishes this series in percent: 3.00 = 300bp." },
+  t10y2y:  { term:'10Y–2Y Yield Curve', what:"Spread between 10-year and 2-year Treasury yields (a level). Inversion has preceded most US recessions since the 1970s, with long and variable lags and occasional false signals; it is not a timing tool.", port:"The card shows a LEVEL. Steepening or flattening are changes and need both legs' moves: bear steepener = long end rising faster; bear flattener = short end rising faster. No 2Y history is fetched, so no direction is shown." },
   rsi14:   { term:'RSI — Relative Strength Index', what:"A momentum oscillator (0–100) measuring speed of recent price moves over a 14-day lookback. Above 70 = overbought; below 30 = oversold.", port:"RSI does not determine intrinsic value — it measures momentum. A sustained move below 30 alongside high volume signals capitulation. A confirmed move above RSI 50 signals a momentum regime shift." },
-  portbeta:{ term:'Weighted Portfolio Beta', what:"Portfolio beta = sum of (each position's weight × its beta vs S&P 500). Beta of 1.0 means your portfolio moves in line with the index; 1.5 means 50% more. Measures systematic (market) risk.", port:"SGLN's negative beta (−0.08) is your partial hedge against equity selloffs. AMD's high beta (1.82) means a 10% S&P drawdown historically corresponds to an ~18% AMD drawdown." },
+  portbeta:{ term:'Weighted Portfolio Beta', what:"Portfolio beta = sum of (each position's weight × its beta vs S&P 500). Beta of 1.0 means your portfolio moves in line with the index; 1.5 means 50% more. Measures systematic (market) risk.", port:"Betas depend on the benchmark, return frequency and window used to estimate them. The betas in this app's analytics are hand-entered assumptions, not estimates from price data." },
   hhiindex:{ term:'Herfindahl-Hirschman Index', what:"HHI = sum of squared portfolio weights × 10,000. Below 1,000 = diversified; 1,000–1,800 = moderate; above 1,800 = concentrated. Adopted from competition law by risk managers.", port:"A high HHI means returns are dominated by one or two positions. Institutional risk desks set maximum HHI thresholds to ensure no single idea drives performance." },
-  usdexp:  { term:'Unhedged USD Exposure', what:"The proportion of your GBP portfolio whose sterling value fluctuates with GBP/USD. Unhedged means no FX forwards are in place — a 1% GBP appreciation directly reduces GBP value of all USD assets by 1%.", port:"AMD and SGLN are 100% USD-denominated and unhedged. A 5% GBP appreciation — plausible in a tariff-rollback scenario — would reduce GBP value of USD positions by 5% with no change in stock prices." },
+  usdexp:  { term:'Unhedged USD Exposure', what:"The proportion of your GBP portfolio whose sterling value fluctuates with GBP/USD. Unhedged means no FX forwards are in place — a 1% GBP appreciation directly reduces GBP value of all USD assets by 1%.", port:"AMD is priced in USD; SGLN trades in GBP but tracks gold priced in USD, so its GBP value moves with GBP/USD as well. A 5% GBP appreciation would reduce the GBP value of unhedged USD exposure by about 5%, all else equal." },
 };
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
@@ -1278,8 +1292,14 @@ function App() {
     try {
       const resp = await apiFetch('/api/snapshot');
       setSnapshot(resp.data);
-      setSnapshotMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale });
-      if (resp.stale) showToast('Market data is from cache — may be delayed', 'info');
+      setSnapshotMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale,
+                        freshness: resp.freshness || null, demoMode: !!resp.demoMode, demoBanner: resp.demoBanner || null });
+      if (resp.stale) {
+        const f = resp.freshness;
+        showToast(f && f.oldestObservation
+          ? 'Some market data is ' + (f.status || 'not current') + ' — oldest observation ' + f.oldestObservation.observedAt
+          : 'Some market data is unavailable or not current', 'info');
+      }
     } catch (err) {
       showToast('Snapshot error: ' + err.message, 'error');
     }
@@ -1942,7 +1962,7 @@ function App() {
     const t10yie    = rates.t10yie?.value;
     const hySpread  = rates.hy_spread?.value;
     const t10y2y    = rates.t10y2y?.value;
-    const usdgbp    = fx?.value ?? 0;
+    const usdgbp    = fx?.value ?? null;
 
     const srcLabel = src
       ? React.createElement(SourceBadge, src)
@@ -1954,24 +1974,31 @@ function App() {
       // ── Rate stat cards ──────────────────────────────────────────────────────
       React.createElement('div', { className:'grid-4', style:{marginBottom:16} },
         StatCard('10Y Treasury',   dgs10 != null ? `${dgs10.toFixed(2)}%` : '—',
-          rates.dgs10 ? `Nominal rate (${rates.dgs10.date})` : 'Loading…', 'neu', ExplainerCard('dgs10')),
+          factNote(rates.dgs10, 'Nominal'), 'neu', ExplainerCard('dgs10')),
         StatCard('Real Yield',     dfii10 != null ? `${dfii10.toFixed(2)}%` : '—',
-          rates.dfii10 ? `TIPS 10Y (${rates.dfii10.date})` : 'Loading…',
+          factNote(rates.dfii10, 'TIPS 10Y'),
           dfii10 > 1.5 ? 'neg' : 'neu', ExplainerCard('dfii10')),
         StatCard('Breakeven Infl', t10yie != null ? `${t10yie.toFixed(2)}%` : '—',
-          'Market 10Y inflation forecast', 'neu', ExplainerCard('t10yie')),
-        StatCard('HY Spread',      hySpread != null ? `${hySpread.toFixed(2)}%` : '—',
-          rates.hy_spread ? `OAS — ${rates.hy_spread.date}` : 'Loading…',
+          factNote(rates.t10yie, 'Market-implied, incl. risk premia'), 'neu', ExplainerCard('t10yie')),
+        StatCard('HY Spread',      hySpread != null ? `${Math.round(hySpread * 100)}bp` : '—',
+          factNote(rates.hy_spread, hySpread != null ? `OAS ${hySpread.toFixed(2)}%` : 'OAS'),
           hySpread > 4 ? 'neg' : 'pos', ExplainerCard('hyspread')),
       ),
       React.createElement('div', { className:'grid-4', style:{marginBottom:20} },
-        StatCard('Yield Curve', t10y2y != null ? `${t10y2y > 0 ? '+' : ''}${t10y2y.toFixed(2)}%` : '—',
-          '10Y-2Y spread', t10y2y > 0 ? 'pos' : 'neg', ExplainerCard('t10y2y')),
-        StatCard('USD/GBP', usdgbp ? usdgbp.toFixed(4) : '—', 'FX rate', 'neu'),
+        StatCard('Yield Curve', t10y2y != null ? `${t10y2y > 0 ? '+' : ''}${t10y2y.toFixed(2)}pp` : '—',
+          factNote(rates.t10y2y, '10Y-2Y level'), t10y2y > 0 ? 'pos' : 'neg', ExplainerCard('t10y2y')),
+        StatCard('USD/GBP', usdgbp ? usdgbp.toFixed(4) : '—', factNote(fx, 'GBP per USD'), 'neu'),
         StatCard('AMD RSI(14)', lastRsi != null ? lastRsi.toFixed(1) : '—',
-          rsiHistory.length ? `As of ${rsiHistory[rsiHistory.length-1].d} — ${lastRsi < 30 ? 'oversold' : lastRsi > 70 ? 'overbought' : 'neutral'}` : '',
-          lastRsi < 35 ? 'neg' : 'neu', ExplainerCard('rsi14')),
-        StatCard('US-Iran Risk', 'ELEVATED', 'Active conflict — monitor SGLN', 'neg'),
+          rsiHistory.length ? `DEMO · as of ${rsiHistory[rsiHistory.length-1].d}` : 'No free feed — shown only in demo mode',
+          lastRsi != null && lastRsi < 35 ? 'neg' : 'neu', ExplainerCard('rsi14')),
+        // Was a permanent "US-Iran Risk: ELEVATED — Active conflict" card: a
+        // hand-typed claim about the world shown as current on every load.
+        StatCard('Data Freshness',
+          src && src.freshness ? String(src.freshness.status).toUpperCase() : '—',
+          src && src.freshness && src.freshness.oldestObservation
+            ? `Oldest obs ${src.freshness.oldestObservation.observedAt} (${src.freshness.oldestObservation.component})`
+            : 'Awaiting snapshot',
+          src && src.freshness && src.freshness.status === 'current' ? 'pos' : 'neg'),
       ),
 
       // ── Charts ──────────────────────────────────────────────────────────────
@@ -2030,19 +2057,24 @@ function App() {
             ),
             React.createElement('div', { style:{textAlign:'right'} },
               React.createElement('div', { className:`wl-price ${w.chg < 0 ? 'neg' : 'pos'}` },
-                typeof w.price === 'number' ? `$${w.price.toFixed(2)}` : w.price
+                typeof w.price === 'number' ? `$${w.price.toFixed(2)}` : '—'
               ),
               React.createElement('div', { className:`wl-chg ${w.chg < 0 ? 'neg' : 'pos'}` },
-                `${w.chg > 0 ? '+' : ''}${typeof w.chg === 'number' ? w.chg.toFixed(2) : w.chg}%`
+                typeof w.chg === 'number' ? `${w.chg > 0 ? '+' : ''}${w.chg.toFixed(2)}%` : ''
               ),
-              w.date && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--steel)',marginTop:2,opacity:0.7} }, w.date),
+              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--steel)',marginTop:2,opacity:0.7} },
+                w.kind === 'unavailable' || w.price == null ? 'unavailable'
+                : w.kind === 'demo' ? 'DEMO'
+                : 'close ' + (w.date || 'n/a') + (w.freshness && w.freshness.status !== 'current' ? ' · ' + w.freshness.status : '')),
             )
           ))
         ),
         React.createElement('div', { className:'card' },
           React.createElement('div', { className:'card-title' }, 'INTERNATIONAL WATCHLIST',
-            React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, 'SEEDED · KRX / TSE')
+            React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, intl.length ? 'DEMO · HAND-ENTERED' : 'UNAVAILABLE')
           ),
+          !intl.length && React.createElement('div', { style:{fontSize:11,color:'var(--steel)',padding:'8px 0'} },
+            'No free KRX/TSE price feed is configured. Hand-entered prices are shown only in demo mode.'),
           intl.map(w => React.createElement('div', { className:'watchlist-row', key: w.sym },
             React.createElement('div', null,
               React.createElement('div', { className:'ticker' }, w.sym),
@@ -2310,6 +2342,8 @@ function App() {
               )
             : React.createElement(React.Fragment, null,
                 React.createElement('div', { className:'brief-regime' }, b?.regime || '—'),
+                b?.ratesAsOf && React.createElement('div', { style:{ fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',marginBottom:8 } },
+                  'Levels only · FRED obs ' + b.ratesAsOf.oldest + (b.ratesAsOf.newest !== b.ratesAsOf.oldest ? ' – ' + b.ratesAsOf.newest : '') + ' · Δ vs previous FRED observation'),
                 b?.regimeDrivers?.length > 0 && React.createElement('div', { style:{ marginBottom:14 } },
                   b.regimeDrivers.map((d, i) => React.createElement('span', { key:i, className:'brief-driver' }, d))
                 ),
@@ -2325,13 +2359,14 @@ function App() {
                     React.createElement('div', { key:i, className:'wc-row' },
                       React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10.5,color:'var(--blue)',fontWeight:500 } }, w.series),
                       React.createElement('span', { style:{ color:'var(--steel)',fontSize:10.5 } }, w.label),
-                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:11,textAlign:'right',fontWeight:500 } }, (w.current != null ? w.current.toFixed(2) : '—') + '%'),
-                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10,textAlign:'right',color: w.deltaBps > 5 ? 'var(--red)' : w.deltaBps < -5 ? 'var(--green)' : 'var(--steel)' } },
-                        (w.deltaBps > 0 ? '+' : '') + w.deltaBps
+                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:11,textAlign:'right',fontWeight:500 }, title: w.observedAt ? 'FRED observation ' + w.observedAt : '' }, w.current != null ? w.current.toFixed(2) + '%' : '—'),
+                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10,textAlign:'right',color: w.deltaBps > 5 ? 'var(--red)' : w.deltaBps < -5 ? 'var(--green)' : 'var(--steel)' }, title: w.basis || '' },
+                        w.deltaBps == null ? 'n/a' : (w.deltaBps > 0 ? '+' : '') + w.deltaBps
                       ),
                       React.createElement('span', {
                         style:{ textAlign:'right' },
-                        className: w.signal === 'BULLISH' ? 'sig-bull' : w.signal === 'BEARISH' ? 'sig-bear' : 'sig-neu',
+                        className: w.signal === 'FALLING' ? 'sig-bull' : w.signal === 'RISING' ? 'sig-bear' : 'sig-neu',
+                        title: w.basis || '',
                       }, w.signal)
                     )
                   )
@@ -3578,13 +3613,19 @@ function App() {
             React.createElement('div', { className:'rp-verified-lbl' }, row.label),
             React.createElement('div', { className:'rp-verified-val' }, row.value),
             React.createElement('div', { className:'rp-verified-src' },
-              [row.source, row.detail, row.asOf].filter(Boolean).join(' · ')
+              [row.source, row.detail, row.asOf ? 'obs ' + row.asOf : null,
+               row.freshness && row.freshness !== 'current' ? row.freshness.toUpperCase() : null].filter(Boolean).join(' · ')
             )
           )
         )
       ),
       asOf && React.createElement('div', { className:'rp-verified-foot' },
-        'Snapshot taken ' + new Date(asOf).toLocaleString() + '. Figures below that do not appear here are model-generated.'
+        typeof asOf === 'object'
+          ? 'FRED end-of-day observations dated ' + (asOf.oldestObservation || 'n/a') +
+            (asOf.newestObservation && asOf.newestObservation !== asOf.oldestObservation ? ' to ' + asOf.newestObservation : '') +
+            ' (status: ' + (asOf.status || 'unknown') + '). Retrieved ' + (asOf.retrievedAt ? new Date(asOf.retrievedAt).toLocaleString() : 'n/a') +
+            ' — regenerating the report does not make these observations newer. Figures not listed here are model-generated.'
+          : 'Retrieved ' + new Date(asOf).toLocaleString() + '. Check each figure\'s observation date. Figures not listed here are model-generated.'
       )
     );
   }
@@ -3601,20 +3642,35 @@ function App() {
         React.createElement('span', { className:'rp-pp-gap' }, (pp.gapBp >= 0 ? '+' : '') + pp.gapBp + 'bp')
       ),
       React.createElement('div', { className:'rp-pp-reading' }, pp.reading),
-      React.createElement('div', { className:'rp-pp-method' }, 'Method: ' + pp.method),
-      React.createElement('div', { className:'rp-pp-caveat' }, '⚠ ' + pp.caveat)
+      React.createElement('div', { className:'rp-pp-method' },
+        'Method: ' + pp.method + (pp.neutralBandBp ? ' · neutral band ±' + pp.neutralBandBp + 'bp' : '') +
+        (pp.inputs ? ' · inputs: ' + pp.inputs.map(i => i.seriesId + ' ' + i.observedAt).join(', ') : '') +
+        (pp.mixedDates ? ' (inputs dated on different days)' : '')),
+      React.createElement('div', { className:'rp-pp-caveat' }, '⚠ ' + pp.caveat),
+      (pp.limitations || []).map((l, i) => React.createElement('div', { key:i, className:'rp-pp-caveat' }, '· ' + l))
     );
   }
 
   function RpGroundingWarning(r) {
-    if (!r || r.grounded !== false) return null;
-    return React.createElement('div', { className:'rp-ungrounded' },
-      React.createElement('div', { className:'rp-ungrounded-hd' }, '⚠ NOT GROUNDED IN LIVE SEARCH'),
-      React.createElement('div', { className:'rp-ungrounded-body' },
-        'This report was produced by a fallback model with no web search available, so its figures ' +
-        'come from training data rather than current sources. The verified market data above is still ' +
-        'live. Treat every other number as unconfirmed and regenerate when the primary model is available.'
-      )
+    if (!r) return null;
+    const g = r.grounding;
+    if (r.grounded === false) {
+      return React.createElement('div', { className:'rp-ungrounded' },
+        React.createElement('div', { className:'rp-ungrounded-hd' }, '⚠ NOT GROUNDED IN SEARCH RESULTS'),
+        React.createElement('div', { className:'rp-ungrounded-body' },
+          (g && !g.searchEnabled
+            ? 'This report was produced by a fallback model with no web search, so its figures come from training data. '
+            : 'Web search returned no sources for this report. ') +
+          'The verified market data above is server-fetched FRED data with its own dates. Treat every other number as unconfirmed.'
+        )
+      );
+    }
+    if (!g) return null;
+    // Grounded ≠ verified. Say exactly what the citations do and do not cover.
+    return React.createElement('div', { className:'rp-verified-foot' },
+      'Search returned ' + g.sourcesReturned + ' source(s); ' + g.resolvedCitations + ' passage(s) link to a specific page' +
+      (g.unresolvedCitations ? '; ' + g.unresolvedCitations + ' citation(s) could not be resolved and are marked [citation unresolved]' : '') +
+      '. Uncited statements are model output, not verified facts.'
     );
   }
 
@@ -5060,7 +5116,7 @@ function App() {
 
       // Find matching Alpaca order for this idea (by ticker + playbook)
       const order = lastOrders.find(o => o.ticker === idea.ticker && o.playbook === idea.playbook);
-      const bt = order?.backtestEvidence;
+      const bt = order?.triggerFrequencyDemo;   // trigger count on demo data, not performance
       const sizing = order ? { qty: order.qty, notionalGBP: order.notionalGBP, riskGBP: order.riskGBP, sizingReason: order.sizingReason } : null;
 
       return React.createElement('div', { className:'engine-card' },
@@ -5323,7 +5379,7 @@ function App() {
           React.createElement('span', null, 'PLAYBOOK')
         ),
         lastOrders.map(function(o, i) {
-          const bt = o.backtestEvidence || {};
+          const bt = o.triggerFrequencyDemo || {};   // trigger count on demo data, not performance
           const fired = bt.timesTriggered != null ? bt.timesTriggered + '/' + (bt.totalMonths || 7) : '—';
           return React.createElement('div', { key: i, style:{display:'grid',gridTemplateColumns:'60px 50px 50px 60px 60px 60px 60px 1fr',gap:8,padding:'6px 0',borderBottom:'1px solid rgba(13,13,15,.06)',fontSize:11,alignItems:'center'} },
             React.createElement('span', { style:{fontFamily:'var(--mono)',fontWeight:700,color:'var(--blue)'} }, o.ticker),
@@ -6360,7 +6416,11 @@ function App() {
     news:'NEWS', research:'RESEARCH', glossary:'GLOSSARY', engine:'ENGINE', interview:'INTERVIEW'
   };
 
-  const isLive = snapshotMeta && !snapshotMeta.stale && snapshotMeta.source === 'live';
+  const isLive = snapshotMeta && !snapshotMeta.stale && snapshotMeta.freshness && snapshotMeta.freshness.status === 'current';
+  const snapStatusText = snapshotMeta
+    ? (SOURCE_LABELS[snapshotMeta.source] || String(snapshotMeta.source || 'unknown').toUpperCase()) +
+      ' · ' + String((snapshotMeta.freshness && snapshotMeta.freshness.status) || (snapshotMeta.stale ? 'stale' : 'unknown')).toUpperCase()
+    : null;
 
   return React.createElement('div', { className:'app-shell' },
 
@@ -6388,9 +6448,7 @@ function App() {
       React.createElement('div', { className:'sb-footer' },
         React.createElement('div', { className:'sb-status-dot' + (isLive ? ' live' : '') }),
         React.createElement('span', { className:'sb-footer-text' },
-          snapshotMeta
-            ? snapshotMeta.source.toUpperCase() + (snapshotMeta.stale ? ' · STALE' : ' · LIVE')
-            : 'LOADING…'
+          snapStatusText || 'LOADING…'
         )
       )
     ),
@@ -6398,11 +6456,14 @@ function App() {
     // ── Main area ──────────────────────────────────────────────────────────
     React.createElement('div', { className:'main-area' },
 
+      snapshotMeta && snapshotMeta.demoMode &&
+        React.createElement('div', { className:'ai-fallback-banner' }, '◆ ' + (snapshotMeta.demoBanner || 'DEMO MODE — demonstration data, not market observations.')),
+
       budgetStatus && budgetStatus.apiFallback && budgetStatus.apiFallback.active &&
         React.createElement('div', { className:'ai-fallback-banner' },
           '⚠ AI FALLBACK ACTIVE — deterministic mode · retrying in ',
           React.createElement('strong', null, budgetStatus.apiFallback.retryInMins + 'm'),
-          ' · All AI-powered sections showing cached or seeded data'
+          ' · AI sections show cached or computed (level-only) content'
         ),
 
       // Topbar
@@ -6414,7 +6475,7 @@ function App() {
           React.createElement('div', {
             className: 'sb-status-dot' + (isLive ? ' live' : ''),
             style: { width:6, height:6, borderRadius:'50%', flexShrink:0 },
-            title: snapshotMeta ? snapshotMeta.source.toUpperCase() + (snapshotMeta.stale ? ' · STALE' : ' · LIVE') : 'Loading…'
+            title: snapStatusText || 'Loading…'
           }),
           React.createElement('button', {
             className: 'theme-toggle',

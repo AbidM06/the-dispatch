@@ -29,11 +29,11 @@ const TERMS = {
   },
   hySpread: {
     term: "HY OAS (High-Yield Option-Adjusted Spread)",
-    definition: "The yield premium investors demand to hold sub-investment-grade bonds over Treasuries. Widening (>3.5%) signals deteriorating credit conditions, risk-off behaviour, and increased recession probability.",
+    definition: "The yield premium investors demand to hold sub-investment-grade bonds over Treasuries. FRED publishes it in percent (3.50 = 350bp). A high LEVEL indicates more compensation for default and liquidity risk; WIDENING is a change over time and needs a prior observation to establish.",
   },
   yieldCurve: {
     term: "Yield Curve (T10Y2Y)",
-    definition: "The spread between 10-year and 2-year Treasury yields. Positive = normal (term premium). Flat/inverted = recession risk signal. Bear flattener = long-end rates rising faster — hawkish signal.",
+    definition: "The spread between 10-year and 2-year Treasury yields. Positive = upward-sloping; negative = inverted (historically associated with later recessions, with long and variable lags). Steepener/flattener describe CHANGES: bear steepener = long end rising faster; bear flattener = short end rising faster; bull steepener = short end falling faster; bull flattener = long end falling faster.",
   },
   hhi: {
     term: "Herfindahl-Hirschman Index (HHI)",
@@ -49,11 +49,11 @@ const TERMS = {
   },
   duration: {
     term: "Duration",
-    definition: "A bond's price sensitivity to interest rate changes. Modified duration = % price change per 1% rate move. Long-duration bonds (e.g. 10Y+) lose more value when rates rise. HBKS is a medium-duration sukuk ETF.",
+    definition: "A bond's price sensitivity to interest rate changes. Modified duration ≈ % price change per 1 percentage-point yield move. Long-duration bonds lose more value when yields rise.",
   },
   meanReversion: {
     term: "Mean Reversion",
-    definition: "The tendency of a variable to return toward its long-run average after extreme deviations. A z-score >1.5σ above mean signals likely pullback; z-score <-1.5σ signals likely recovery.",
+    definition: "The tendency of some variables to return toward an average after large deviations. A |z-score| > 1.5 is this app's trigger for a reversion setup; reversion is an assumption, not a guarantee, and depends heavily on the window used.",
   },
   correlationBreak: {
     term: "Correlation Break",
@@ -82,7 +82,7 @@ const TERMS = {
 const LEARNING_MAP = {
   "hot-cpi": {
     traderInterpretation: "CPI breakeven spike signals the market is pricing accelerating inflation. Traders buy gold (SGLN) as inflation typically erodes real bond yields and equities face multiple compression. This is a 'pricing power' macro trade.",
-    economicsInterpretation: "Breakeven inflation > 2.5% means bond markets expect CPI to average above 2.5% for 10 years. Central banks face a dilemma: raising rates to fight inflation risks slowing growth. Gold benefits as both an inflation hedge and a real-yield story (SGLN has negative equity beta).",
+    economicsInterpretation: "A 10Y breakeven above 2.5% means the nominal–TIPS yield gap implies average CPI inflation of roughly that much over ten years, plus inflation-risk and liquidity premia. It is market pricing, not a CPI release, and says nothing about surprises versus consensus. Gold as an inflation hedge is an assumption of this playbook.",
     keyTerms: [TERMS.breakeven, TERMS.realYield, TERMS.basisRisk, TERMS.carry],
     falsification: [
       "Breakeven inflation drops below 2.2% on a series of soft CPI prints.",
@@ -90,7 +90,7 @@ const LEARNING_MAP = {
       "Gold supply shock or crypto rotation drains SGLN safe-haven flows.",
     ],
     setupType: "Macro inflation hedge",
-    macroLink: "T10YIE > 2.5% signals above-consensus inflation expectations, directly supporting gold as real-asset hedge.",
+    macroLink: "T10YIE > 2.5% is a level of market-implied inflation compensation; the gold link is an assumption, not a measured relationship.",
     whatWouldInvalidate: "Breakeven inflation drops below 2.2% on consecutive soft CPI prints.",
     checklist: {
       preTrade: ["Confirm T10YIE > 2.5% (not stale data)", "Check current SGLN weight < 22%", "Verify no FOMC in next 48h"],
@@ -149,8 +149,8 @@ const LEARNING_MAP = {
     },
   },
   "payroll-proxy": {
-    traderInterpretation: "A rising 10Y-2Y yield curve slope signals the market expects higher growth and potentially higher long-term rates. HIES (halal equity-income ETF) benefits from the 'risk-on' signal embedded in a steepening curve.",
-    economicsInterpretation: "When the yield curve steepens (T10Y2Y rising), it historically reflects improving growth expectations. This is the opposite of an inversion. Higher long-end yields often accompany strong payroll data and GDP growth — positive for global equity earnings.",
+    traderInterpretation: "A steepening 10Y–2Y curve can reflect higher expected growth, lower expected policy rates, or a rising term premium — which one matters, and a slope change alone does not say. This playbook cannot fire until 2Y history is fetched.",
+    economicsInterpretation: "Bull steepening (short end falling) and bear steepening (long end rising) have different causes and different implications for equities. Attributing a steepening to payroll data requires the data release, which this app does not ingest.",
     keyTerms: [TERMS.yieldCurve, TERMS.carry, TERMS.momentum, TERMS.realYield],
     falsification: [
       "Steepening caused by supply (Treasury issuance) rather than growth — bear steepener, negative for equities.",
@@ -158,7 +158,7 @@ const LEARNING_MAP = {
       "HIES KRW exposure creates FX drag if Korean Won weakens.",
     ],
     setupType: "Growth resilience risk-on",
-    macroLink: "Yield curve steepening (T10Y2Y rising > +10bps) proxies for growth-positive payroll surprises.",
+    macroLink: "Curve steepening (T10Y2Y change > +10bp) — requires 2Y history, not currently fetched. No link to payroll surprises is claimed.",
     whatWouldInvalidate: "Yield curve flattens again (< +5bps) or HY spreads widen.",
     checklist: {
       preTrade: ["Confirm T10Y2Y delta > +10bps", "Check HIES weight", "Review NFP date proximity"],
@@ -184,7 +184,7 @@ const LEARNING_MAP = {
   },
   "credit-spread-widening": {
     traderInterpretation: "HY spread widening is an early-warning credit stress signal. Institutional positioning moves defensively — flows into gold (SGLN) are a natural de-risking response. This is the 'risk-off rotation' trade.",
-    economicsInterpretation: "HY OAS > 3.5% with a 15bps+ widening is a material deterioration in credit conditions. HY spreads often lead equity drawdowns by 4–8 weeks. Rising default risk and tightening lending conditions pressure corporate earnings forecasts.",
+    economicsInterpretation: "HY OAS > 3.5% with a 15bps+ widening is a material deterioration in credit conditions. Whether spreads lead equity drawdowns, and by how long, is not measured by this app. Rising default risk and tightening lending conditions pressure corporate earnings forecasts.",
     keyTerms: [TERMS.hySpread, TERMS.basisRisk, TERMS.duration, TERMS.rMultiple],
     falsification: [
       "HY spreads reverse below 3.0% — credit stress proves transitory.",
@@ -234,16 +234,16 @@ const LEARNING_MAP = {
     },
   },
   "breakout-failure": {
-    traderInterpretation: "A HY spread spike followed by rapid compression (delta < -10bps) signals a failed breakout — credit stress proved short-lived. HBKS (halal bond ETF) benefits from spread compression as bond prices recover.",
-    economicsInterpretation: "When HY spreads spike above 4.0% then quickly retrace, it often represents forced selling (margin calls, fund redemptions) rather than genuine fundamental deterioration. Spread compression from elevated levels is bond-price positive — HBKS NAV benefits directly.",
+    traderInterpretation: "HY OAS above 4.0% and narrowing by more than 10bp over the measured window. HELD: the expression vehicle (HBKS) has an unverified identity, so this playbook does not fire.",
+    economicsInterpretation: "Spread narrowing from a high level raises high-yield bond prices, all else equal. Whether a spike reflected forced selling or fundamentals cannot be determined from the spread alone.",
     keyTerms: [TERMS.hySpread, TERMS.duration, TERMS.convexity, TERMS.carry],
     falsification: [
       "Spread compression stalls above 3.5% — fundamental deterioration, not a failed breakout.",
       "Interest rate spike simultaneously offsets spread compression benefit.",
-      "HBKS sukuk-specific credit events override macro spread signal.",
+      "Expression vehicle unverified — see CONTESTED_INSTRUMENTS in playbooks.js.",
     ],
     setupType: "Credit reversal / failed breakout",
-    macroLink: "HY OAS spike > 4.0% followed by rapid compression (delta < -10bps) signals forced selling, not fundamentals.",
+    macroLink: "HY OAS > 4.0% and narrowing (< -10bp over the window). No claim about the cause of the prior spike.",
     whatWouldInvalidate: "Spread compression stalls above 3.5% or a genuine credit event occurs.",
     checklist: {
       preTrade: ["Confirm HY OAS > 4.0% with delta < -10bps", "Check HBKS weight", "Review for corporate default news"],
@@ -252,7 +252,7 @@ const LEARNING_MAP = {
   },
   "correlation-break": {
     traderInterpretation: "AMD diverging from NVDA by >8% in a single day suggests idiosyncratic news or relative mispricing. Traders play the reversion — long the underperformer relative to the outperformer. This is a statistical arb / relative value trade.",
-    economicsInterpretation: "AMD and NVDA are highly correlated semiconductor AI plays (typical correlation 0.8+). A large divergence often reflects news-driven over-reaction in one name. Relative value: the underperformer tends to catch up to peer group performance absent continued fundamental divergence.",
+    economicsInterpretation: "AMD and NVDA are both AI-semiconductor names and are assumed to co-move; their correlation is not measured here. A one-day divergence may be news or noise, and convergence is an assumption.",
     keyTerms: [TERMS.correlationBreak, TERMS.momentum, TERMS.rMultiple, TERMS.basisRisk],
     falsification: [
       "Divergence is fundamental (AMD loses major customer, NVDA wins exclusive contract).",
@@ -260,7 +260,7 @@ const LEARNING_MAP = {
       "Sector-wide selloff overrides individual stock relative value dynamic.",
     ],
     setupType: "Relative value / pair divergence",
-    macroLink: "AMD/NVDA divergence > 8% signals stock-specific event, not sector — historical correlation 0.8+ suggests reversion.",
+    macroLink: "AMD/NVDA one-day divergence > 8pp. Correlation not measured; reversion assumed.",
     whatWouldInvalidate: "Divergence is driven by fundamental shift (AMD loses customer, NVDA exclusive contract).",
     checklist: {
       preTrade: ["Confirm AMD-NVDA gap > 8% today", "Check for company-specific news driving divergence", "Review AMD weight"],
@@ -268,8 +268,8 @@ const LEARNING_MAP = {
     },
   },
   "high-usd-hedge": {
-    traderInterpretation: "When USD exposure exceeds 55% of portfolio, adding SGLN (gold in USD) increases nominal USD exposure but SGLN has near-zero equity beta and negative correlation to risk assets — it hedges the portfolio against USD risk-asset drawdown.",
-    economicsInterpretation: "Portfolio USD over-concentration creates correlation risk — most USD assets fall together in a risk-off environment. SGLN provides USD-denominated exposure but with negative equity beta (-0.08), acting as insurance rather than adding pure USD risk. A structural hedge for a heavily USD-weighted technology portfolio.",
+    traderInterpretation: "Estimated USD exposure above 55% (from hand-entered look-through weights). Gold is priced in USD, so adding SGLN does not reduce currency exposure in a simple sense; it is used here as a diversifier whose behaviour versus the rest of the book is not measured.",
+    economicsInterpretation: "Concentration in USD assets exposes a GBP-reporting investor to USD/GBP moves. Gold's relationship with the dollar and with equities varies over time; no beta is asserted.",
     keyTerms: [TERMS.basisRisk, TERMS.hhi, TERMS.carry, TERMS.realYield],
     falsification: [
       "SGLN weight already at 25%+ — adding more creates gold concentration risk.",
@@ -277,7 +277,7 @@ const LEARNING_MAP = {
       "Portfolio shifts to GBP-denominated holdings, reducing the USD concentration problem.",
     ],
     setupType: "Portfolio FX hedge",
-    macroLink: "Portfolio USD exposure > 55% creates FX concentration risk — SGLN provides negative-beta USD diversification.",
+    macroLink: "Estimated USD exposure > 55% (look-through weights are assumptions).",
     whatWouldInvalidate: "Portfolio USD exposure naturally reduces below 50% or SGLN weight already at 25%.",
     checklist: {
       preTrade: ["Confirm USD exposure > 55%", "Check SGLN weight < 22%", "Review GBP/USD trend"],
@@ -285,16 +285,15 @@ const LEARNING_MAP = {
     },
   },
   "concentration-hedge": {
-    traderInterpretation: "HHI > 2000 means the portfolio has excessive concentration. Adding HBKS (halal bond ETF with low equity correlation) reduces the HHI by adding a low-correlated asset. This is a portfolio construction trade, not a directional bet.",
-    economicsInterpretation: "Diversification benefit is measured by correlation-weighted contribution to portfolio volatility. HBKS has sub-0.5 correlation to equity positions and provides income (carry). Adding duration through HBKS reduces equity beta and portfolio HHI simultaneously — optimal when late-cycle risk is elevated.",
+    traderInterpretation: "HHI > 2000 means the portfolio is concentrated. Adding any new line reduces HHI mechanically. HELD: the proposed vehicle (HBKS) has an unverified identity, so this playbook does not fire.",
+    economicsInterpretation: "HHI measures concentration by weight, not by risk. Real diversification depends on correlations, which are not measured here.",
     keyTerms: [TERMS.hhi, TERMS.duration, TERMS.carry, TERMS.basisRisk],
     falsification: [
-      "HBKS weight already exceeds 10% — further addition increases sukuk concentration.",
-      "Bear steepener regime (rates rising sharply) causes HBKS capital losses > income.",
+      "Vehicle unverified — see CONTESTED_INSTRUMENTS in playbooks.js.",
       "Portfolio rebalancing toward equities is the desired direction — adding bonds contradicts objective.",
     ],
     setupType: "Portfolio diversification",
-    macroLink: "HHI > 2000 signals excessive concentration — HBKS (beta 0.62) reduces HHI and adds income ballast.",
+    macroLink: "HHI > 2000 signals concentration. No beta or income figure is asserted for the vehicle.",
     whatWouldInvalidate: "HHI naturally decreases through deposits or HBKS weight already exceeds 10%.",
     checklist: {
       preTrade: ["Confirm HHI > 2000", "Check HBKS weight < 8%", "Review rate environment for duration risk"],

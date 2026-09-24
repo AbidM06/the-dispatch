@@ -84,6 +84,24 @@ beforeAll(() => {
   app = require("../server/index");
 });
 
+/**
+ * seedSnapshotFacts — put dated FRED Facts where the deterministic narrative
+ * reads them. The narrative no longer invents rates when none are cached, so
+ * tests that expect narrative content must supply real-shaped inputs.
+ */
+function seedSnapshotFacts(date = "2026-09-18") {
+  const f = (seriesId, value) => ({ seriesId, value, date, observedAt: date, source: "FRED", kind: "observed",
+                                    freshness: { status: "current" } });
+  cache.set("snapshot:data", {
+    rates: {
+      dgs10: f("DGS10", 4.1), dfii10: f("DFII10", 1.9), t10yie: f("T10YIE", 2.2),
+      hy_spread: f("BAMLH0A0HYM2", 3.17), t10y2y: f("T10Y2Y", 0.5),
+    },
+    fx: { value: 0.75, observedAt: `${date}T00:00:00Z`, date, source: "ExchangeRate-API", kind: "observed" },
+    watchlist: [],
+  }, 60_000);
+}
+
 beforeEach(() => {
   cache.clear();
   jest.clearAllMocks();
@@ -191,11 +209,18 @@ describe("GET /api/snapshot", () => {
     const res = await request(app).get("/api/snapshot");
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      source:    expect.stringMatching(/live|cache|seeded/),
+      // "partial": intl prices and RSI history have no free feed, so they are
+      // unavailable outside DEMO_MODE and the envelope says so.
+      source:    expect.stringMatching(/^(live|cache|partial)$/),
       fetchedAt: expect.any(String),
       stale:     expect.any(Boolean),
+      freshness: expect.any(Object),
+      components: expect.any(Object),
       data:      expect.any(Object),
     });
+    expect(res.body.components.intl.freshness.status).toBe("unavailable");
+    expect(res.body.data.rates.dgs10.observedAt).toBe("2026-03-05");
+    expect(res.body.data.rates.dgs10.retrievedAt).toBeTruthy();
     expect(res.body.data.rates).toBeDefined();
     expect(res.body.data.fx).toBeDefined();
     expect(res.body.data.watchlist).toBeInstanceOf(Array);
@@ -204,7 +229,7 @@ describe("GET /api/snapshot", () => {
     expect(syms).toContain("AMD");
   });
 
-  test("falls back to seeded data when all providers fail", async () => {
+  test("reports unavailable — not seed values — when all providers fail", async () => {
     fredMock.getAllRates.mockRejectedValue(new Error("FRED down"));
     fredMock.getRecentHistory.mockRejectedValue(new Error("FRED down"));
     avMock.getQuotes.mockRejectedValue(new Error("AV down"));
@@ -215,6 +240,10 @@ describe("GET /api/snapshot", () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toBeDefined();
     expect(res.body.stale).toBe(true);
+    expect(res.body.source).toBe("unavailable");
+    expect(res.body.data.rates.dgs10.value).toBeNull();
+    expect(res.body.data.rates.dgs10.kind).toBe("unavailable");
+    expect(res.body.data.watchlist.every(w => w.price === null)).toBe(true);
   });
 
   test("watchlist merges AV (AMD) and Polygon (peers) correctly", async () => {
@@ -275,7 +304,7 @@ describe("POST /api/snapshot/prefetch", () => {
     expect(res.body.watchlist.source).toMatch(/live|cache|seeded/);
   });
 
-  test("prefetch still returns 200 when providers fail (falls to seed)", async () => {
+  test("prefetch still returns 200 when providers fail, and reports unavailable", async () => {
     avMock.getFxRate.mockRejectedValue(new Error("AV down"));
     avMock.getQuotes.mockRejectedValue(new Error("AV down"));
     polyMock.getSnapshots.mockRejectedValue(new Error("Polygon down"));
@@ -283,7 +312,8 @@ describe("POST /api/snapshot/prefetch", () => {
     const res = await request(app).post("/api/snapshot/prefetch");
     expect(res.status).toBe(200);
     expect(res.body.prefetched).toBe(true);
-    expect(res.body.watchlist.source).toBe("seeded");
+    expect(res.body.watchlist.source).toBe("unavailable");   // was "seeded"
+    expect(res.body.fx.value).toBeNull();
   });
 });
 
@@ -291,13 +321,16 @@ describe("POST /api/snapshot/prefetch", () => {
 // /api/risk — Phase 2b + Phase 1 (LOW_COST_MODE, budget exhaustion, cooldown)
 // ─────────────────────────────────────────────────────────────────────────────
 describe("/api/risk", () => {
-  test("GET returns seeded risks with stale:true when cache is empty", async () => {
+  test("GET with an empty cache is explicitly unavailable, not seeded risks", async () => {
+    // Used to serve seven hand-typed March 2026 risks (a war, a tariff package…)
+    // labelled "seeded". Outside DEMO_MODE nothing is shown in their place.
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe("seeded");
+    expect(res.body.source).toBe("unavailable");
+    expect(res.body.analysisMode).toBe("unavailable");
     expect(res.body.stale).toBe(true);
-    expect(res.body.data.risks).toBeInstanceOf(Array);
-    expect(res.body.data.risks.length).toBe(7);
+    expect(res.body.data.risks).toEqual([]);
+    expect(res.body.reason).toBeTruthy();
   });
 
   test("POST /refresh calls fetchAllAnalysis once (merged call)", async () => {
@@ -368,12 +401,19 @@ describe("/api/risk", () => {
 
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
+    seedSnapshotFacts("2026-09-18");
 
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
     expect(res.body.analysisMode).toBe("deterministic");
+    expect(res.body.source).toBe("computed");
     expect(res.body.data.risks).toBeInstanceOf(Array);
     expect(res.body.data.risks.length).toBeGreaterThan(0);
+    // Dated by its inputs' observation date, not today; computed, not observed.
+    for (const r of res.body.data.risks) {
+      expect(r.date).toBe("2026-09-18");
+      expect(r.kind).toBe("calculated");
+    }
     // Must NOT call AI
     expect(anthropicMock.fetchAllAnalysis).not.toHaveBeenCalled();
   });
@@ -403,6 +443,7 @@ describe("/api/risk", () => {
     const budgetErr = new Error("Daily budget exhausted (5/5 calls today).");
     budgetErr.code  = "BUDGET_DAILY";
     anthropicMock.fetchAllAnalysis.mockRejectedValue(budgetErr);
+    seedSnapshotFacts();
 
     const res = await request(app).post("/api/risk/refresh").send({ force: true });
     expect(res.status).toBe(200);
@@ -428,12 +469,24 @@ describe("/api/risk", () => {
 // /api/events — Phase 2b + Phase 1 (LOW_COST_MODE, budget exhaustion, cooldown)
 // ─────────────────────────────────────────────────────────────────────────────
 describe("/api/events", () => {
-  test("GET returns seeded events when cache is empty", async () => {
+  test("GET with an empty cache is explicitly unavailable, not seeded events", async () => {
     const res = await request(app).get("/api/events");
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe("seeded");
-    expect(res.body.data.events).toBeInstanceOf(Array);
-    expect(res.body.data.econ).toBeInstanceOf(Array);
+    expect(res.body.source).toBe("unavailable");
+    expect(res.body.data.events).toEqual([]);
+    expect(res.body.data.econ).toEqual([]);
+  });
+
+  test("a cached deterministic narrative is not relabelled as AI on the next read", async () => {
+    process.env.LOW_COST_MODE = "true";
+    seedSnapshotFacts();
+    await request(app).post("/api/events/refresh");        // writes the cache
+    delete process.env.LOW_COST_MODE;
+    const res = await request(app).get("/api/events");     // cache hit
+    expect(res.body.analysisMode).toBe("deterministic");   // was "ai"
+    expect(res.body.source).toBe("computed");
+    const risk = await request(app).get("/api/risk");
+    expect(risk.body.analysisMode).toBe("deterministic");
   });
 
   test("POST /refresh calls fetchAllAnalysis once (not fetchMarketEvents + fetchEconAnalysis)", async () => {
@@ -498,12 +551,17 @@ describe("/api/events", () => {
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
 
+    seedSnapshotFacts("2026-09-18");
     const res = await request(app).get("/api/events");
     expect(res.status).toBe(200);
     expect(res.body.analysisMode).toBe("deterministic");
     expect(res.body.data.events).toBeInstanceOf(Array);
     expect(res.body.data.econ).toBeInstanceOf(Array);
     expect(res.body.data.events.length).toBeGreaterThan(0);
+    const text = JSON.stringify(res.body.data);
+    // No canned world events, no level narrated as a curve move.
+    expect(text).not.toMatch(/Iran|tariff|MI450|\$9\.8B|steepener in progress|Fed holds/i);
+    expect(res.body.data.events.every(e => e.date === "2026-09-18")).toBe(true);
     expect(res.body.data.econ.length).toBeGreaterThan(0);
     expect(anthropicMock.fetchAllAnalysis).not.toHaveBeenCalled();
   });

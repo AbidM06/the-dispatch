@@ -151,7 +151,7 @@ function buildCrossAssetMatrix(rates = {}) {
       asset: "US Equities — Value / Cyclical",
       signal: label(curveScore + 1),
       score: Math.max(-2, Math.min(2, curveScore + 1)),
-      rationale: `Yield curve at +${t10y2y}% — ${t10y2y > 0.5 ? "mild steepener supports banks and cyclicals; financials, energy, industrials in focus" : t10y2y > 0 ? "flat curve limits bank margin expansion; value vs growth rotation cautious" : "inverted curve pressures cyclicals and raises recession risk"}.`,
+      rationale: `Yield curve at +${t10y2y}% — ${t10y2y > 0.5 ? "positively sloped (a level, not a steepening) — conventionally read as supportive of bank net interest margins" : t10y2y > 0 ? "flat — conventionally read as a constraint on bank margins" : "inverted — historically associated with later recessions, with long and variable lags"}.`,
     },
     {
       asset: "EM Equities",
@@ -245,21 +245,22 @@ router.get("/view", async (req, res) => {
       t10y2y:    rateVal(r.t10y2y),
     };
     volSurface = vol;
-    const asOf = [r.dgs10, r.dfii10, r.t10yie, r.hy_spread, r.t10y2y]
-      .map(rateDate).filter(Boolean).sort().pop();
+    // Each figure carries its own observation date. The old string appended
+    // only the NEWEST date, so an older series read as current.
+    const d = f => rateDate(f) ? ` (${rateDate(f)})` : " (date n/a)";
     const parts = [
-      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%`                 : null,
-      rates.dfii10    != null ? `real yield: ${rates.dfii10}%`                 : null,
-      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%`       : null,
-      rates.hy_spread != null ? `HY OAS: ${rates.hy_spread}%`                  : null,
-      rates.t10y2y    != null ? `yield curve (10Y-2Y): ${rates.t10y2y}%`       : null,
+      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%${d(r.dgs10)}`                     : null,
+      rates.dfii10    != null ? `real yield: ${rates.dfii10}%${d(r.dfii10)}`                    : null,
+      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%${d(r.t10yie)}`          : null,
+      rates.hy_spread != null ? `HY OAS: ${Math.round(rates.hy_spread * 100)}bp${d(r.hy_spread)}` : null,
+      rates.t10y2y    != null ? `yield curve (10Y-2Y): ${rates.t10y2y}pp${d(r.t10y2y)}`         : null,
     ].filter(Boolean);
     const volStr = [
-      vol.vix3m ? `VIX3M: ${vol.vix3m.value}` : null,
-      vol.skew  ? `CBOE SKEW: ${vol.skew.value}` : null,
+      vol.vix3m ? `VIX3M: ${vol.vix3m.value} (${vol.vix3m.source}, ${vol.vix3m.date})` : null,
+      vol.skew  ? `CBOE SKEW: ${vol.skew.value} (${vol.skew.source}, ${vol.skew.date})` : null,
     ].filter(Boolean).join(", ");
     ratesStr = parts.length
-      ? parts.join(", ") + (asOf ? ` (FRED, observed ${asOf})` : "")
+      ? `FRED end-of-day observations — ${parts.join(", ")}`
         + (volStr ? `. Vol surface: ${volStr}` : "")
       : "";
   } catch (err) {
@@ -311,16 +312,15 @@ router.get("/clients", async (req, res) => {
       hy_spread: rateVal(r.hy_spread),
       t10y2y:    rateVal(r.t10y2y),
     };
-    const asOf = [r.dgs10, r.dfii10, r.t10yie, r.hy_spread, r.t10y2y]
-      .map(rateDate).filter(Boolean).sort().pop();
+    const d = f => rateDate(f) ? ` (${rateDate(f)})` : " (date n/a)";
     const parts = [
-      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%`           : null,
-      rates.dfii10    != null ? `real yield: ${rates.dfii10}%`           : null,
-      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%` : null,
-      rates.hy_spread != null ? `HY OAS: ${rates.hy_spread}%`            : null,
-      rates.t10y2y    != null ? `yield curve: ${rates.t10y2y}%`          : null,
+      rates.dgs10     != null ? `10Y nominal: ${rates.dgs10}%${d(r.dgs10)}`                     : null,
+      rates.dfii10    != null ? `real yield: ${rates.dfii10}%${d(r.dfii10)}`                    : null,
+      rates.t10y_ie   != null ? `breakeven inflation: ${rates.t10y_ie}%${d(r.t10yie)}`          : null,
+      rates.hy_spread != null ? `HY OAS: ${Math.round(rates.hy_spread * 100)}bp${d(r.hy_spread)}` : null,
+      rates.t10y2y    != null ? `yield curve (10Y-2Y): ${rates.t10y2y}pp${d(r.t10y2y)}`         : null,
     ].filter(Boolean);
-    ratesStr = parts.length ? parts.join(", ") + (asOf ? ` (FRED, observed ${asOf})` : "") : "";
+    ratesStr = parts.length ? `FRED end-of-day observations — ${parts.join(", ")}` : "";
     // Only label a regime when the inputs it depends on were actually measured.
     regime = describeRegime(rates);
   } catch (err) {

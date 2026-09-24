@@ -127,8 +127,9 @@ const SECTOR_REGIME_SCORES = {
     "Social Technology":    -2,
     "E-commerce / Cloud":   -1,
   },
-  // t10y2y > 0.5 — steepening curve / growth signal
-  steepeningCurve: {
+  // t10y2y > 0.5 — a positively sloped curve LEVEL. It used to be called
+  // "steepeningCurve", but a level says nothing about steepening (a change).
+  positiveCurveLevel: {
     "Semiconductors":       +2,
     "Technology":           +2,
     "Cloud Software":       +1,
@@ -163,14 +164,20 @@ const SECTOR_REGIME_SCORES = {
  * Compute active regime conditions from current rates.
  */
 function getActiveConditions(rates) {
+  // A missing rate must not satisfy a threshold: `null < 1.0` is true in
+  // JavaScript, so an absent real yield used to register as "lowRealYields".
+  const r = rates || {};
+  const has = k => Number.isFinite(r[k]);
   const conditions = [];
-  if (rates.dgs10 > 4.5)                                    conditions.push("ratesRestrictive");
-  if (rates.dfii10 > 1.5)                                   conditions.push("highRealYields");
-  if (rates.dfii10 < 1.0)                                   conditions.push("lowRealYields");
-  if (rates.hy_spread > 3.5)                                conditions.push("creditStress");
-  if (rates.t10yie > 2.5)                                   conditions.push("inflationBreakout");
-  if (rates.t10y2y < 0)                                     conditions.push("invertedCurve");
-  if (rates.t10y2y > 0.5)                                   conditions.push("steepeningCurve");
+  if (has("dgs10")     && r.dgs10 > 4.5)     conditions.push("ratesRestrictive");
+  if (has("dfii10")    && r.dfii10 > 1.5)    conditions.push("highRealYields");
+  if (has("dfii10")    && r.dfii10 < 1.0)    conditions.push("lowRealYields");
+  if (has("hy_spread") && r.hy_spread > 3.5) conditions.push("creditStress");
+  // Breakeven above 2.5% — a level of market-implied inflation compensation,
+  // not a CPI "breakout" versus consensus. The key name is kept for stability.
+  if (has("t10yie")    && r.t10yie > 2.5)    conditions.push("inflationBreakout");
+  if (has("t10y2y")    && r.t10y2y < 0)      conditions.push("invertedCurve");
+  if (has("t10y2y")    && r.t10y2y > 0.5)    conditions.push("positiveCurveLevel");
   return conditions;
 }
 
@@ -208,31 +215,28 @@ function getMomentumScore(ticker, watchlist) {
 function buildRationale(ticker, info, macroScore, momentumScore, activeConditions, rates) {
   const parts = [];
 
-  if (macroScore >= 2) {
-    parts.push(`${info.sector} sector has strong macro tailwinds in the current regime (macro score: +${macroScore}).`);
-  } else if (macroScore > 0) {
-    parts.push(`${info.sector} sector has mild macro support in current conditions.`);
-  } else if (macroScore < 0) {
-    parts.push(`${info.sector} faces macro headwinds — consider as a defensive/hedge position only.`);
+  // Sector scores come from SECTOR_REGIME_SCORES — hand-set heuristics in this
+  // file, not an estimated or backtested relationship. The text says so.
+  if (macroScore !== 0) {
+    parts.push(`${info.sector}: sector–regime score ${macroScore > 0 ? "+" : ""}${macroScore} under this app's hand-set heuristic map (active conditions: ${activeConditions.join(", ") || "none"}).`);
   }
-
-  if (activeConditions.includes("highRealYields") && macroScore > 0) {
-    parts.push(`Real yields at ${rates.dfii10.toFixed(2)}% are elevated but ${info.sector} tends to be resilient.`);
+  if (activeConditions.includes("highRealYields")) {
+    parts.push(`Real yield ${rates.dfii10.toFixed(2)}% (above the 1.5% threshold).`);
   }
-  if (activeConditions.includes("creditStress") && macroScore > 0) {
-    parts.push(`HY spread widening (${rates.hy_spread.toFixed(2)}%) signals risk-off — ${info.sector} benefits from flight-to-quality.`);
+  if (activeConditions.includes("creditStress")) {
+    parts.push(`HY OAS ${Math.round(rates.hy_spread * 100)}bp (level above the 350bp threshold; no widening is implied).`);
   }
-  if (activeConditions.includes("inflationBreakout") && macroScore > 0) {
-    parts.push(`Breakeven inflation at ${rates.t10yie.toFixed(2)}% supports ${info.sector} as an inflation hedge.`);
+  if (activeConditions.includes("inflationBreakout")) {
+    parts.push(`10Y breakeven ${rates.t10yie.toFixed(2)}% (above 2.5%).`);
   }
   if (momentumScore > 0) {
-    parts.push(`Positive price momentum confirms macro thesis alignment.`);
+    parts.push(`Latest daily change positive.`);
   }
 
   if (info.note) parts.push(`Note: ${info.note}`);
   if (info.index) parts.push(`Shariah index: ${info.index}.`);
 
-  return parts.join(" ") || `${ticker} (${info.sector}) — aligned with current macro regime.`;
+  return parts.join(" ") || `${ticker} (${info.sector}) — no active condition scores this sector.`;
 }
 
 /**

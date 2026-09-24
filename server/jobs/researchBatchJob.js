@@ -132,7 +132,11 @@ async function runBatchRefresh({ force = false } = {}) {
           // any source came back, so the client can flag an ungrounded report
           // instead of presenting it as sourced.
           const sources = hit.sources || [];
-          report = anthropic.finalizeResearchReport(type, hit.text, sources, sources.length > 0);
+          // Same exit as the synchronous path: same contract, same provenance
+          // and the same `grounding` block, so a batched report cannot be
+          // accepted on weaker terms or carry weaker metadata.
+          report = anthropic.finalizeResearchReport(type, hit.text, sources,
+            { searchEnabled: true, tier: "batch" });   // every batch request carries the web_search tool (see above)
           if (!sources.length) {
             console.warn(`[researchBatch] ${type} returned no web_search sources — marked ungrounded.`);
           }
@@ -154,7 +158,10 @@ async function runBatchRefresh({ force = false } = {}) {
       // Verified data rides along with every report, exactly as the live route does.
       report.marketData    = macroContext.toMarketDataRows(macroCtx);
       report.policyPath    = macroCtx?.policyPath || null;
-      report.dataAsOf      = macroCtx?.fetchedAt || null;
+      // Observation dates, not fetch time. `dataAsOf` used to be the moment the
+      // context was assembled, so regenerating a report made week-old FRED data
+      // read as fresh. Retrieval is reported separately and labelled as such.
+      report.dataAsOf       = macroContext.observationSpan(macroCtx);
       report.missingSeries = macroCtx?.missing || [];
 
       cache.set(cacheKey(type), report, TTL_24H);

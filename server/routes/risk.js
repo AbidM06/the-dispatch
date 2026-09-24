@@ -21,8 +21,8 @@ const { isApiFallback, clearApiFallback,
         setApiFallback, getApiFallbackInfo }      = require("../providers/budget");
 const { generateNarrative } = require("../analytics/narrativeEngine");
 const { schemas, validate } = require("../schemas");
-const seeds = require("../../seeds/fallback");
 const requireWriteAuth = require("../middleware/auth");
+const store = require("../analytics/analysisStore");
 
 const router = Router();
 
@@ -45,40 +45,43 @@ function riskResponse(risks, source, fetchedAt, stale, analysisMode, extra = {})
   return { source, fetchedAt, stale, data: { risks }, analysisMode, ...extra };
 }
 
-/**
- * Collect rates/fx/portfolio context for the narrative engine.
- */
-function getContext() {
-  const snapData      = cache.get("snapshot:data");
-  const portfolioData = cache.get("portfolio:data");
-  return {
-    rates:     snapData?.rates     || seeds.RATES_SEED,
-    fx:        snapData?.fx        || seeds.FX_SEED,
-    portfolio: portfolioData       || null,
-  };
+// Facts from the snapshot, never seed levels. See analysisStore.
+const getContext = store.narrativeContext;
+
+function computeAndStore() {
+  const n = generateNarrative(getContext());
+  store.storeAnalysis(CACHE_KEY,      n.risks,  "deterministic", TTL_AI, { inputs: n.inputs });
+  store.storeAnalysis(CACHE_KEY_EVT,  n.events, "deterministic", TTL_AI, { inputs: n.inputs });
+  store.storeAnalysis(CACHE_KEY_ECON, n.econ,   "deterministic", TTL_AI, { inputs: n.inputs });
+  return n;
+}
+
+function fallbackResponse(extra = {}) {
+  const fb = store.fallback("risks");
+  return riskResponse(fb.items, fb.source, fb.fetchedAt, true, fb.analysisMode, { reason: fb.reason, ...extra });
 }
 
 // ── GET /api/risk ──────────────────────────────────────────────────────────────
 router.get("/", (req, res) => {
-  // 1. Cache hit
-  if (cache.has(CACHE_KEY)) {
-    const meta = cache.getWithMeta(CACHE_KEY);
-    const response = riskResponse(meta.value, "cache", meta.fetchedAt, meta.stale, "ai");
+  // 1. Cache hit — with the mode that produced it
+  const hit = store.readAnalysis(CACHE_KEY);
+  if (hit) {
+    const response = riskResponse(hit.items, store.sourceFor(hit.analysisMode), hit.fetchedAt, hit.stale,
+                                  hit.analysisMode, hit.inputs ? { inputs: hit.inputs } : {});
     const { ok, data } = validate(schemas.RiskResponse, response);
     return res.json(ok ? data : response);
   }
 
   // 2. LOW_COST_MODE or API credits exhausted — deterministic
   if (LOW_COST() || isApiFallback()) {
-    const ctx = getContext();
-    const { risks } = generateNarrative(ctx);
+    const n = generateNarrative(getContext());
     const now = new Date().toISOString();
     const extra = isApiFallback() ? { _apiFallback: getApiFallbackInfo() } : {};
-    return res.json({ ...riskResponse(risks, "seeded", now, false, "deterministic"), ...extra });
+    return res.json({ ...riskResponse(n.risks, "computed", now, false, "deterministic", { inputs: n.inputs }), ...extra });
   }
 
-  // 3. Static seed
-  const response = riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded");
+  // 3. Nothing generated yet
+  const response = fallbackResponse();
   const { ok, data } = validate(schemas.RiskResponse, response);
   res.json(ok ? data : response);
 });
@@ -89,17 +92,13 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
 
   // LOW_COST_MODE or API credits exhausted — no AI calls unless force
   if ((LOW_COST() || isApiFallback()) && !force) {
-    const ctx = getContext();
-    const { events, risks, econ } = generateNarrative(ctx);
+    const { risks, inputs } = computeAndStore();
     const now = new Date().toISOString();
-    cache.set(CACHE_KEY,      risks,  TTL_AI);
-    cache.set(CACHE_KEY_EVT,  events, TTL_AI);
-    cache.set(CACHE_KEY_ECON, econ,   TTL_AI);
     const note = isApiFallback()
       ? `API credits exhausted — deterministic fallback active. Retrying AI in ${getApiFallbackInfo().retryInMins} min, or pass force:true to retry now.`
       : "LOW_COST_MODE=true — deterministic narrative returned. Pass force:true to call AI.";
     return res.json({
-      ...riskResponse(risks, "seeded", now, false, "deterministic"),
+      ...riskResponse(risks, "computed", now, false, "deterministic", { inputs }),
       _lowCostMode: note,
       ...(isApiFallback() ? { _apiFallback: getApiFallbackInfo() } : {}),
     });
@@ -108,17 +107,14 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
   // Cooldown guard
   if (!force && isCoolingDown()) {
     const remaining = Math.ceil((COOLDOWN_MS - (Date.now() - _lastRefreshAt)) / 60_000);
-    if (cache.has(CACHE_KEY)) {
-      const meta = cache.getWithMeta(CACHE_KEY);
+    const hit = store.readAnalysis(CACHE_KEY);
+    if (hit) {
       return res.json({
-        ...riskResponse(meta.value, "cache", meta.fetchedAt, true, "ai"),
+        ...riskResponse(hit.items, store.sourceFor(hit.analysisMode), hit.fetchedAt, true, hit.analysisMode),
         _cooldown: `Cooldown active — ${remaining} min remaining. Pass force:true to override.`,
       });
     }
-    return res.json({
-      ...riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded"),
-      _cooldown: `Cooldown active — ${remaining} min remaining.`,
-    });
+    return res.json(fallbackResponse({ _cooldown: `Cooldown active — ${remaining} min remaining.` }));
   }
 
   try {
@@ -130,9 +126,9 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
     const fetchedAt = new Date().toISOString();
     _lastRefreshAt  = Date.now();
 
-    cache.set(CACHE_KEY,      risks,  TTL_AI);
-    cache.set(CACHE_KEY_EVT,  events, TTL_AI);
-    cache.set(CACHE_KEY_ECON, econ,   TTL_AI);
+    store.storeAnalysis(CACHE_KEY,      risks,  "ai", TTL_AI);
+    store.storeAnalysis(CACHE_KEY_EVT,  events, "ai", TTL_AI);
+    store.storeAnalysis(CACHE_KEY_ECON, econ,   "ai", TTL_AI);
 
     const response = riskResponse(risks, "live", fetchedAt, false, "ai");
     const { ok, data, errors } = validate(schemas.RiskResponse, response);
@@ -148,14 +144,10 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
     // Ensure fallback state is active for billing errors (safety net for mocked tests).
     if (err.code === "API_CREDITS_EXHAUSTED") setApiFallback();
     if (isBudgetErr || LOW_COST() || isApiFallback()) {
-      const ctx = getContext();
-      const { events, risks, econ } = generateNarrative(ctx);
+      const { risks, inputs } = computeAndStore();
       const now = new Date().toISOString();
-      cache.set(CACHE_KEY,      risks,  TTL_AI);
-      cache.set(CACHE_KEY_EVT,  events, TTL_AI);
-      cache.set(CACHE_KEY_ECON, econ,   TTL_AI);
       return res.json({
-        ...riskResponse(risks, "seeded", now, false, "deterministic"),
+        ...riskResponse(risks, "computed", now, false, "deterministic", { inputs }),
         _refreshError: err.message,
       });
     }
@@ -163,17 +155,14 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
     // Generic AI failure — reset cooldown
     _lastRefreshAt = 0;
 
-    const meta = cache.getWithMeta(CACHE_KEY);
-    if (meta) {
+    const hit = store.readAnalysis(CACHE_KEY, { allowExpired: true });
+    if (hit) {
       return res.status(200).json({
-        ...riskResponse(meta.value, "cache", meta.fetchedAt, true, "ai"),
+        ...riskResponse(hit.items, store.sourceFor(hit.analysisMode), hit.fetchedAt, true, hit.analysisMode),
         _refreshError: err.message,
       });
     }
-    res.status(200).json({
-      ...riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded"),
-      _refreshError: err.message,
-    });
+    res.status(200).json(fallbackResponse({ _refreshError: err.message }));
   }
 });
 
