@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-09-28 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/sonnet-5-5`
+**Last updated:** 2026-09-28 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/journal-tracking`
 
 ---
 
@@ -40,7 +40,8 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
-| Sonnet 5.5 evaluation (D-17): `SONNET_MODEL` setting, 5.5 price, time on receipts; owner runs the A/B on the Mac | Claude | `claude/sonnet-5-5` | PR open — default still Sonnet 5; waiting for the owner's two receipts |
+| Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | PR #8 — Codex reviewed through 07a8002 (8 rounds, every finding fixed). Last fix (aged final bar, see session log) made at the owner's instruction as the final round; ready to merge |
+| Sonnet 5.5 evaluation (D-17): `SONNET_MODEL` setting, 5.5 price, time on receipts; owner runs the A/B on the Mac | Claude | `claude/sonnet-5-5` | Merged (PR #7) — default still Sonnet 5; waiting for the owner's A/B receipts, then a one-line PR to switch |
 
 ## 3. Next up (agreed with the owner, not started)
 
@@ -139,6 +140,18 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-09-28 — Claude (Journal stage 2)
+- Owner answered the stage-2 questions (D-18). Built `server/journal/tracker.js`: daily-bar
+  tracking after each Markets refresh, limit-order entry in the zone, target/stop/expiry,
+  uncertain days, R, S&P comparison, fill rate; final results appended as `outcome` events.
+  The idea prompt now returns `horizonDays`. Journal tab shows status, R, vs-S&P and a stats strip.
+- Codex reviewed PR #8 over 8 rounds; every finding fixed. Main ones: never score a still-trading
+  bar (but keep an aged final bar); retry outcome writes and benchmarks; the Journal outcome wins
+  over the derived file; "unavailable" when history can't cover the period; one refresh entry
+  point (`jobs/refreshMarkets.js`) and one tracking lookup (`tracker.trackingFor`). 413 tests.
+- Owner ended the day after PR #8 ("last fix, then merge").
+- Next: owner's Sonnet A/B receipts (D-17); stage 3 (reflections + lessons ledger) — propose first.
 
 ### 2026-09-28 — Claude (Journal stage 1)
 - Built stage 1 on `claude/journal-logging`: every generated idea is written to an

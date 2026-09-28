@@ -46,6 +46,9 @@ const IdeaSchema = z.object({
   target:       num,
   stop:         num,
   horizon:      clip(60),
+  // The holding period as a number — the Journal tracks against this rather than
+  // guessing from the prose. Unreadable → null (the Journal then reads the text).
+  horizonDays:  z.preprocess(v => (v == null || v === "") ? null : Math.round(Number(v)), z.number().int().min(1).max(3650).nullable().catch(null)).optional(),
   confidence:   z.preprocess(v => Math.round(Number(v)), z.number().int().min(0).max(100)),
   keyRisks:     z.array(clip(300)).min(1).transform(a => a.slice(0, 5)),
   invalidation: clip(500),
@@ -64,6 +67,7 @@ function marketContext() {
       kind: "market", ref, label: `${it.label} ${q.value}${it.unit === "%" ? "%" : ""}`,
       url: q.sourceUrl, publisher: q.source, publishedAt: q.releasedAt || q.asOf, observedAt: q.asOf || null, marketId: it.id, value: q.value,
       freshness: it.stale ? "stale" : it.freshness?.label, cadence: q.cadence || null,
+      history: it.history || null,   // dynamic markets: lets the Journal find history after the market leaves the snapshot
     };
     const chg = q.changePct != null ? `${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%` :
                 q.change != null ? `${q.change >= 0 ? "+" : ""}${q.change}` : "n/a";
@@ -116,7 +120,7 @@ Rules:
 - For yields/spreads quote levels in percent (e.g. 4.25), for odds in percent (0-100).
 - "basedOn" must list the input ids you actually relied on (e.g. "N3", "M:GOLD", "C2", "REPORT", "SRC-004"). Never cite anything else.
 - Be specific about the catalyst and what would prove the idea wrong.
-Return ONLY a JSON object with keys: instrument, marketId, assetClass (fx|rates|credit|equities|commodities|crypto|macro|other), direction (LONG|SHORT), expression, headline (≤ 14 words), thesis (3-5 sentences), catalyst, entryLow, entryHigh, target, stop, horizon (e.g. "2-6 weeks"), confidence (0-100 integer), keyRisks (2-4 strings), invalidation, basedOn (array of ids).`;
+Return ONLY a JSON object with keys: instrument, marketId, assetClass (fx|rates|credit|equities|commodities|crypto|macro|other), direction (LONG|SHORT), expression, headline (≤ 14 words), thesis (3-5 sentences), catalyst, entryLow, entryHigh, target, stop, horizon (e.g. "2-6 weeks"), horizonDays (integer: calendar days the trade is held — the UPPER end of horizon, e.g. 42 for "2-6 weeks"), confidence (0-100 integer), keyRisks (2-4 strings), invalidation, basedOn (array of ids).`;
 
 function parseJsonObject(text) {
   const s = String(text || "");
@@ -231,6 +235,7 @@ Today is ${new Date().toISOString()}. Return the JSON object only.`;
       : { reportId: input.report.reportId, reportType: input.report.reportType, reportVersion: input.report.version },
     ...idea,
     marketId: marketRef ? marketRef.marketId : null,
+    marketHistory: marketRef?.history || null,
     // asOf is the OBSERVATION time (FRED: the observation date); releasedAt is when the
     // provider published it (FRED: series last_updated). The Journal ages the former.
     priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.observedAt || marketRef.publishedAt, releasedAt: marketRef.publishedAt || null, url: marketRef.url, freshness: marketRef.freshness || null, cadence: marketRef.cadence || null } : null,

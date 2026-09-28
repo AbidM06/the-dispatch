@@ -14,6 +14,9 @@
  *                   before or after the AI's idea was revealed.
  *   manual_price  — a hypothetical entry price the owner typed in. Stored
  *                   separately: it never changes the original reference price.
+ *   outcome       — stage 2: the FINAL tracked result (target/stop hit,
+ *                   expired, uncertain, never entered), written once by
+ *                   journal/tracker.js. Open ideas are not written here.
  *
  * Why every idea: judging the system only by ideas picked after they looked
  * promising is selection bias. Everything generated is logged; "watch" is a
@@ -163,8 +166,21 @@ function horizonFrom(raw) {
     pending = [];
   }
   if (maxDays == null) return { raw: raw || null, category: "undeclared", maxDays: null };
-  const category = maxDays <= 14 ? "tactical" : maxDays <= 93 ? "swing" : maxDays <= 366 ? "strategic" : "undeclared";
-  return { raw: raw || null, category, maxDays };
+  return { raw: raw || null, category: bucket(maxDays), maxDays };
+}
+
+/**
+ * horizonFor — the idea's declared holding period. New cards carry
+ * horizonDays from the model (source "declared"); older ones fall back to
+ * reading the text (source "parsed").
+ */
+function bucket(days) {
+  return days <= 14 ? "tactical" : days <= 93 ? "swing" : days <= 366 ? "strategic" : "undeclared";
+}
+function horizonFor(card) {
+  const d = Number(card.horizonDays);
+  if (Number.isInteger(d) && d >= 1) return { raw: card.horizon || null, category: bucket(d), maxDays: d, source: "declared" };
+  return { ...horizonFrom(card.horizon), source: "parsed" };
 }
 
 // ── writes ───────────────────────────────────────────────────────────────────
@@ -190,7 +206,7 @@ function logIdea(card, { backfilled = false } = {}) {
     idea,
     ideaHash: hashIdea(idea),
     reference: referenceFrom(card, { backfilled }),
-    horizon: horizonFrom(card.horizon),
+    horizon: horizonFor(card),
   });
   return getEntry(ev.entryId);
 }
@@ -223,6 +239,15 @@ function addManualPrice(entryId, price, note) {
   return getEntry(entryId);
 }
 
+/** recordOutcome — append the final tracked result once (later calls are no-ops). */
+function recordOutcome(entryId, result) {
+  const e = requireEntry(entryId);
+  if (e.outcome) return e;
+  const keep = ["status", "fillDate", "fillPrice", "exitDate", "exitPrice", "R", "returnPct", "spx", "note", "closeOnly", "plan"];
+  appendEvent({ type: "outcome", entryId, result: Object.fromEntries(keep.filter(k => result[k] !== undefined).map(k => [k, result[k]])) });
+  return getEntry(entryId);
+}
+
 // ── reads (fold events into entries) ─────────────────────────────────────────
 function foldAll() {
   const entries = new Map();
@@ -234,7 +259,7 @@ function foldAll() {
         idea: ev.idea, ideaHash: ev.ideaHash,
         integrity: hashIdea(ev.idea) === ev.ideaHash ? "intact" : "MODIFIED",
         reference: ev.reference, horizon: ev.horizon,
-        watched: false, pitches: [], manualPrices: [],
+        watched: false, pitches: [], manualPrices: [], outcome: null,
       });
       continue;
     }
@@ -243,6 +268,7 @@ function foldAll() {
     if (ev.type === "watch") e.watched = Boolean(ev.watched);
     else if (ev.type === "pitch") e.pitches.push({ text: ev.text, beforeReveal: ev.beforeReveal, at: ev.at });
     else if (ev.type === "manual_price") e.manualPrices.push({ price: ev.price, note: ev.note, at: ev.at });
+    else if (ev.type === "outcome" && !e.outcome) e.outcome = { ...ev.result, recordedAt: ev.at };
   }
   return entries;
 }
@@ -283,8 +309,8 @@ function backfill(cards = []) {
 function _reset() { _memory = []; }
 
 module.exports = {
-  logIdea, setWatch, addPitch, addManualPrice,
+  logIdea, setWatch, addPitch, addManualPrice, recordOutcome,
   getEntry, findEntryByIdea, list, backfill,
-  _internal: { referenceFrom, horizonFrom, hashIdea, readEvents, STALE_AFTER_DAYS },
+  _internal: { referenceFrom, horizonFrom, horizonFor, hashIdea, readEvents, STALE_AFTER_DAYS },
   _reset,
 };

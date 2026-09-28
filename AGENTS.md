@@ -177,7 +177,7 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   Level consistency + distance-from-price warnings; long text is clipped, not rejected.
 - No direction/universe restrictions (user choice). Saved to `data/idea_cards.json` (gitignored).
 
-## Trade Journal (`server/journal/`, `routes/journal.js`) — stage 1 of 3 (D-14, D-16)
+## Trade Journal (`server/journal/`, `routes/journal.js`) — stages 1–2 of 3 (D-14, D-16, D-18)
 - **Every generated idea is logged automatically** by `ideas/generator.js` before it is
   returned (a failed write adds a warning to the card — never silent). Ideas created before
   the Journal existed are backfilled at server start (`journal/migrate.js`), flagged
@@ -199,8 +199,28 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 - Client: JOURNAL tab (filters, ★ watch, reference badge, frozen idea, pitches, manual
   price). "My pitch first" mode seals each new idea card until the owner writes a pitch
   (saved `beforeReveal: true`) or skips — in the Journal too; mode + sealed ids live in localStorage.
-- **Stage 2** (tracking & scoring) must follow D-16's rule: close-based outcomes, and a day
-  whose range contains both target and stop is **uncertain**, never guessed.
+- **Stage 2 — tracking & scoring** (`journal/tracker.js`, D-18). Runs after every Markets
+  refresh — all refreshes go through `jobs/refreshMarkets.js` (never call `markets.refresh()`
+  directly) — and every Journal response resolves results via `tracker.trackingFor()`. It uses free daily history (Yahoo OHLC; FRED closes-only, labelled).
+  No AI. Rules: tracking starts the day AFTER generation; the newest bar of each series is
+  not scored while recent (< 4 days — it may still be trading; an older final bar is a
+  completed terminal bar and is scored); **entered only when price trades in
+  the entry zone** (fill = midpoint), at any time within the horizon, else `never_entered`;
+  closes at target / stop (gap → the open) / horizon expiry (that day's close); a day touching
+  both levels — or the fill day touching either — is `uncertain`, no R. 1R = |entry − stop|.
+  Undeclared horizon → **assumed 91 days**, labelled (a declared one of any length is honoured).
+  If the history cannot cover the idea's period (starts too late, a gap > 10 days — 45 for
+  closes-only series — or stops before the horizon ends) the result is `unavailable`, never
+  asserted. The Journal's `outcome` event wins over the derived file (a lost file is rebuilt
+  from it, not recomputed). Dynamic markets (Polymarket) keep their history source on the
+  card (`marketHistory`) so they can be priced after leaving the snapshot. Benchmark: S&P 500 index (^GSPC price, no
+  dividends) from the fill close (stored as `spxAtFill`, since history only reaches ~6 months)
+  to the exit close; if either close is unavailable the outcome waits (`benchmarkPending`). State is incremental in
+  `data/journal_tracking.json` (gitignored); a final result is also appended to the Journal as
+  one `outcome` event. `GET /api/journal` returns `tracking` per entry and `stats` (win rate
+  and R over closed ideas; uncertain, never-entered and fill rate reported separately).
+- **horizonDays**: the idea prompt now asks for the holding period as a number of days; the
+  Journal uses it (`horizon.source: "declared"`) and only parses the text for older cards.
 
 ## Cross-asset context layer — read this before touching research prompts
 
