@@ -137,7 +137,7 @@ const UNIT_DAYS = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 };
 // compactly ("2-year", "10y", "5yr"), holding periods in words ("1 month").
 // So a comma joins legs only after a compactly written duration.
 const TENOR_UNIT = String.raw`(?:years?|yrs?|y|months?|mos?|m|weeks?|wks?|w)\b`;
-const INSTRUMENT = String.raw`\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur(?:y|ies)|t-?(?:notes?|bills?|bonds?)|tsys?|gilts?|schatz|bobls?|buxls?|acgbs?|kgbs?|govvies|sovereigns?|munis?|ois|irs|cds|sonia|estr|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b`;
+const INSTRUMENT = String.raw`\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur(?:y|ies)|t-?(?:notes?|bills?|bonds?)|tsys?|gilts?|schatz|bobls?|buxls?|acgbs?|kgbs?|govvies|sovereigns?|munis?|ois|irs|cds|sonia|estr|€str|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b`;
 function tenorChain(separators) {
   const leg = String.raw`\s*(?:${separators})\s*\d+(?:\.\d+)?\s*-?\s*${TENOR_UNIT}`;
   return new RegExp(String.raw`^[a-z]*(?:${leg})*${INSTRUMENT}`);

@@ -118,6 +118,7 @@ describe("journal store", () => {
     ["2-year T-note, 1 month", "swing"], ["3-month T-bill, 2 weeks", "tactical"], ["5-year TIPS for 3 months", "swing"],
     ["10-year Bund vs 10-year gilt, 1 month", "swing"], ["2-year German Schatz, 1 month", "swing"],
     ["10-year JGB yields, 6 months", "strategic"], ["10-year OAT-Bund spread over 3 months", "swing"],
+    ["2-year €STR, 1 month", "swing"], ["2-year ESTR, 1 month", "swing"],
   ])("horizon %p → %s", (raw, category) => {
     expect(journal._internal.horizonFrom(raw).category).toBe(category);
   });
