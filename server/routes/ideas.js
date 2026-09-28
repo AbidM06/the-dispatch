@@ -17,6 +17,7 @@ const reportStore = require("../research/reportStore");
 const { generate } = require("../ideas/generator");
 const store      = require("../ideas/store");
 const requireWriteAuth = require("../middleware/auth");
+const journalMigrate = require("../journal/migrate");
 
 const router = Router();
 
@@ -68,6 +69,10 @@ router.post("/research", requireWriteAuth, async (req, res) => {
 });
 
 router.delete("/:id", requireWriteAuth, (req, res) => {
+  // Dismissing a card must never lose an idea: it is logged first (a no-op for
+  // ideas already in the Journal). If that write fails, the card stays.
+  try { journalMigrate.ensureLogged(req.params.id); }
+  catch (err) { return res.status(500).json({ error: "Could not log this idea to the Journal, so it was not dismissed: " + err.message }); }
   if (!store.remove(req.params.id)) return res.status(404).json({ error: "Idea not found" });
   res.json({ ok: true });
 });

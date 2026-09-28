@@ -6863,6 +6863,21 @@ function App() {
     const row = (e) => {
       const c = e.idea, open = jrOpen === e.entryId, r = e.reference || {};
       const draft = jrPriceDraft[e.entryId] || {};
+      // "My pitch first": an idea still sealed on the News/Research tab stays
+      // sealed here too — no instrument, direction, headline or levels until revealed.
+      if (sealedIdeas.includes(e.ideaId)) {
+        return React.createElement('div', { key: e.entryId, className: 'jr-row' + (open ? ' open' : '') },
+          React.createElement('div', { className: 'jr-head', role: 'button', tabIndex: 0,
+              onClick: () => setJrOpen(open ? null : e.entryId), onKeyDown: ev => { if (ev.key === 'Enter') setJrOpen(open ? null : e.entryId); } },
+            React.createElement('span', { className: 'jr-star', 'aria-hidden': true }, '🔒'),
+            React.createElement('div', { style: { minWidth: 0 } },
+              React.createElement('div', { className: 'idc-instr' }, 'Sealed idea',
+                React.createElement('span', { className: 'jr-badge' }, c.origin === 'research' ? 'Research' : 'News')),
+              React.createElement('div', { className: 'idc-headline' }, 'Hidden until you write your own pitch')),
+            React.createElement('div', { className: 'jr-ref' }),
+            React.createElement('div', { className: 'idc-sub', style: { whiteSpace: 'nowrap' } }, mkFmtWhen(c.createdAt))),
+          open && React.createElement('div', { className: 'jr-body' }, SealedIdeaCard({ ...c, journalEntryId: e.entryId })));
+      }
       return React.createElement('div', { key: e.entryId, className: 'jr-row' + (open ? ' open' : '') },
         React.createElement('div', { className: 'jr-head', role: 'button', tabIndex: 0,
             onClick: () => setJrOpen(open ? null : e.entryId), onKeyDown: ev => { if (ev.key === 'Enter') setJrOpen(open ? null : e.entryId); } },

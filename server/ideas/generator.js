@@ -63,7 +63,7 @@ function marketContext() {
     registry[ref] = {
       kind: "market", ref, label: `${it.label} ${q.value}${it.unit === "%" ? "%" : ""}`,
       url: q.sourceUrl, publisher: q.source, publishedAt: q.releasedAt || q.asOf, marketId: it.id, value: q.value,
-      freshness: it.stale ? "stale" : it.freshness?.label,
+      freshness: it.stale ? "stale" : it.freshness?.label, cadence: q.cadence || null,
     };
     const chg = q.changePct != null ? `${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%` :
                 q.change != null ? `${q.change >= 0 ? "+" : ""}${q.change}` : "n/a";
@@ -231,7 +231,7 @@ Today is ${new Date().toISOString()}. Return the JSON object only.`;
       : { reportId: input.report.reportId, reportType: input.report.reportType, reportVersion: input.report.version },
     ...idea,
     marketId: marketRef ? marketRef.marketId : null,
-    priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.publishedAt, url: marketRef.url, freshness: marketRef.freshness || null } : null,
+    priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.publishedAt, url: marketRef.url, freshness: marketRef.freshness || null, cadence: marketRef.cadence || null } : null,
     riskReward: riskReward(idea),
     basedOn,
     warnings,

@@ -76,6 +76,21 @@ describe("journal store", () => {
       expect(r.status).toBe("stale");
       expect(r.reason).toMatch(/days old/);
     });
+    test("monthly series — a normal between-release age is not stale", () => {
+      const monthly = { ...card().priceAtIdea, asOf: "2026-08-14T12:30:00.000Z", freshness: "Monthly data", cadence: "monthly" };
+      const r = referenceFrom(card({ priceAtIdea: monthly }));
+      expect(r).toMatchObject({ status: "ok", cadence: "monthly" });
+      const labelOnly = { ...monthly }; delete labelOnly.cadence;          // cards logged before cadence was recorded
+      expect(referenceFrom(card({ priceAtIdea: labelOnly })).status).toBe("ok");
+    });
+    test("monthly series — the upstream stale flag still counts", () => {
+      const p = { ...card().priceAtIdea, asOf: "2026-08-14T12:30:00.000Z", freshness: "stale", cadence: "monthly" };
+      expect(referenceFrom(card({ priceAtIdea: p })).status).toBe("stale");
+    });
+    test("daily series — the age cutoff still applies", () => {
+      const p = { ...card().priceAtIdea, asOf: "2026-09-18T20:00:00.000Z", freshness: "Daily close", cadence: "daily" };
+      expect(referenceFrom(card({ priceAtIdea: p })).status).toBe("stale");
+    });
     test("unknown — backfilled card with no recorded freshness", () => {
       const p = { ...card().priceAtIdea }; delete p.freshness;
       expect(referenceFrom(card({ priceAtIdea: p }), { backfilled: true }).status).toBe("unknown");
@@ -86,6 +101,9 @@ describe("journal store", () => {
     ["1-3 days", "tactical"], ["2 weeks", "tactical"], ["2-6 weeks", "swing"], ["2–4 weeks", "swing"],
     ["3 months", "swing"], ["6-12 months", "strategic"], ["1 year", "strategic"],
     ["until the Fed meets", "undeclared"], ["", "undeclared"], ["5 years", "undeclared"],
+    // mixed units: the longest duration named decides, not the first unit found
+    ["2 weeks to 3 months", "swing"], ["3 months to 1 year", "strategic"], ["1 week-6 months", "strategic"],
+    ["6 to 9 months", "strategic"], ["10-year yield, over 2 weeks", "tactical"],
   ])("horizon %p → %s", (raw, category) => {
     expect(journal._internal.horizonFrom(raw).category).toBe(category);
   });
@@ -201,6 +219,46 @@ describe("journal routes + every generated idea is logged", () => {
     const one = await request(app).get("/api/journal/" + gen.body.idea.journalEntryId);
     expect(one.status).toBe(200);
     expect(one.body.entry.integrity).toBe("intact");
+  });
+
+  test("dismissing a pre-Journal card logs it first, even if the Journal was never opened", async () => {
+    const app = setup();
+    const old = card({ id: "IDEA-prejournal" });
+    require("../server/ideas/store").add(old);          // a card from before the Journal existed
+    const journal = require("../server/journal/store");
+    expect(journal.findEntryByIdea(old.id)).toBeNull();
+    expect((await request(app).delete("/api/ideas/" + old.id)).status).toBe(200);
+    const e = journal.findEntryByIdea(old.id);
+    expect(e).toMatchObject({ backfilled: true, integrity: "intact" });
+    expect(e.idea.target).toBe(110);
+  });
+
+  test("startup backfill logs every stored card; a failed run retries", () => {
+    setup();
+    const ideaStore = require("../server/ideas/store");
+    const journal = require("../server/journal/store");
+    const migrate = require("../server/journal/migrate");
+    ideaStore.add(card({ id: "IDEA-a" })); ideaStore.add(card({ id: "IDEA-b" }));
+    const spy = jest.spyOn(journal, "backfill").mockImplementationOnce(() => { throw new Error("disk full"); });
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    migrate.ensureBackfilled();                          // fails…
+    expect(journal.findEntryByIdea("IDEA-a")).toBeNull();
+    migrate.ensureBackfilled();                          // …and is retried, not marked done
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(journal.findEntryByIdea("IDEA-a")).not.toBeNull();
+    expect(journal.findEntryByIdea("IDEA-b")).not.toBeNull();
+  });
+
+  test("the server runs the backfill at startup", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../server/index.js"), "utf8");
+    expect(src).toMatch(/journal\/migrate"\)\.ensureBackfilled\(\)/);
+  });
+
+  test("a sealed idea stays sealed in the Journal (client)", () => {
+    const html = require("fs").readFileSync(require("path").join(__dirname, "../client/index.html"), "utf8");
+    const journalView = html.slice(html.indexOf("const row = (e) =>"), html.indexOf("The idea, exactly as generated"));
+    expect(journalView).toMatch(/sealedIdeas\.includes\(e\.ideaId\)/);
+    expect(journalView).toMatch(/SealedIdeaCard\(/);
   });
 
   test("watch, pitch and manual price via HTTP", async () => {

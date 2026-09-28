@@ -33,7 +33,7 @@ Working and merged (PR #4, 2026-09-28):
   complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
   audit tracks where the code does not meet it yet.
 - Tests on `main` (14780c6): `npm test` → 304 passing (10 suites). Open PRs add more
-  (PR #5: 307; PR #6 Journal: 334).
+  (PR #5: 307; PR #6 Journal: 346).
 
 ## 2. In progress
 
@@ -41,7 +41,7 @@ Working and merged (PR #4, 2026-09-28):
 |---|---|---|---|
 | Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
 | Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
-| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | PR open — awaiting Codex cross-review |
+| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | PR #6 open — Codex's four review findings fixed; awaiting re-review |
 
 ## 3. Next up (agreed with the owner, not started)
 
@@ -145,7 +145,11 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Built stage 1 on `claude/journal-logging`: every generated idea is written to an
   append-only `data/journal.jsonl` with a fingerprint, reference-price status and horizon
   bucket; watch / pitch / manual price are separate events; no edit or delete routes;
-  JOURNAL tab; "my pitch first" seals new idea cards. 334 tests; checked in a browser.
+  JOURNAL tab; "my pitch first" seals new idea cards. Checked in a browser.
+- Fixed Codex's four review findings on PR #6: pre-Journal cards are backfilled at server
+  start and logged before any dismissal; monthly series are not marked stale by age (only
+  the Markets stale flag counts); horizons read every number–unit pair ("2 weeks to
+  3 months" → swing); sealed ideas stay sealed in the Journal. 346 tests.
 - Next (stage 2, propose first): outcome tracking on daily closes with D-16's
   close-based rule, R multiples and vs-S&P comparison.
 - Addressed Codex's two review findings on PR #5 (safe `--ff-only` update; honest

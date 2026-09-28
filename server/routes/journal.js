@@ -14,24 +14,13 @@
 
 const { Router } = require("express");
 const journal    = require("../journal/store");
-const ideaStore  = require("../ideas/store");
 const requireWriteAuth = require("../middleware/auth");
 
 const router = Router();
 
 // Ideas generated before the Journal existed are logged once, flagged
-// "backfilled", the first time the Journal is read.
-let backfilled = false;
-function ensureBackfilled() {
-  if (backfilled) return;
-  backfilled = true;
-  try {
-    const n = journal.backfill(ideaStore.list({ limit: 1000 }).slice().reverse());
-    if (n) console.log(`[journal] backfilled ${n} earlier idea(s)`);
-  } catch (err) {
-    console.warn("[journal] backfill failed:", err.message);
-  }
-}
+// "backfilled" — at server start, and here in case that failed.
+const { ensureBackfilled } = require("../journal/migrate");
 
 function send(res, fn) {
   try { res.json({ entry: fn() }); }
@@ -63,4 +52,3 @@ router.post("/:entryId/manual-price", requireWriteAuth, (req, res) =>
   send(res, () => journal.addManualPrice(req.params.entryId, req.body?.price, req.body?.note)));
 
 module.exports = router;
-module.exports._resetBackfill = () => { backfilled = false; };

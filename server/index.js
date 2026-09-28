@@ -183,6 +183,9 @@ if (require.main === module) {
 
     // ── Start background jobs ────────────────────────────────────────────────
     if (process.env.NODE_ENV !== "test") {
+      // Log any idea cards that predate the Journal before anything can dismiss them.
+      require("./journal/migrate").ensureBackfilled();
+
       const { start: startMarkets } = require("./jobs/marketsScheduler");
       startMarkets();
 

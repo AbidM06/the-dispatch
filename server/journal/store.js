@@ -72,12 +72,24 @@ function hashIdea(idea) {
   return crypto.createHash("sha256").update(stable(idea)).digest("hex");
 }
 
-const STALE_AFTER_DAYS = 5;   // a quote older than this at generation time is recorded as stale
+const STALE_AFTER_DAYS = 5;   // a daily / intraday quote older than this at generation time is recorded as stale
+
+/**
+ * A monthly series (CPI, payrolls…) is legitimately weeks old between
+ * releases, so the age cutoff would mark every current release stale. For
+ * those only the Markets service's own stale flag (every source failed) counts.
+ * Older cards carry just the freshness label, so the label is checked too.
+ */
+function isMonthly(p) {
+  return p.cadence === "monthly" || p.freshness === "Monthly data";
+}
 
 /**
  * referenceFrom — the price the idea is measured from, with an explicit status.
  *   ok       — a Markets value, not flagged stale, observed within STALE_AFTER_DAYS
- *   stale    — flagged stale by the Markets service, or older than STALE_AFTER_DAYS
+ *              (monthly series: not flagged stale — their age is normal)
+ *   stale    — flagged stale by the Markets service, or (daily/intraday only)
+ *              older than STALE_AFTER_DAYS
  *   missing  — the instrument is not in the Markets snapshot (nothing to measure from)
  *   unknown  — backfilled from a card logged before freshness was recorded
  */
@@ -94,29 +106,36 @@ function referenceFrom(card, { backfilled = false } = {}) {
     status = "unknown"; reason = "Logged retroactively; freshness was not recorded for this idea.";
   } else if (p.freshness === "stale") {
     status = "stale"; reason = "The Markets service flagged this price as stale (every live source failed).";
-  } else if (ageDays != null && ageDays > STALE_AFTER_DAYS) {
+  } else if (!isMonthly(p) && ageDays != null && ageDays > STALE_AFTER_DAYS) {
     status = "stale"; reason = `Price was ${ageDays.toFixed(1)} days old when the idea was generated.`;
   }
   return {
     status, reason,
     value: Number(p.value), source: p.source || null, asOf: p.asOf || null, url: p.url || null,
-    freshness: p.freshness || null, marketId: card.marketId || null, snapshotAt: card.marketsSnapshotAt || null,
+    freshness: p.freshness || null, cadence: p.cadence || (isMonthly(p) ? "monthly" : null), marketId: card.marketId || null, snapshotAt: card.marketsSnapshotAt || null,
   };
 }
 
 /**
  * horizonFrom — map the card's free-text horizon to the agreed buckets:
- * tactical ≤ 2 weeks, swing ≤ 3 months, strategic ≤ 12 months (by the upper
- * bound of a range). Anything unreadable is "undeclared" — never guessed.
+ * tactical ≤ 2 weeks, swing ≤ 3 months, strategic ≤ 12 months, by the LONGEST
+ * duration named. Every number–unit pair is read, so mixed units work
+ * ("2 weeks to 3 months" → 3 months); a bare number borrows the next unit
+ * ("2-6 weeks" → 6 weeks). Anything unreadable is "undeclared" — never guessed.
  */
+const UNIT_DAYS = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 };
 function horizonFrom(raw) {
   const text = String(raw || "").toLowerCase();
-  const m = text.match(/(\d+(?:\.\d+)?)\s*(?:[-–to]+\s*(\d+(?:\.\d+)?))?\s*(day|d\b|week|wk|w\b|month|mo|m\b|quarter|q\b|year|yr|y\b)/);
-  if (!m) return { raw: raw || null, category: "undeclared", maxDays: null };
-  const upper = parseFloat(m[2] || m[1]);
-  const unit  = m[3][0];
-  const perUnit = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 }[unit];
-  const maxDays = Math.round(upper * perUnit);
+  const re = /(\d+(?:\.\d+)?)\s*(?:(day|d\b|week|wk|w\b|month|mo|m\b|quarter|q\b|year|yr|y\b)|(?=\s*(?:-|–|to)\s*\d))/g;
+  let maxDays = null, pending = [], m;
+  while ((m = re.exec(text))) {
+    const n = parseFloat(m[1]);
+    if (!m[2]) { pending.push(n); continue; }          // "2" in "2-6 weeks": unit comes next
+    const per = UNIT_DAYS[m[2][0]];
+    for (const v of [...pending, n]) maxDays = Math.max(maxDays ?? 0, Math.round(v * per));
+    pending = [];
+  }
+  if (maxDays == null) return { raw: raw || null, category: "undeclared", maxDays: null };
   const category = maxDays <= 14 ? "tactical" : maxDays <= 93 ? "swing" : maxDays <= 366 ? "strategic" : "undeclared";
   return { raw: raw || null, category, maxDays };
 }
