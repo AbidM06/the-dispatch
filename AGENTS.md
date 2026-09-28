@@ -22,6 +22,10 @@ future agent. Keep it current; do not fork a model-specific copy.
 - **Cross-review.** A PR written by one model is reviewed by the other before the owner
   merges it. The reviewer leaves GitHub review comments; the author addresses each one or
   replies why not. The PR description and review thread are how the models communicate.
+  **The author requests the review itself** — the owner does not: after opening a PR, and
+  again after pushing fixes for review findings, post a PR comment `@codex review` (Claude's
+  PRs) so Codex reviews the current head. Codex, on its PRs, asks the owner to relay a
+  review request to Claude, or tags it in the PR description.
 - **Claim work.** Put the task, your agent name and branch under "In progress" in
   `docs/HANDOFF.md` so two models never edit the same thing at once.
 - **Before you stop — including when you are near a usage limit:** tests green, commit and
@@ -85,6 +89,7 @@ server/index.js            Express entry point — mounts all routes
 server/routes/
   markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id
   ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
+  journal.js               GET /api/journal | GET /api/journal/:id | POST …/:id/{watch,pitch,manual-price} — append-only
   portfolio.js             GET /api/portfolio — T212 holdings + P&L computation
   events.js                GET /api/events  |  POST /api/events/refresh
   risk.js                  GET /api/risk    |  POST /api/risk/refresh
@@ -113,7 +118,8 @@ server/providers/
   finnhub.js               News, earnings calendar, economic calendar, sentiment
   budget.js                USD caps over the spend ledger + auto API-fallback state machine
 server/markets/            instruments.js · sources.js · service.js — free Markets data + provenance
-server/ideas/              generator.js · store.js — on-demand idea cards
+server/ideas/              generator.js · store.js — on-demand idea cards (every one logged to the Journal)
+server/journal/            store.js · migrate.js — append-only trade Journal (stage 1)
 server/research/           five-agent pipeline — see "Institutional Research" below
 server/jobs/
   marketsScheduler.js      Markets refresh, weekdays 07:45 + 14:45 UK, one catch-up after sleep
@@ -170,6 +176,31 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   SRC-xxx) and must cite them; citations are resolved server-side so links are never invented.
   Level consistency + distance-from-price warnings; long text is clipped, not rejected.
 - No direction/universe restrictions (user choice). Saved to `data/idea_cards.json` (gitignored).
+
+## Trade Journal (`server/journal/`, `routes/journal.js`) — stage 1 of 3 (D-14, D-16)
+- **Every generated idea is logged automatically** by `ideas/generator.js` before it is
+  returned (a failed write adds a warning to the card — never silent). Ideas created before
+  the Journal existed are backfilled at server start (`journal/migrate.js`), flagged
+  `backfilled`; `DELETE /api/ideas/:id` logs the card first and refuses if it cannot.
+- **Append-only** `data/journal.jsonl` (gitignored; memory-only in tests unless
+  `JOURNAL_PATH`). Events: `idea_logged` (frozen copy + SHA-256 `ideaHash`; reads report
+  `integrity: "intact" | "MODIFIED"`), `watch`, `pitch` (`beforeReveal`), `manual_price`.
+  There are **no edit or delete routes**; dismissing an idea card does not touch the Journal.
+- **Reference price** = the Markets value on the card at generation, with source, time,
+  link and an explicit `status`: `ok` · `stale` (flagged by Markets, or > 5 days old for
+  daily/intraday quotes — monthly series are only stale when Markets flags them) ·
+  `missing` (instrument not in the snapshot) · `unknown` (backfilled, freshness not recorded).
+  A manual price is a separate event and never replaces it.
+- **Horizon** bucketed from the card's text by the longest duration named (every
+  number–unit pair is read, so "2 weeks to 3 months" is 3 months): tactical ≤14d, swing ≤93d,
+  strategic ≤366d, else `undeclared` (never guessed).
+- Routes: `GET /api/journal?watched=&origin=`, `GET /api/journal/:entryId`,
+  `POST /api/journal/:entryId/{watch,pitch,manual-price}` (auth). No AI, no cost.
+- Client: JOURNAL tab (filters, ★ watch, reference badge, frozen idea, pitches, manual
+  price). "My pitch first" mode seals each new idea card until the owner writes a pitch
+  (saved `beforeReveal: true`) or skips — in the Journal too; mode + sealed ids live in localStorage.
+- **Stage 2** (tracking & scoring) must follow D-16's rule: close-based outcomes, and a day
+  whose range contains both target and stop is **uncertain**, never guessed.
 
 ## Cross-asset context layer — read this before touching research prompts
 

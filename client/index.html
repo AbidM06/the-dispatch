@@ -1170,6 +1170,30 @@ tbody tr:hover td { background: var(--bg-alt); }
 .news-idea-btn:hover:not(:disabled) { border-color: var(--gold-border); color: var(--gold); }
 .news-idea-btn:disabled { opacity: .4; cursor: not-allowed; }
 @media (max-width: 760px) { .idc-levels { grid-template-columns: repeat(3, 1fr); } .idc-grid { grid-template-columns: 1fr; } }
+/* ── Journal (stage 1) ── */
+.idc-sealed { padding: 12px; }
+.idc-sealed textarea, .jr-form textarea { width: 100%; min-height: 90px; margin: 8px 0; padding: 8px 10px; font-family: var(--sans); font-size: 12px; color: var(--ink); background: var(--paper, var(--bg)); border: 1px solid var(--border); border-radius: var(--radius); box-sizing: border-box; resize: vertical; }
+.jr-form input { padding: 6px 8px; font-family: var(--mono); font-size: 11px; color: var(--ink); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; min-width: 0; }
+.jr-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.jr-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.jr-seg button { background: transparent; border: 0; border-right: 1px solid var(--border); padding: 5px 10px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; color: var(--ink-mid); cursor: pointer; }
+.jr-seg button:last-child { border-right: 0; }
+.jr-seg button.on { background: var(--gold-dim); color: var(--gold); }
+.jr-row { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; background: var(--bg); }
+.jr-row.open { border-color: var(--gold-border); }
+.jr-head { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 9px 12px; cursor: pointer; }
+.jr-star { background: transparent; border: 0; font-size: 15px; line-height: 1; color: var(--ink-low); cursor: pointer; padding: 0 2px; }
+.jr-star.on { color: var(--gold); }
+.jr-ref { font-family: var(--mono); font-size: 10.5px; color: var(--ink); text-align: right; white-space: nowrap; }
+.jr-badge { display: inline-block; font-family: var(--mono); font-size: 8.5px; letter-spacing: .08em; padding: 1px 6px; border-radius: 2px; border: 1px solid var(--border); color: var(--ink-mid); margin-left: 6px; text-transform: uppercase; }
+.jr-badge.ok { color: var(--pos); border-color: var(--pos); }
+.jr-badge.stale, .jr-badge.unknown { color: var(--gold); border-color: var(--gold-border); }
+.jr-badge.missing, .jr-badge.modified { color: var(--neg); border-color: var(--neg); }
+.jr-body { padding: 6px 12px 12px; border-top: 1px solid var(--rule); font-size: 12px; line-height: 1.6; color: var(--ink); }
+.jr-body a { color: var(--ink); border-bottom: 1px dotted var(--border-med); text-decoration: none; }
+.jr-pitch { border-left: 2px solid var(--gold-border); padding: 4px 10px; margin: 6px 0; font-family: var(--sans); white-space: pre-wrap; }
+.jr-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+@media (max-width: 760px) { .jr-head { grid-template-columns: auto minmax(0,1fr) auto; } .jr-head .jr-ref { grid-column: 2 / -1; text-align: left; } }
 </style>
 </head>
 <body>
@@ -1541,6 +1565,20 @@ function App() {
   const [ideaBusy, setIdeaBusy]       = useState(null);   // { origin, headlineId? } while generating
   const [ideaOpen, setIdeaOpen]       = useState(null);   // id of expanded card
   const [ideaShowAll, setIdeaShowAll] = useState({});
+  // Journal (stage 1). Pitch mode and sealed ideas persist per browser.
+  const readJson = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch { return d; } };
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [journalLoading, setJournalLoading] = useState(false);
+  const [journalFilter, setJournalFilter]   = useState({ watched: 'all', origin: 'all' });
+  const [jrOpen, setJrOpen]                 = useState(null);
+  const [pitchMode, setPitchModeRaw]        = useState(() => readJson('dispatch-pitch-mode', 'ai'));   // 'ai' | 'mine'
+  const [sealedIdeas, setSealedIdeasRaw]    = useState(() => readJson('dispatch-sealed-ideas', []));  // idea ids awaiting my pitch
+  const [pitchDraft, setPitchDraft]         = useState({});
+  const [jrPriceDraft, setJrPriceDraft]     = useState({});
+  function setPitchMode(v) { setPitchModeRaw(v); try { localStorage.setItem('dispatch-pitch-mode', JSON.stringify(v)); } catch {} }
+  function setSealedIdeas(fn) {
+    setSealedIdeasRaw(prev => { const next = fn(prev); try { localStorage.setItem('dispatch-sealed-ideas', JSON.stringify(next)); } catch {} return next; });
+  }
 
   // ── Glossary tab state ───────────────────────────────────────────────────
   const [glossary, setGlossary]             = useState(null);
@@ -1663,6 +1701,9 @@ function App() {
     setQaDetail(null); setSrcDetail(null);
     setInterroMessages([]); setInterroConvId(null); setInterroInput('');
   }, [research && research.reportId]);
+
+  // ── Journal loads when its tab is opened (no AI, no cost) ─────────────────
+  useEffect(() => { if (tab === 'journal') loadJournal(); }, [tab]);
 
   // ── Fetch data on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -1849,13 +1890,75 @@ function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
       });
       setIdeaCards(list => [resp.idea].concat(list));
-      setIdeaOpen(resp.idea.id);
-      showToast('Idea ready: ' + resp.idea.direction + ' ' + resp.idea.instrument, 'success');
+      if (pitchMode === 'mine') {
+        // Pitch drill: keep the AI's idea hidden until the owner has written theirs.
+        setSealedIdeas(ids => ids.concat(resp.idea.id));
+        setIdeaOpen(null);
+        showToast('Idea ready — write your own pitch first, then reveal the AI\'s', 'success');
+      } else {
+        setIdeaOpen(resp.idea.id);
+        showToast('Idea ready: ' + resp.idea.direction + ' ' + resp.idea.instrument, 'success');
+      }
       loadBudgetStatus();
     } catch (err) {
       showToast('Idea failed: ' + err.message, 'error');
     }
     setIdeaBusy(null);
+  }
+
+  // ── JOURNAL ────────────────────────────────────────────────────────────────
+  async function loadJournal() {
+    setJournalLoading(true);
+    try {
+      const resp = await apiFetch('/api/journal?limit=500');
+      setJournalEntries(resp.entries || []);
+    } catch (err) { showToast('Journal error: ' + err.message, 'error'); }
+    setJournalLoading(false);
+  }
+
+  function replaceEntry(entry) {
+    setJournalEntries(list => list.some(e => e.entryId === entry.entryId)
+      ? list.map(e => e.entryId === entry.entryId ? entry : e) : [entry].concat(list));
+  }
+
+  async function journalPost(entryId, action, body) {
+    const resp = await apiFetch('/api/journal/' + encodeURIComponent(entryId) + '/' + action, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    });
+    replaceEntry(resp.entry);
+    return resp.entry;
+  }
+
+  async function toggleWatch(entry) {
+    try { await journalPost(entry.entryId, 'watch', { watched: !entry.watched }); }
+    catch (err) { showToast('Could not update: ' + err.message, 'error'); }
+  }
+
+  function revealIdea(ideaId) {
+    setSealedIdeas(ids => ids.filter(x => x !== ideaId));
+    setIdeaOpen(ideaId);
+  }
+
+  // Save my pitch for an idea. beforeReveal=true when written while the AI's idea was sealed.
+  async function savePitch(card, beforeReveal) {
+    const key = card.journalEntryId || card.id;
+    const text = (pitchDraft[key] || '').trim();
+    if (!text) { showToast('Write your pitch first', 'error'); return; }
+    if (!card.journalEntryId) { showToast('This idea is not in the Journal, so the pitch cannot be saved', 'error'); return; }
+    try {
+      await journalPost(card.journalEntryId, 'pitch', { text, beforeReveal });
+      setPitchDraft(d => ({ ...d, [key]: '' }));
+      if (beforeReveal) revealIdea(card.id);
+      showToast('Pitch saved to the Journal', 'success');
+    } catch (err) { showToast('Could not save pitch: ' + err.message, 'error'); }
+  }
+
+  async function saveManualPrice(entry) {
+    const d = jrPriceDraft[entry.entryId] || {};
+    try {
+      await journalPost(entry.entryId, 'manual-price', { price: d.price, note: d.note });
+      setJrPriceDraft(x => ({ ...x, [entry.entryId]: {} }));
+    } catch (err) { showToast('Could not save price: ' + err.message, 'error'); }
   }
 
   async function dismissIdea(id) {
@@ -5721,8 +5824,29 @@ function App() {
   // ── TRADE IDEA CARDS (News + Research) ─────────────────────────────────────
   // On-demand only: each "Generate idea" is one Claude call (≈$0.02–0.05,
   // counted against the daily AI cap). View-only — nothing is executed.
+  // "My pitch first": the AI's idea stays hidden until the owner writes a pitch
+  // (saved to the Journal as written BEFORE the reveal) or chooses to skip.
+  function SealedIdeaCard(c) {
+    const key = c.journalEntryId || c.id;
+    const basis = c.origin === 'news'
+      ? (c.context && c.context.focusHeadline ? 'Headline: ' + c.context.focusHeadline : 'Today\'s headlines')
+      : 'Research report: ' + ((c.context && c.context.reportType) || '') + (c.context && c.context.reportVersion ? ' v' + c.context.reportVersion : '');
+    return React.createElement('div', { key: c.id, className: 'idc open' },
+      React.createElement('div', { className: 'idc-sealed' },
+        React.createElement('div', { className: 'idc-panel-title' }, 'YOUR PITCH FIRST'),
+        React.createElement('div', { className: 'idc-sub' }, 'The AI has written an idea from — ' + basis + '. It stays hidden until you pitch your own trade: what you would do, why now, entry, target, stop, and what would prove you wrong.'),
+        React.createElement('textarea', { value: pitchDraft[key] || '', placeholder: 'My 60-second pitch…',
+          onChange: e => { const v = e.target.value; setPitchDraft(d => ({ ...d, [key]: v })); } }),
+        React.createElement('div', { style: { display: 'flex', gap: 8 } },
+          React.createElement('button', { className: 'btn btn-primary', onClick: () => savePitch(c, true) }, 'Save my pitch & reveal'),
+          React.createElement('button', { className: 'btn', onClick: () => revealIdea(c.id) }, 'Skip & reveal'))
+      )
+    );
+  }
+
   function IdeaCard(c, opts) {
     opts = opts || {};
+    if (!opts.readOnly && sealedIdeas.includes(c.id)) return SealedIdeaCard(c);
     const open = opts.open;
     const f = (v) => {
       if (v == null || !isFinite(v)) return '—';
@@ -5767,7 +5891,7 @@ function App() {
           'Last price when generated: ' + f(c.priceAtIdea.value) + ' (' + c.priceAtIdea.source + ', ' + mkFmtFull(c.priceAtIdea.asOf) + ')'),
         React.createElement('div', { className: 'idc-foot' },
           React.createElement('span', null, 'Generated ' + mkFmtFull(c.createdAt) + ' · ' + c.model + ' · markets snapshot ' + mkFmtWhen(c.marketsSnapshotAt) + ' · for information only, not advice'),
-          React.createElement('button', { className: 'btn', onClick: () => dismissIdea(c.id) }, 'Dismiss'))
+          !opts.readOnly && React.createElement('button', { className: 'btn', title: 'Hides the card here. The Journal keeps its record.', onClick: () => dismissIdea(c.id) }, 'Dismiss'))
       )
     );
   }
@@ -6718,6 +6842,115 @@ function App() {
     );
   }
 
+  // ── JOURNAL TAB (stage 1) ─────────────────────────────────────────────────
+  // Every generated idea, exactly as written, newest first. Nothing here can
+  // edit or delete an entry: watch, pitches and manual prices are added
+  // alongside the original. Outcome tracking and scoring arrive in stage 2.
+  function renderJournal() {
+    const f = (v) => {
+      if (v == null || !isFinite(v)) return '—';
+      const a = Math.abs(v);
+      return Number(v).toLocaleString('en-GB', { maximumFractionDigits: a >= 1000 ? 0 : a >= 100 ? 2 : a >= 1 ? 3 : 4 });
+    };
+    const refLabel = { ok: 'price ok', stale: 'stale price', missing: 'no price', unknown: 'freshness unknown' };
+    const hzLabel  = { tactical: 'Tactical ≤2w', swing: 'Swing 1–3m', strategic: 'Strategic 3–12m', undeclared: 'Horizon undeclared' };
+    const list = journalEntries
+      .filter(e => journalFilter.watched === 'all' || (journalFilter.watched === 'watched' ? e.watched : !e.watched))
+      .filter(e => journalFilter.origin === 'all' || e.idea.origin === journalFilter.origin);
+    const seg = (key, options) => React.createElement('div', { className: 'jr-seg' },
+      options.map(([v, label]) => React.createElement('button', { key: v, className: journalFilter[key] === v ? 'on' : '',
+        onClick: () => setJournalFilter(x => ({ ...x, [key]: v })) }, label)));
+
+    const row = (e) => {
+      const c = e.idea, open = jrOpen === e.entryId, r = e.reference || {};
+      const draft = jrPriceDraft[e.entryId] || {};
+      // "My pitch first": an idea still sealed on the News/Research tab stays
+      // sealed here too — no instrument, direction, headline or levels until revealed.
+      if (sealedIdeas.includes(e.ideaId)) {
+        return React.createElement('div', { key: e.entryId, className: 'jr-row' + (open ? ' open' : '') },
+          React.createElement('div', { className: 'jr-head', role: 'button', tabIndex: 0,
+              onClick: () => setJrOpen(open ? null : e.entryId), onKeyDown: ev => { if (ev.key === 'Enter') setJrOpen(open ? null : e.entryId); } },
+            React.createElement('span', { className: 'jr-star', 'aria-hidden': true }, '🔒'),
+            React.createElement('div', { style: { minWidth: 0 } },
+              React.createElement('div', { className: 'idc-instr' }, 'Sealed idea',
+                React.createElement('span', { className: 'jr-badge' }, c.origin === 'research' ? 'Research' : 'News')),
+              React.createElement('div', { className: 'idc-headline' }, 'Hidden until you write your own pitch')),
+            React.createElement('div', { className: 'jr-ref' }),
+            React.createElement('div', { className: 'idc-sub', style: { whiteSpace: 'nowrap' } }, mkFmtWhen(c.createdAt))),
+          open && React.createElement('div', { className: 'jr-body' }, SealedIdeaCard({ ...c, journalEntryId: e.entryId })));
+      }
+      return React.createElement('div', { key: e.entryId, className: 'jr-row' + (open ? ' open' : '') },
+        React.createElement('div', { className: 'jr-head', role: 'button', tabIndex: 0,
+            onClick: () => setJrOpen(open ? null : e.entryId), onKeyDown: ev => { if (ev.key === 'Enter') setJrOpen(open ? null : e.entryId); } },
+          React.createElement('button', { className: 'jr-star' + (e.watched ? ' on' : ''), title: e.watched ? 'Stop watching' : 'Watch closely',
+            'aria-label': e.watched ? 'Stop watching' : 'Watch closely', onClick: ev => { ev.stopPropagation(); toggleWatch(e); } }, e.watched ? '★' : '☆'),
+          React.createElement('div', { style: { minWidth: 0 } },
+            React.createElement('div', { className: 'idc-instr' },
+              React.createElement('span', { className: 'idc-dir ' + (c.direction === 'LONG' ? 'idc-long' : 'idc-short'), style: { marginRight: 8 } }, c.direction),
+              c.instrument,
+              React.createElement('span', { className: 'jr-badge' }, hzLabel[(e.horizon || {}).category] || 'Horizon undeclared'),
+              e.backfilled && React.createElement('span', { className: 'jr-badge', title: 'Logged after the fact from an idea generated before the Journal existed' }, 'backfilled'),
+              e.integrity !== 'intact' && React.createElement('span', { className: 'jr-badge modified', title: 'The stored idea no longer matches its fingerprint' }, 'modified')),
+            React.createElement('div', { className: 'idc-headline' }, c.headline)),
+          React.createElement('div', { className: 'jr-ref' },
+            r.value != null ? f(r.value) : '—',
+            React.createElement('span', { className: 'jr-badge ' + (r.status || 'missing'), title: r.reason || '' }, refLabel[r.status] || r.status)),
+          React.createElement('div', { className: 'idc-sub', style: { whiteSpace: 'nowrap' } }, mkFmtWhen(c.createdAt))),
+        open && React.createElement('div', { className: 'jr-body' },
+          React.createElement('div', { className: 'idc-lbl' }, 'Reference price (recorded when the idea was generated)'),
+          r.value != null
+            ? React.createElement('div', null, f(r.value) + ' · ',
+                r.url ? React.createElement('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, (r.source || 'source') + ' ↗') : (r.source || 'unknown source'),
+                ' · observed ' + (r.asOf ? mkFmtFull(r.asOf) : 'unknown'),
+                r.reason ? React.createElement('div', { className: 'idc-sub' }, r.reason) : null)
+            : React.createElement('div', { className: 'idc-sub' }, r.reason || 'No reference price.'),
+          React.createElement('div', { className: 'idc-lbl' }, 'The idea, exactly as generated'),
+          IdeaCard(c, { open: true, readOnly: true }),
+          React.createElement('div', { className: 'idc-lbl' }, 'My pitches'),
+          e.pitches.length === 0 && React.createElement('div', { className: 'idc-sub' }, 'None yet.'),
+          e.pitches.map((p, i) => React.createElement('div', { key: i, className: 'jr-pitch' },
+            p.text, React.createElement('div', { className: 'idc-sub' }, (p.beforeReveal ? 'Written before seeing the AI\'s idea' : 'Written after seeing the AI\'s idea') + ' · ' + mkFmtFull(p.at)))),
+          React.createElement('div', { className: 'jr-form', style: { display: 'block' } },
+            React.createElement('textarea', { value: pitchDraft[e.entryId] || '', placeholder: 'Add a pitch or note (kept separately; the original never changes)…',
+              onChange: ev => { const v = ev.target.value; setPitchDraft(d => ({ ...d, [e.entryId]: v })); } }),
+            React.createElement('button', { className: 'btn', onClick: () => savePitch({ ...c, journalEntryId: e.entryId }, false) }, 'Save pitch')),
+          React.createElement('div', { className: 'idc-lbl' }, 'My own entry price (hypothetical — stored separately)'),
+          e.manualPrices.map((m, i) => React.createElement('div', { key: i, className: 'idc-sub' }, f(m.price) + (m.note ? ' — ' + m.note : '') + ' · ' + mkFmtFull(m.at))),
+          React.createElement('div', { className: 'jr-form' },
+            React.createElement('input', { type: 'number', step: 'any', placeholder: 'Price', value: draft.price || '', style: { width: 110 },
+              onChange: ev => { const v = ev.target.value; setJrPriceDraft(x => ({ ...x, [e.entryId]: { ...draft, price: v } })); } }),
+            React.createElement('input', { type: 'text', placeholder: 'Note (optional)', value: draft.note || '', style: { flex: 1, minWidth: 140 },
+              onChange: ev => { const v = ev.target.value; setJrPriceDraft(x => ({ ...x, [e.entryId]: { ...draft, note: v } })); } }),
+            React.createElement('button', { className: 'btn', onClick: () => saveManualPrice(e) }, 'Record')),
+          React.createElement('div', { className: 'idc-sub', style: { marginTop: 10 } },
+            'Entry ' + e.entryId + ' · logged ' + mkFmtFull(e.loggedAt) + ' · fingerprint ' + (e.integrity === 'intact' ? 'intact' : 'DOES NOT MATCH'))));
+    };
+
+    return React.createElement('div', null,
+      React.createElement('div', { className: 'card', style: { marginBottom: 16 } },
+        React.createElement('div', { className: 'idc-panel-title' }, 'TRADE JOURNAL'),
+        React.createElement('div', { className: 'idc-sub', style: { marginBottom: 10 } },
+          'Every idea generated on the News and Research tabs is recorded here automatically, exactly as written, with the price it was measured from. ' +
+          'Entries cannot be edited or deleted. Outcome tracking and scoring come in the next stage.'),
+        React.createElement('div', { className: 'jr-bar' },
+          React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            React.createElement('span', { className: 'idc-sub' }, 'New ideas:'),
+            React.createElement('div', { className: 'jr-seg' },
+              React.createElement('button', { className: pitchMode === 'mine' ? 'on' : '', onClick: () => setPitchMode('mine'),
+                title: 'Hide each new AI idea until you have written your own pitch' }, 'MY PITCH FIRST'),
+              React.createElement('button', { className: pitchMode === 'ai' ? 'on' : '', onClick: () => setPitchMode('ai') }, 'AI ONLY'))),
+          React.createElement('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+            seg('watched', [['all', 'ALL'], ['watched', '★ WATCHED']]),
+            seg('origin', [['all', 'ALL SOURCES'], ['news', 'NEWS'], ['research', 'RESEARCH']]),
+            React.createElement('button', { className: 'btn', onClick: loadJournal, disabled: journalLoading }, journalLoading ? 'LOADING…' : 'RELOAD')))),
+      !journalLoading && list.length === 0 && React.createElement('div', { className: 'engine-empty' },
+        journalEntries.length === 0
+          ? 'No ideas yet. Generate one from the News or Research tab and it will appear here.'
+          : 'No entries match these filters.'),
+      list.map(row)
+    );
+  }
+
   // ── TAB RENDER ─────────────────────────────────────────────────────────────
   function renderTab() {
     switch(tab) {
@@ -6728,6 +6961,7 @@ function App() {
       case 'signals':   return renderSignals();
       case 'research':  return renderResearch();
       case 'news':      return renderNews();
+      case 'journal':   return renderJournal();
       case 'glossary':  return renderGlossary();
       case 'interview': return renderInterview();
       default:          return renderMarket();
@@ -6744,6 +6978,7 @@ function App() {
     { id:'sales',     label:'SALES',     svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 12.5L5 8L8 10.5L11 6L14.5 8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
     { id:'news',      label:'NEWS',      svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 4.5H14M2 8H10.5M2 11.5H8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' },
     { id:'research',  label:'RESEARCH',  svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="1.5" width="11" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 5.5H10.5M5.5 8H10.5M5.5 10.5H8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' },
+    { id:'journal',   label:'JOURNAL',   svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 2.5H11.5C12.05 2.5 12.5 2.95 12.5 3.5V13.5H4.5C3.95 13.5 3.5 13.05 3.5 12.5V2.5Z" stroke="currentColor" stroke-width="1.3"/><path d="M6 5.5H10M6 8H10M6 10.5H8.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' },
     { id:'glossary',  label:'GLOSSARY',  svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M6.5 6.5C6.5 5.67 7.17 5 8 5C8.83 5 9.5 5.67 9.5 6.5C9.5 7.33 8 8.25 8 9.25" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.2" r="0.65" fill="currentColor"/></svg>' },
     null,
     { id:'interview', label:'INTERVIEW', svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="5.5" r="2.5" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 14C2.5 11.24 5 9 8 9C11 9 13.5 11.24 13.5 14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>' },
@@ -6751,7 +6986,7 @@ function App() {
 
   const TAB_LABELS = {
     market:'MARKETS', risk:'RISK', signals:'ANALYTICS', desk:'DESK', sales:'SALES',
-    news:'NEWS', research:'RESEARCH', glossary:'GLOSSARY', interview:'INTERVIEW'
+    news:'NEWS', research:'RESEARCH', journal:'JOURNAL', glossary:'GLOSSARY', interview:'INTERVIEW'
   };
 
   const mkAgeH  = markets ? (Date.now() - Date.parse(markets.generatedAt)) / 36e5 : null;
