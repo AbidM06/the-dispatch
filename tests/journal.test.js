@@ -104,6 +104,10 @@ describe("journal store", () => {
     // mixed units: the longest duration named decides, not the first unit found
     ["2 weeks to 3 months", "swing"], ["3 months to 1 year", "strategic"], ["1 week-6 months", "strategic"],
     ["6 to 9 months", "strategic"], ["10-year yield, over 2 weeks", "tactical"],
+    // hyphenated durations (Codex review) — but a bond tenor is never a horizon
+    ["6-month", "strategic"], ["1-year", "strategic"], ["2-week", "tactical"], ["3-month view", "swing"],
+    ["2-3-month", "swing"], ["10-year yield", "undeclared"], ["2y swap over 1 month", "swing"],
+    ["6-month hold on the 2-year note", "strategic"], ["1 month, 10-year real yields", "swing"],
   ])("horizon %p → %s", (raw, category) => {
     expect(journal._internal.horizonFrom(raw).category).toBe(category);
   });

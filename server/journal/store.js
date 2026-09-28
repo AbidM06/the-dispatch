@@ -121,16 +121,24 @@ function referenceFrom(card, { backfilled = false } = {}) {
  * tactical ≤ 2 weeks, swing ≤ 3 months, strategic ≤ 12 months, by the LONGEST
  * duration named. Every number–unit pair is read, so mixed units work
  * ("2 weeks to 3 months" → 3 months); a bare number borrows the next unit
- * ("2-6 weeks" → 6 weeks). Anything unreadable is "undeclared" — never guessed.
+ * ("2-6 weeks" → 6 weeks); hyphenated forms count ("6-month"), but an
+ * instrument tenor does not ("10-year yield"). Anything unreadable is
+ * "undeclared" — never guessed.
  */
 const UNIT_DAYS = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 };
+// A duration followed by one of these names an instrument's tenor ("10-year
+// yield", "2y swap"), not how long the trade runs, so it is not a horizon.
+const TENOR_NOUN = /^[a-z]*\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur|gilts?|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b/;
 function horizonFrom(raw) {
   const text = String(raw || "").toLowerCase();
-  const re = /(\d+(?:\.\d+)?)\s*(?:(day|d\b|week|wk|w\b|month|mo|m\b|quarter|q\b|year|yr|y\b)|(?=\s*(?:-|–|to)\s*\d))/g;
+  // Number, then an optional space or hyphen ("6 months", "6-month"), then a unit;
+  // or a bare number that is the start of a range ("2" in "2-6 weeks").
+  const re = /(\d+(?:\.\d+)?)(?:\s*-?\s*(day|d\b|week|wk|w\b|month|mo|m\b|quarter|q\b|year|yr|y\b)|(?=\s*(?:-|–|to)\s*\d))/g;
   let maxDays = null, pending = [], m;
   while ((m = re.exec(text))) {
     const n = parseFloat(m[1]);
     if (!m[2]) { pending.push(n); continue; }          // "2" in "2-6 weeks": unit comes next
+    if (TENOR_NOUN.test(text.slice(m.index + m[0].length))) { pending = []; continue; }
     const per = UNIT_DAYS[m[2][0]];
     for (const v of [...pending, n]) maxDays = Math.max(maxDays ?? 0, Math.round(v * per));
     pending = [];
