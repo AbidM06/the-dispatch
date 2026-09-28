@@ -15,87 +15,6 @@ const Envelope = z.object({
   stale:     z.boolean(),
 });
 
-// ── Rate observation ──────────────────────────────────────────────────────────
-const RateObs = z.object({
-  value:    z.number(),
-  seriesId: z.string(),
-  date:     z.string(),
-  source:   z.string(),
-});
-
-// ── Watchlist item ────────────────────────────────────────────────────────────
-const WatchlistItem = z.object({
-  sym:    z.string(),
-  price:  z.number(),
-  chg:    z.number(),
-  note:   z.string(),
-  source: z.string(),
-  date:   z.string(),
-});
-
-// ── International watchlist item ──────────────────────────────────────────────
-const IntlItem = z.object({
-  sym:    z.string(),
-  name:   z.string(),
-  price:  z.string(),
-  chg:    z.string(),
-  note:   z.string(),
-  source: z.string(),
-  date:   z.string(),
-});
-
-// ── FX rate ───────────────────────────────────────────────────────────────────
-const FxRate = z.object({
-  value:  z.number(),
-  pair:   z.string(),
-  date:   z.string(),
-  source: z.string(),
-});
-
-// ── Chart history points ──────────────────────────────────────────────────────
-// real/bei are nullable: DFII10 and T10YIE sometimes lag DGS10 by a day.
-// snapshot.js now filters to only fully-populated rows, but nullable here
-// ensures a schema warning never blocks the response if one slips through.
-const RatesHistoryPoint = z.object({
-  m:    z.string(),
-  y10:  z.number(),
-  real: z.number().nullable(),
-  bei:  z.number().nullable(),
-});
-
-const HyHistoryPoint = z.object({
-  m:   z.string(),
-  oas: z.number(),
-});
-
-const RsiHistoryPoint = z.object({
-  d:   z.string(),
-  rsi: z.number(),
-});
-
-// ── /api/snapshot ─────────────────────────────────────────────────────────────
-const SnapshotPayload = z.object({
-  rates: z.object({
-    dgs10:     RateObs.nullable(),
-    dfii10:    RateObs.nullable(),
-    t10yie:    RateObs.nullable(),
-    hy_spread: RateObs.nullable(),
-    t10y2y:    RateObs.nullable(),
-  }),
-  fx: z.object({
-    usdgbp: FxRate,
-  }),
-  watchlist:    z.array(WatchlistItem),
-  intl:         z.array(IntlItem),
-  ratesHistory: z.array(RatesHistoryPoint),
-  hyHistory:    z.array(HyHistoryPoint),
-  rsiHistory:   z.array(RsiHistoryPoint),
-});
-
-const SnapshotResponse = Envelope.extend({
-  data: SnapshotPayload,
-});
-
 // ── /api/portfolio ────────────────────────────────────────────────────────────
 const PositionRow = z.object({
   ticker:   z.string(),
@@ -270,7 +189,6 @@ function validate(schema, payload) {
 
 module.exports = {
   schemas: {
-    SnapshotResponse,
     PortfolioResponse,
     RiskResponse,
     EventsResponse,

@@ -5,7 +5,7 @@
  *
  * Architecture:
  *   PORT 3001               ← Express
- *   /api/snapshot           ← FRED + Alpha Vantage (cached)
+ *   /api/markets            ← free multi-source market prices (daily 14:45 UK + manual refresh)
  *   /api/risk               ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/events             ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/explain/:ticker    ← Anthropic AI (cached per ticker)
@@ -26,7 +26,7 @@ const cors     = require("cors");
 const path     = require("path");
 
 // ── Route handlers ────────────────────────────────────────────────────────────
-const snapshotRouter  = require("./routes/snapshot");
+const marketsRouter   = require("./routes/markets");
 const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
@@ -58,7 +58,7 @@ app.use((req, _res, next) => {
 });
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use("/api/snapshot",  snapshotRouter);
+app.use("/api/markets",   marketsRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
@@ -132,7 +132,9 @@ if (require.main === module) {
     }
     console.log(`\nAPI endpoints:`);
     console.log(`  GET  /api/health`);
-    console.log(`  GET  /api/snapshot`);
+    console.log(`  GET  /api/markets`);
+    console.log(`  POST /api/markets/refresh`);
+    console.log(`  GET  /api/markets/history/:id?tf=1d|1h`);
     console.log(`  GET  /api/risk`);
     console.log(`  POST /api/risk/refresh`);
     console.log(`  GET  /api/events`);
@@ -167,6 +169,8 @@ if (require.main === module) {
 
     // ── Start background jobs ────────────────────────────────────────────────
     if (process.env.NODE_ENV !== "test") {
+      const { start: startMarkets } = require("./jobs/marketsScheduler");
+      startMarkets();
       const { start: startAiRefresh } = require("./jobs/aiRefreshJob");
       startAiRefresh();
       const { start: startBulletin } = require("./jobs/bulletinScheduler");

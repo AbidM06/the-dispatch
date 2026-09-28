@@ -35,3 +35,8 @@ design-preview.html
 # ── Reports (generated, not source) ───────────────────────────────────────────
 reports/
 .venv/
+
+# Markets panel snapshot (regenerated daily)
+data/markets_snapshot.json
+data/markets_snapshot.json.tmp
+data/idea_cards.json
