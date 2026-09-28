@@ -12,6 +12,7 @@
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js" integrity="sha384-/AfDwVDXNopzPvhxMPQ11y1OCpR6mVkWx47qzSwIiquvxkcMkZddEzDNtIOtfCpk"></script>
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" integrity="sha384-su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh"></script>
 <script crossorigin src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js" integrity="sha384-TRYH/YWi2ytN9lydJdE9y40mI/nRmd0K1lNM3l2YGvSp0zlJb/NfWROALrugcMy5"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js" integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK"></script>
 
 <style>
 /* ── THE DISPATCH — Swiss Editorial ─────────────────────────────────────────
@@ -936,6 +937,72 @@ tbody tr:hover td { background: var(--bg-alt); }
 @media (max-width: 860px)  { .iv-stage { flex-direction: column; } .iv-side-col { width: 100%; flex-direction: row; flex-wrap: wrap; } .iv-timer-box, .iv-dos-panel, .iv-ref-card { flex: 1; min-width: 220px; } }
 @media (max-width: 760px)  { .page-content { padding: 16px 14px; } .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } .card { padding: 14px; } table { display: block; overflow-x: auto; } }
 @media (max-width: 600px)  { .iv-stats { grid-template-columns: 1fr 1fr; } .iv-card-q { font-size: 15px; } .iv-card-face { padding: 20px; } .iv-cats { gap: 4px; } }
+/* ── MARKETS PANEL ─────────────────────────────────────────────────────── */
+.mk-panel { padding-bottom: 24px; }
+.mk-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.mk-status-main { font-size: 11px; color: var(--ink); }
+.mk-status-main strong { font-weight: 600; }
+.mk-status-sub { font-size: 9.5px; color: var(--ink-low); margin-top: 3px; letter-spacing: .02em; }
+.mk-ok { color: var(--pos); } .mk-warn { color: var(--neg); }
+.mk-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mk-seg { display: inline-flex; border: 1px solid var(--border-med); border-radius: var(--radius-sm); overflow: hidden; }
+.mk-seg-btn { background: transparent; border: 0; border-right: 1px solid var(--border-med); color: var(--ink-mid); padding: 5px 11px; font-family: var(--font); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.mk-seg-btn:last-child { border-right: 0; }
+.mk-seg-btn.on { background: var(--gold-dim); color: var(--ink); box-shadow: inset 0 -2px 0 var(--gold); }
+.mk-seg-btn:focus-visible, .mk-chip:focus-visible, .mk-row:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+.mk-refresh { white-space: nowrap; }
+.mk-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.mk-chip { background: transparent; border: 1px solid var(--border); color: var(--ink-mid); border-radius: 999px; padding: 3px 11px; font-family: var(--font); font-size: 9.5px; letter-spacing: .06em; cursor: pointer; }
+.mk-chip:hover { border-color: var(--border-med); color: var(--ink); }
+.mk-chip.on { border-color: var(--gold-border); background: var(--gold-dim); color: var(--ink); }
+.mk-card { margin-bottom: 16px; padding-bottom: 6px; }
+.mk-count { font-size: 9px; color: var(--ink-low); }
+.mk-table { width: 100%; border-collapse: collapse; font-size: 11.5px; table-layout: fixed; }
+.mk-table td { overflow: hidden; text-overflow: ellipsis; }
+.mk-table th { text-align: left; font-size: 8.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-low); font-weight: 400; padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
+.mk-table td { padding: 7px 8px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+.mk-table .num { text-align: right; white-space: nowrap; }
+.mk-row { cursor: pointer; transition: background .12s; }
+.mk-row:hover, .mk-row.open { background: var(--bg-card); }
+.mk-row.stale td { opacity: .75; }
+.mk-name { color: var(--ink); font-family: var(--sans); font-size: 12px; }
+.mk-caret { display: inline-block; width: 14px; color: var(--ink-low); font-size: 9px; }
+.mk-last { font-weight: 600; color: var(--ink); }
+.mk-up { color: var(--pos); } .mk-down { color: var(--neg); }
+.mk-sub { font-size: 9.5px; color: var(--ink-low); font-weight: 400; }
+.mk-sub-strong { font-size: 10px; }
+.mk-when { font-size: 10.5px; color: var(--ink-mid); white-space: nowrap; }
+.mk-src { font-size: 10px; color: var(--ink-mid); text-decoration: none; border-bottom: 1px dotted var(--border-med); white-space: nowrap; }
+.mk-src:hover { color: var(--gold); }
+.mk-fresh { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; letter-spacing: .06em; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border); color: var(--ink-mid); white-space: nowrap; }
+.mk-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-low); }
+.mk-fr-realtime { color: var(--pos); border-color: var(--pos); } .mk-fr-realtime .mk-dot { background: var(--pos); }
+.mk-fr-delayed { color: var(--gold); border-color: var(--gold-border); } .mk-fr-delayed .mk-dot { background: var(--gold); }
+.mk-fr-closed .mk-dot { background: transparent; border: 1px solid var(--ink-low); }
+.mk-fr-daily, .mk-fr-monthly, .mk-fr-reference { color: var(--neu); border-color: var(--border-med); } .mk-fr-daily .mk-dot, .mk-fr-monthly .mk-dot, .mk-fr-reference .mk-dot { background: var(--neu); border-radius: 1px; }
+.mk-fr-stale { color: var(--neg); border-color: var(--neg); } .mk-fr-stale .mk-dot { background: var(--neg); }
+.mk-chart-row td { padding: 4px 8px 12px; background: var(--bg-card); }
+.mk-foot { font-size: 9.5px; color: var(--ink-low); margin-top: 6px; line-height: 1.5; }
+.mk-chart { position: relative; width: 100%; }
+.mk-chart-legend { position: absolute; top: 2px; left: 4px; z-index: 3; font-size: 9.5px; color: var(--ink-mid); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 120px); background: var(--bg); padding: 0 3px; border-radius: 2px; }
+.mk-chart-msg, .mk-chart-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--ink-low); z-index: 2; }
+.mk-chart-note { inset: auto 4px 22px auto; }
+.mk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.mk-tile { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mk-tile.stale { border-color: var(--neg); }
+.mk-tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mk-tile-name { font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-tile-val { font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.mk-tile-val span { font-size: 10px; font-weight: 400; }
+.mk-tile-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 9.5px; }
+.mk-failed .mk-sub { margin-bottom: 4px; }
+.mk-disclaimer { font-size: 9.5px; color: var(--ink-low); margin-top: 18px; line-height: 1.6; max-width: 900px; }
+@media (max-width: 760px) {
+  .mk-table { table-layout: auto; }
+  .mk-table col { width: auto !important; }
+  .mk-table th:nth-child(5), .mk-table td:nth-child(5) { display: none; }
+  .mk-grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -1028,6 +1095,198 @@ const EXPLAINERS = {
 };
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// ─── MARKETS PANEL — shared helpers & chart components ───────────────────────
+// Charts use TradingView Lightweight Charts (Apache-2.0, attribution logo kept
+// on as the licence asks). History is fetched on demand per instrument and
+// cached client-side for the session; the server caches it too.
+const MK_TZ = 'Europe/London';
+const mkHistoryCache = new Map();
+
+function mkCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
+}
+function mkAlpha(color, a) {
+  // hex (#rrggbb) → rgba with alpha; leaves rgba()/other strings alone
+  if (/^#([0-9a-f]{6})$/i.test(color)) {
+    const n = parseInt(color.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+  return color;
+}
+function mkLondonParts(d) {
+  const f = new Intl.DateTimeFormat('en-GB', { timeZone: MK_TZ, year:'numeric', month:'2-digit', day:'2-digit' });
+  return f.format(d);
+}
+/** "14:32" if today (London), else "Fri 25 Sep 19:59" */
+function mkFmtWhen(iso, { dateOnly = false } = {}) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  if (dateOnly) return d.toLocaleDateString('en-GB', { timeZone:'UTC', weekday:'short', day:'numeric', month:'short' });
+  const today = mkLondonParts(new Date()) === mkLondonParts(d);
+  const time = d.toLocaleTimeString('en-GB', { timeZone: MK_TZ, hour:'2-digit', minute:'2-digit' });
+  if (today) return time;
+  return d.toLocaleDateString('en-GB', { timeZone: MK_TZ, weekday:'short', day:'numeric', month:'short' }) + ' ' + time;
+}
+function mkFmtFull(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-GB', { timeZone: MK_TZ, weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short' });
+}
+function mkFmtValue(item, v) {
+  if (v == null || !isFinite(v)) return '—';
+  const d = item.decimals ?? 2;
+  const n = Number(v).toLocaleString('en-GB', { minimumFractionDigits: d, maximumFractionDigits: d });
+  if (item.unit === '%')   return n + '%';
+  if (item.unit === '$tn') return '$' + n + 'tn';
+  return n;
+}
+/** Change column: bp for yields/spreads, points for odds, absolute otherwise. */
+function mkFmtChange(item) {
+  const q = item.quote || {};
+  if (q.change == null) return { abs: '—', pct: '', dir: 0 };
+  const dir = q.change > 0 ? 1 : q.change < 0 ? -1 : 0;
+  const sign = q.change > 0 ? '+' : q.change < 0 ? '−' : '';
+  const a = Math.abs(q.change);
+  let abs;
+  if (item.kind === 'prob')        abs = sign + a.toFixed(1) + ' pts';
+  else if (item.unit === '%')      abs = sign + Math.round(a * 100) + 'bp';
+  else if (item.unit === '$tn')    abs = sign + '$' + a.toFixed(item.decimals ?? 2) + 'tn';
+  else abs = sign + a.toLocaleString('en-GB', { minimumFractionDigits: item.decimals ?? 2, maximumFractionDigits: item.decimals ?? 2 });
+  const pct = (q.changePct != null && item.kind === 'price') ? (sign + Math.abs(q.changePct).toFixed(2) + '%') : '';
+  return { abs, pct, dir };
+}
+function mkFreshClass(item) {
+  if (item.stale) return 'mk-fr-stale';
+  return 'mk-fr-' + ((item.freshness && item.freshness.code) || 'closed');
+}
+function mkFreshLabel(item) {
+  if (item.stale) return 'Stale';
+  return (item.freshness && item.freshness.label) || '—';
+}
+/** One-line provenance used in tooltips and chart footers. */
+function mkProvenance(item) {
+  const q = item.quote || {};
+  const parts = [q.sourceDetail || q.source];
+  if (q.cadence === 'daily' || q.cadence === 'monthly') {
+    parts.push('Data for ' + mkFmtWhen(q.asOf, { dateOnly: true }));
+    parts.push('Released ' + mkFmtFull(q.releasedAt));
+  } else {
+    parts.push('Printed ' + mkFmtFull(q.releasedAt || q.asOf));
+  }
+  parts.push('Fetched ' + mkFmtFull(item.fetchedAt));
+  if (item.fallbackUsed) parts.push('Primary source failed — fallback used');
+  if (item.stale) parts.push('All sources failed at last refresh — showing value fetched ' + mkFmtFull(item.staleSince));
+  return parts.join(' · ');
+}
+
+/** Mounts children only once scrolled near the viewport (saves history calls). */
+function LazyMount({ height, children }) {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (shown || !ref.current) return;
+    if (!('IntersectionObserver' in window)) { setShown(true); return; }
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) { setShown(true); io.disconnect(); }
+    }, { rootMargin: '200px' });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [shown]);
+  return React.createElement('div', { ref, style: { minHeight: height } }, shown ? children : null);
+}
+
+/**
+ * MarketChart — candles for prices, area for yields/spreads/macro/odds.
+ * Dotted High/Low lines over the visible period, last-value tag on the axis,
+ * crosshair with an O/H/L/C (or value) read-out in the top-left.
+ */
+function MarketChart({ item, tf, theme, height = 190, interactive = false }) {
+  const boxRef    = useRef(null);
+  const legendRef = useRef(null);
+  const [state, setState] = useState({ loading: true, error: null, hist: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const key = item.id + ':' + tf;
+    const cached = mkHistoryCache.get(key);
+    if (cached) { setState({ loading: false, error: null, hist: cached }); return; }
+    setState(s => ({ ...s, loading: true, error: null }));
+    apiFetch('/api/markets/history/' + encodeURIComponent(item.id) + '?tf=' + tf)
+      .then(h => { mkHistoryCache.set(key, h); if (!cancelled) setState({ loading: false, error: null, hist: h }); })
+      .catch(err => { if (!cancelled) setState({ loading: false, error: err.message, hist: null }); });
+    return () => { cancelled = true; };
+  }, [item.id, tf]);
+
+  useEffect(() => {
+    const h = state.hist;
+    if (!h || !boxRef.current || !window.LightweightCharts) return;
+    const LWC = window.LightweightCharts;
+    const ink = mkCssVar('--ink-mid'), rule = mkCssVar('--rule'), border = mkCssVar('--border');
+    const up = mkCssVar('--pos'), down = mkCssVar('--neg'), line = mkCssVar('--gold'), low = mkCssVar('--ink-low');
+    const dec = item.decimals ?? 2;
+    const fmtTime = (t) => {
+      const d = new Date(t * 1000);
+      return tf === '1h'
+        ? d.toLocaleString('en-GB', { timeZone: MK_TZ, day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
+        : d.toLocaleDateString('en-GB', { timeZone: 'UTC', day:'numeric', month:'short', year:'2-digit' });
+    };
+    const chart = LWC.createChart(boxRef.current, {
+      autoSize: true,
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: ink, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10 },
+      grid: { vertLines: { color: rule }, horzLines: { color: rule } },
+      rightPriceScale: { borderColor: border, scaleMargins: { top: 0.12, bottom: 0.08 } },
+      timeScale: { borderColor: border, timeVisible: tf === '1h', secondsVisible: false, fixLeftEdge: true, fixRightEdge: true },
+      crosshair: { mode: LWC.CrosshairMode.Normal },
+      localization: { timeFormatter: fmtTime, priceFormatter: (p) => mkFmtValue(item, p) },
+      handleScroll: interactive, handleScale: interactive,
+    });
+
+    const clean = (arr) => {
+      const seen = new Set();
+      return arr.filter(x => { if (seen.has(x.t)) return false; seen.add(x.t); return true; }).sort((a, b) => a.t - b.t);
+    };
+    let series, hi, lo, lastVal;
+    const priceFormat = { type: 'custom', minMove: Math.pow(10, -dec), formatter: (p) => mkFmtValue(item, p) };
+    if (h.type === 'ohlc') {
+      const bars = clean(h.bars);
+      series = chart.addCandlestickSeries({ upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat });
+      series.setData(bars.map(b => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
+      hi = Math.max(...bars.map(b => b.h)); lo = Math.min(...bars.map(b => b.l)); lastVal = bars[bars.length - 1];
+    } else {
+      const pts = clean(h.points);
+      series = chart.addAreaSeries({ lineColor: line, lineWidth: 2, topColor: mkAlpha(line, 0.28), bottomColor: mkAlpha(line, 0.02), priceFormat, crosshairMarkerRadius: 4 });
+      series.setData(pts.map(p => ({ time: p.t, value: p.v })));
+      hi = Math.max(...pts.map(p => p.v)); lo = Math.min(...pts.map(p => p.v)); lastVal = pts[pts.length - 1];
+    }
+    series.createPriceLine({ price: hi, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'High' });
+    series.createPriceLine({ price: lo, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'Low' });
+    chart.timeScale().fitContent();
+
+    const setLegend = (d, t) => {
+      if (!legendRef.current || !d) return;
+      const f = (v) => mkFmtValue(item, v);
+      legendRef.current.textContent = (d.open != null)
+        ? `${fmtTime(t)}  O ${f(d.open)}  H ${f(d.high)}  L ${f(d.low)}  C ${f(d.close)}`
+        : `${fmtTime(t)}  ${f(d.value)}`;
+    };
+    const lastData = h.type === 'ohlc' ? { open: lastVal.o, high: lastVal.h, low: lastVal.l, close: lastVal.c } : { value: lastVal.v };
+    setLegend(lastData, lastVal.t);
+    chart.subscribeCrosshairMove(param => {
+      const d = param && param.time ? param.seriesData.get(series) : null;
+      if (d) setLegend(d, param.time); else setLegend(lastData, lastVal.t);
+    });
+    return () => chart.remove();
+  }, [state.hist, theme, interactive]);
+
+  return React.createElement('div', { className: 'mk-chart', style: { height } },
+    React.createElement('div', { className: 'mk-chart-legend', ref: legendRef }),
+    state.loading && React.createElement('div', { className: 'mk-chart-msg' }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading chart…'),
+    state.error && React.createElement('div', { className: 'mk-chart-msg' }, 'Chart unavailable — ' + state.error),
+    state.hist && state.hist.note && React.createElement('div', { className: 'mk-chart-note' }, state.hist.note),
+    React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0, visibility: state.hist ? 'visible' : 'hidden' } })
+  );
+}
+
 function App() {
   const [tab, setTab] = useState('market');
   const [toasts, setToasts] = useState([]);
@@ -1058,9 +1317,16 @@ function App() {
   }
 
   // ── Data state ─────────────────────────────────────────────────────────────
-  const [snapshot, setSnapshot]       = useState(null);
-  const [snapshotMeta, setSnapshotMeta] = useState(null);
-  const [snapshotLoading, setSnapshotLoading] = useState(true);
+  const [markets, setMarkets]                   = useState(null);
+  const [marketsLoading, setMarketsLoading]     = useState(true);
+  const [marketsRefreshing, setMarketsRefreshing] = useState(false);
+  const mkPref = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+  const [mkView, setMkViewRaw]   = useState(() => mkPref('dispatch-mk-view', 'table'));
+  const [mkTf, setMkTfRaw]       = useState(() => mkPref('dispatch-mk-tf', '1d'));
+  const [mkGroup, setMkGroup]    = useState('all');
+  const [mkExpanded, setMkExpanded] = useState(null);
+  function setMkView(v) { setMkViewRaw(v); try { localStorage.setItem('dispatch-mk-view', v); } catch {} }
+  function setMkTf(v)   { setMkTfRaw(v);   try { localStorage.setItem('dispatch-mk-tf', v); } catch {} }
 
   const [events, setEvents]           = useState([]);
   const [econ, setEcon]               = useState([]);
@@ -1220,9 +1486,9 @@ function App() {
     setInterroMessages([]); setInterroConvId(null); setInterroInput('');
   }, [research && research.reportId]);
 
-  // ── Fetch snapshot on mount ────────────────────────────────────────────────
+  // ── Fetch data on mount ────────────────────────────────────────────────
   useEffect(() => {
-    loadSnapshot();
+    loadMarkets();
     loadEvents();
     loadRisk();
     loadBrief();
@@ -1232,17 +1498,34 @@ function App() {
     loadBudgetStatus();
   }, []);
 
-  async function loadSnapshot() {
-    setSnapshotLoading(true);
+  async function loadMarkets() {
+    setMarketsLoading(true);
     try {
-      const resp = await apiFetch('/api/snapshot');
-      setSnapshot(resp.data);
-      setSnapshotMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale });
-      if (resp.stale) showToast('Market data is from cache — may be delayed', 'info');
+      const resp = await apiFetch('/api/markets');
+      setMarkets(resp);
+      if (resp.summary && (resp.summary.failed || resp.summary.stale)) {
+        showToast(`Markets: ${resp.summary.failed + resp.summary.stale} instrument(s) stale or unavailable`, 'info');
+      }
     } catch (err) {
-      showToast('Snapshot error: ' + err.message, 'error');
+      showToast('Markets error: ' + err.message, 'error');
     }
-    setSnapshotLoading(false);
+    setMarketsLoading(false);
+  }
+
+  async function refreshMarkets() {
+    setMarketsRefreshing(true);
+    try {
+      const resp = await apiFetch('/api/markets/refresh', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      });
+      setMarkets(resp);
+      mkHistoryCache.clear();
+      if (resp.skipped) showToast('Prices were refreshed under a minute ago', 'info');
+      else showToast(`Markets refreshed — ${resp.summary.live}/${resp.summary.total} sources OK`, resp.summary.failed ? 'info' : 'success');
+    } catch (err) {
+      showToast('Refresh failed: ' + err.message, 'error');
+    }
+    setMarketsRefreshing(false);
   }
 
   async function loadEvents() {
@@ -1939,204 +2222,162 @@ function App() {
     );
   }
 
-  // ── MARKET TAB ─────────────────────────────────────────────────────────────
+  // ── MARKETS TAB ────────────────────────────────────────────────────────────
+  // One panel for every asset class. Each value shows who published it, when
+  // it was released and how fresh it is. Table ↔ Charts toggle; click any row
+  // to open its chart inline. Prices refresh automatically once per weekday
+  // (14:45 London) or when you press Refresh.
   function renderMarket() {
-    const rates = snapshot?.rates || {};
-    const fx    = snapshot?.fx?.usdgbp;
-    const wl    = snapshot?.watchlist || [];
-    const intl  = snapshot?.intl || [];
-    const ratesHistory = snapshot?.ratesHistory || [];
-    const hyHistory    = snapshot?.hyHistory || [];
-    const rsiHistory   = snapshot?.rsiHistory || [];
-
-    // Derive RSI from data
-    const lastRsi = rsiHistory.length ? rsiHistory[rsiHistory.length - 1].rsi : null;
-
-    const src = snapshotMeta;
-
-    if (snapshotLoading) {
+    const m = markets;
+    if (marketsLoading && !m) {
       return React.createElement('div', { style:{padding:'30px',textAlign:'center',color:'var(--steel)'} },
-        React.createElement('span', { className:'spin' }, '↻'), ' Loading market data…'
+        React.createElement('span', { className:'spin' }, '↻'), ' Loading markets…');
+    }
+    if (!m) {
+      return React.createElement('div', { className:'card', style:{textAlign:'center',padding:30} },
+        React.createElement('div', { style:{marginBottom:12,color:'var(--ink-mid)'} }, 'No market data yet.'),
+        React.createElement('button', { className:'btn btn-primary', onClick: refreshMarkets, disabled: marketsRefreshing }, marketsRefreshing ? 'Refreshing…' : '↻ Refresh now'));
+    }
+
+    const groups  = m.groups || [];
+    const items   = (m.items || []).filter(i => i.ok);
+    const failed  = (m.items || []).filter(i => !i.ok);
+    const visible = mkGroup === 'all' ? groups : groups.filter(g => g.id === mkGroup);
+    const sched   = m.schedule || {};
+    const trig    = { schedule:'scheduled', manual:'manual', startup:'first run', 'first-load':'first run' }[m.trigger] || m.trigger;
+
+    // ── header: status + controls ───────────────────────────────────────────
+    const seg = (value, set, opts) => React.createElement('div', { className:'mk-seg', role:'group' },
+      opts.map(([v, label]) => React.createElement('button', {
+        key: v, className: 'mk-seg-btn' + (value === v ? ' on' : ''), 'aria-pressed': value === v,
+        onClick: () => set(v),
+      }, label)));
+
+    const header = React.createElement('div', { className:'mk-head' },
+      React.createElement('div', { className:'mk-status' },
+        React.createElement('div', { className:'mk-status-main' },
+          'Last refresh ', React.createElement('strong', null, mkFmtWhen(m.generatedAt)), ' (' + trig + ')',
+          ' · ', React.createElement('span', { className: m.summary.failed || m.summary.stale ? 'mk-warn' : 'mk-ok' },
+            `${m.summary.live}/${m.summary.total} sources OK`),
+          m.summary.stale ? ` · ${m.summary.stale} stale` : '',
+          m.summary.failed ? ` · ${m.summary.failed} unavailable` : ''
+        ),
+        React.createElement('div', { className:'mk-status-sub' },
+          sched.enabled === false ? 'Automatic refresh off' :
+            `Auto-refresh weekdays ${sched.time} UK · next ${mkFmtWhen(sched.nextRunAt)}`,
+          ' · All times UK')
+      ),
+      React.createElement('div', { className:'mk-controls' },
+        seg(mkView, setMkView, [['table','Table'], ['charts','Charts']]),
+        (mkView === 'charts' || mkExpanded) && seg(mkTf, setMkTf, [['1d','Daily'], ['1h','Hourly']]),
+        React.createElement('button', { className:'btn btn-primary mk-refresh', onClick: refreshMarkets, disabled: marketsRefreshing, title:'Fetch fresh prices now (free sources, ~50 requests, no cost)' },
+          marketsRefreshing ? React.createElement(React.Fragment, null, React.createElement('span', { className:'spin' }, '↻'), ' Refreshing…') : '↻ Refresh now')
+      )
+    );
+
+    const chips = React.createElement('div', { className:'mk-chips', role:'tablist' },
+      [['all', 'All']].concat(groups.map(g => [g.id, g.label])).map(([id, label]) =>
+        React.createElement('button', { key:id, className:'mk-chip' + (mkGroup === id ? ' on' : ''), onClick: () => setMkGroup(id), role:'tab', 'aria-selected': mkGroup === id }, label)));
+
+    const freshBadge = (it) => React.createElement('span', { className:'mk-fresh ' + mkFreshClass(it), title: mkProvenance(it) },
+      React.createElement('span', { className:'mk-dot' }), mkFreshLabel(it));
+
+    const sourceLink = (it) => React.createElement('a', {
+      className:'mk-src', href: it.quote.sourceUrl, target:'_blank', rel:'noopener noreferrer',
+      title: mkProvenance(it), onClick: e => e.stopPropagation(),
+    }, it.quote.source + (it.fallbackUsed ? ' (fallback)' : ''), ' ↗');
+
+    const releasedCell = (it) => {
+      const q = it.quote;
+      if (q.cadence === 'daily' || q.cadence === 'monthly') {
+        return React.createElement('span', { title: mkProvenance(it) },
+          mkFmtWhen(q.releasedAt), React.createElement('span', { className:'mk-sub' }, ' data ' + mkFmtWhen(q.asOf, { dateOnly: true })));
+      }
+      return React.createElement('span', { title: mkProvenance(it) }, mkFmtWhen(q.releasedAt || q.asOf));
+    };
+
+    // ── table view ──────────────────────────────────────────────────────────
+    function groupTable(g) {
+      const rows = items.filter(i => i.group === g.id);
+      if (!rows.length) return null;
+      return React.createElement('div', { key: g.id, className:'card mk-card' },
+        React.createElement('div', { className:'card-title' }, g.label, React.createElement('span', { className:'mk-count' }, rows.length)),
+        React.createElement('table', { className:'mk-table' },
+          React.createElement('colgroup', null, ['25%','12%','14%','14%','23%','12%'].map((w, i) => React.createElement('col', { key: i, style: { width: w } }))),
+          React.createElement('thead', null, React.createElement('tr', null,
+            ['Instrument', 'Last', 'Change', 'Freshness', 'Released', 'Source'].map((h, i) =>
+              React.createElement('th', { key: h, className: i === 1 || i === 2 ? 'num' : '' }, h)))),
+          React.createElement('tbody', null, rows.flatMap(it => {
+            const ch = mkFmtChange(it);
+            const open = mkExpanded === it.id;
+            const row = React.createElement('tr', {
+              key: it.id, className: 'mk-row' + (open ? ' open' : '') + (it.stale ? ' stale' : ''),
+              onClick: () => setMkExpanded(open ? null : it.id), tabIndex: 0,
+              onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMkExpanded(open ? null : it.id); } },
+              title: 'Click to ' + (open ? 'hide' : 'show') + ' chart',
+            },
+              React.createElement('td', { className:'mk-name' },
+                React.createElement('span', { className:'mk-caret' }, open ? '▾' : '▸'),
+                it.label,
+                it.eventTitle && React.createElement('div', { className:'mk-sub' }, it.eventTitle + ' · ' + it.outcome)),
+              React.createElement('td', { className:'num mk-last' }, mkFmtValue(it, it.quote.value),
+                it.quote.currency && it.kind === 'price' && it.group !== 'fx' ? React.createElement('span', { className:'mk-sub' }, ' ' + it.quote.currency) : null),
+              React.createElement('td', { className:'num ' + (ch.dir > 0 ? 'mk-up' : ch.dir < 0 ? 'mk-down' : '') },
+                ch.abs, ch.pct && React.createElement('span', { className:'mk-sub-strong' }, ' ' + ch.pct)),
+              React.createElement('td', null, freshBadge(it)),
+              React.createElement('td', { className:'mk-when' }, releasedCell(it)),
+              React.createElement('td', null, sourceLink(it))
+            );
+            if (!open) return [row];
+            return [row, React.createElement('tr', { key: it.id + ':chart', className:'mk-chart-row' },
+              React.createElement('td', { colSpan: 6 },
+                React.createElement(MarketChart, { item: it, tf: mkTf, theme: themeMode, height: 280, interactive: true }),
+                React.createElement('div', { className:'mk-foot' }, mkProvenance(it))))];
+          }))
+        )
       );
     }
 
-    const dgs10     = rates.dgs10?.value;
-    const dfii10    = rates.dfii10?.value;
-    const t10yie    = rates.t10yie?.value;
-    const hySpread  = rates.hy_spread?.value;
-    const t10y2y    = rates.t10y2y?.value;
-    const usdgbp    = fx?.value ?? 0;
+    // ── chart grid view ─────────────────────────────────────────────────────
+    function chartTile(it) {
+      const ch = mkFmtChange(it);
+      return React.createElement('div', { key: it.id, className:'mk-tile' + (it.stale ? ' stale' : '') },
+        React.createElement('div', { className:'mk-tile-head' },
+          React.createElement('div', { className:'mk-tile-name', title: it.eventTitle || it.label }, it.label),
+          React.createElement('div', { className:'mk-tile-val' },
+            mkFmtValue(it, it.quote.value), ' ',
+            React.createElement('span', { className: ch.dir > 0 ? 'mk-up' : ch.dir < 0 ? 'mk-down' : '' }, ch.pct || ch.abs))
+        ),
+        React.createElement(LazyMount, { height: 190 },
+          React.createElement(MarketChart, { item: it, tf: mkTf, theme: themeMode, height: 190 })),
+        React.createElement('div', { className:'mk-tile-foot' },
+          freshBadge(it),
+          React.createElement('span', { className:'mk-when' }, releasedCell(it)),
+          sourceLink(it))
+      );
+    }
 
-    const srcLabel = src
-      ? React.createElement(SourceBadge, src)
-      : null;
+    const body = mkView === 'table'
+      ? visible.map(groupTable)
+      : visible.map(g => {
+          const rows = items.filter(i => i.group === g.id);
+          if (!rows.length) return null;
+          return React.createElement('div', { key: g.id },
+            React.createElement('div', { className:'section-title' }, g.label),
+            React.createElement('div', { className:'mk-grid' }, rows.map(chartTile)));
+        });
 
-    return React.createElement('div', null,
-
-
-      // ── Rate stat cards ──────────────────────────────────────────────────────
-      React.createElement('div', { className:'grid-4', style:{marginBottom:16} },
-        StatCard('10Y Treasury',   dgs10 != null ? `${dgs10.toFixed(2)}%` : '—',
-          rates.dgs10 ? `Nominal rate (${rates.dgs10.date})` : 'Loading…', 'neu', ExplainerCard('dgs10')),
-        StatCard('Real Yield',     dfii10 != null ? `${dfii10.toFixed(2)}%` : '—',
-          rates.dfii10 ? `TIPS 10Y (${rates.dfii10.date})` : 'Loading…',
-          dfii10 > 1.5 ? 'neg' : 'neu', ExplainerCard('dfii10')),
-        StatCard('Breakeven Infl', t10yie != null ? `${t10yie.toFixed(2)}%` : '—',
-          'Market 10Y inflation forecast', 'neu', ExplainerCard('t10yie')),
-        StatCard('HY Spread',      hySpread != null ? `${hySpread.toFixed(2)}%` : '—',
-          rates.hy_spread ? `OAS — ${rates.hy_spread.date}` : 'Loading…',
-          hySpread > 4 ? 'neg' : 'pos', ExplainerCard('hyspread')),
-      ),
-      React.createElement('div', { className:'grid-4', style:{marginBottom:20} },
-        StatCard('Yield Curve', t10y2y != null ? `${t10y2y > 0 ? '+' : ''}${t10y2y.toFixed(2)}%` : '—',
-          '10Y-2Y spread', t10y2y > 0 ? 'pos' : 'neg', ExplainerCard('t10y2y')),
-        StatCard('USD/GBP', usdgbp ? usdgbp.toFixed(4) : '—', 'FX rate', 'neu'),
-        StatCard('AMD RSI(14)', lastRsi != null ? lastRsi.toFixed(1) : '—',
-          rsiHistory.length ? `As of ${rsiHistory[rsiHistory.length-1].d} — ${lastRsi < 30 ? 'oversold' : lastRsi > 70 ? 'overbought' : 'neutral'}` : '',
-          lastRsi < 35 ? 'neg' : 'neu', ExplainerCard('rsi14')),
-        StatCard('US-Iran Risk', 'ELEVATED', 'Active conflict — monitor SGLN', 'neg'),
-      ),
-
-      // ── Charts ──────────────────────────────────────────────────────────────
-      React.createElement('div', { className:'grid-2', style:{marginBottom:20} },
-        React.createElement('div', { className:'card' },
-          React.createElement('div', { className:'card-title' }, 'RATES DASHBOARD',
-            React.createElement('span', { style:{color:'var(--steel)'} },
-              rates.dgs10 ? `FRED · ${rates.dgs10.date}` : 'FRED'
-            )
-          ),
-          React.createElement(ResponsiveContainer, { width:'100%', height:180 },
-            React.createElement(LineChart, { data: ratesHistory },
-              React.createElement(CartesianGrid, { strokeDasharray:'3 3', stroke:'rgba(13,13,15,0.08)' }),
-              React.createElement(XAxis, { dataKey:'m', tick:{fill:'#4a5568',fontSize:10} }),
-              React.createElement(YAxis, { tick:{fill:'#4a5568',fontSize:10}, domain:[1,5] }),
-              React.createElement(Tooltip, { contentStyle:{background:'#f5f0e8',border:'1px solid rgba(13,13,15,0.12)',borderRadius:'0',fontSize:'11px'}, labelStyle:{color:'#0d0d0f'} }),
-              React.createElement(Legend, { wrapperStyle:{fontSize:10,color:'#4a5568'} }),
-              React.createElement(Line, { type:'monotone', dataKey:'y10',  stroke:'#1c3a5e', name:'10Y Nominal', dot:false, strokeWidth:2 }),
-              React.createElement(Line, { type:'monotone', dataKey:'real', stroke:'#1a7a4a', name:'Real Yield',  dot:false, strokeWidth:2 }),
-              React.createElement(Line, { type:'monotone', dataKey:'bei',  stroke:'#c8972a', name:'Breakeven',  dot:false, strokeWidth:1, strokeDasharray:'4 2' }),
-            )
-          )
-        ),
-        React.createElement('div', { className:'card' },
-          React.createElement('div', { className:'card-title' }, 'HY CREDIT SPREAD (OAS %)',
-            React.createElement('span', { style:{color:'var(--steel)'} }, 'ICE BofA US HY')
-          ),
-          React.createElement(ResponsiveContainer, { width:'100%', height:180 },
-            React.createElement(AreaChart, { data: hyHistory },
-              React.createElement(CartesianGrid, { strokeDasharray:'3 3', stroke:'rgba(13,13,15,0.08)' }),
-              React.createElement(XAxis, { dataKey:'m', tick:{fill:'#4a5568',fontSize:10} }),
-              React.createElement(YAxis, { tick:{fill:'#4a5568',fontSize:10}, domain:['auto','auto'] }),
-              React.createElement(Tooltip, { contentStyle:{background:'#f5f0e8',border:'1px solid rgba(13,13,15,0.12)',borderRadius:'0',fontSize:'11px'} }),
-              React.createElement(Area, { type:'monotone', dataKey:'oas', stroke:'#c0392b', fill:'rgba(192,57,43,.07)', name:'HY OAS', strokeWidth:2 }),
-            )
-          )
-        ),
-      ),
-
-      // ── Watchlists ──────────────────────────────────────────────────────────
-      React.createElement('div', { className:'grid-2', style:{marginBottom:20} },
-        React.createElement('div', { className:'card' },
-          React.createElement('div', { className:'card-title' },
-            React.createElement('span', null,
-              React.createElement('span', { className:'dot dot-live' }),
-              'US HOLDINGS WATCHLIST'
-            ),
-            React.createElement('button', { className:'btn', onClick: loadSnapshot, disabled: snapshotLoading },
-              snapshotLoading ? React.createElement('span', { className:'spin' }, '↻') : 'REFRESH'
-            )
-          ),
-          wl.map(w => React.createElement('div', { className:'watchlist-row', key: w.sym },
-            React.createElement('div', null,
-              React.createElement('div', { className:'ticker' }, w.sym),
-              React.createElement('div', { style:{fontSize:10,color:'var(--steel)'} }, w.note),
-              React.createElement('div', { style:{marginTop:4} }, PitchButton(w.sym)),
-            ),
-            React.createElement('div', { style:{textAlign:'right'} },
-              React.createElement('div', { className:`wl-price ${w.chg < 0 ? 'neg' : 'pos'}` },
-                typeof w.price === 'number' ? `$${w.price.toFixed(2)}` : w.price
-              ),
-              React.createElement('div', { className:`wl-chg ${w.chg < 0 ? 'neg' : 'pos'}` },
-                `${w.chg > 0 ? '+' : ''}${typeof w.chg === 'number' ? w.chg.toFixed(2) : w.chg}%`
-              ),
-              w.date && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--steel)',marginTop:2,opacity:0.7} }, w.date),
-            )
-          ))
-        ),
-        React.createElement('div', { className:'card' },
-          React.createElement('div', { className:'card-title' }, 'INTERNATIONAL WATCHLIST',
-            React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, 'SEEDED · KRX / TSE')
-          ),
-          intl.map(w => React.createElement('div', { className:'watchlist-row', key: w.sym },
-            React.createElement('div', null,
-              React.createElement('div', { className:'ticker' }, w.sym),
-              React.createElement('div', { style:{fontSize:10,color:'var(--steel)'} }, `${w.name} — ${w.note}`),
-            ),
-            React.createElement('div', { style:{textAlign:'right'} },
-              React.createElement('div', { className:'wl-price' }, w.price),
-              React.createElement('div', { className:`wl-chg ${(w.chg+'').includes('-') ? 'neg' : 'pos'}` }, w.chg),
-              w.date && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--steel)',marginTop:2,opacity:0.7} }, w.date),
-            )
-          ))
-        ),
-      ),
-
-      // ── Events Log ──────────────────────────────────────────────────────────
-      React.createElement('div', { className:'card', style:{marginBottom:20} },
-        React.createElement('div', { className:'card-title' },
-          React.createElement('span', null,
-            React.createElement('span', { className:'dot dot-live' }),
-            'MARKET EVENTS LOG'
-          ),
-          React.createElement('button', { className:'btn btn-primary', onClick: refreshEvents, disabled: eventsLoading },
-            eventsLoading ? React.createElement('span', { className:'spin' }, '↻') : 'REFRESH'
-          )
-        ),
-        eventsLoading && React.createElement('div', { style:{color:'var(--steel)',textAlign:'center',padding:'20px'} },
-          React.createElement('span', { className:'spin' }, '↻'), ' Searching live news…'
-        ),
-        !eventsLoading && events.length === 0 && React.createElement('div', { style:{color:'var(--steel)',padding:'10px 0'} }, 'No events loaded — click Refresh Live to fetch.'),
-        !eventsLoading && events.map((e, i) =>
-          React.createElement('div', { key:i, style:{padding:'10px 0', borderBottom: i < events.length-1 ? '1px solid rgba(13,13,15,0.08)' : 'none'} },
-            React.createElement('div', { style:{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:4} },
-              e.date && React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',background:'rgba(74,85,104,0.08)',border:'1px solid rgba(74,85,104,0.15)',padding:'1px 5px',whiteSpace:'nowrap'} }, e.date),
-              React.createElement('span', { className:`badge ${e.impact==='BULLISH'?'badge-low':e.impact==='BEARISH'?'badge-high':'badge-med'}` }, e.impact),
-              React.createElement('span', { style:{color:'var(--blue)',fontSize:11} }, e.ticker),
-              React.createElement('span', { style:{color:'var(--ink)',fontSize:12,fontWeight:500} }, e.headline),
-            ),
-            React.createElement('div', { style:{color:'var(--steel)',fontSize:11,paddingLeft:4} }, e.detail)
-          )
-        )
-      ),
-
-      // ── Economic Analysis ────────────────────────────────────────────────────
-      React.createElement('div', null,
-        React.createElement('div', { className:'section-title' },
-          React.createElement('span', null,
-            React.createElement('span', { className:'dot dot-live' }),
-            'ECONOMIC ANALYSIS'
-          ),
-          React.createElement('button', { className:'btn btn-primary', onClick: refreshEvents, disabled: eventsLoading },
-            eventsLoading ? React.createElement('span', { className:'spin' }, '↻') : 'REFRESH'
-          )
-        ),
-        eventsLoading && React.createElement('div', { style:{color:'var(--steel)',textAlign:'center',padding:'30px'} },
-          React.createElement('span', { className:'spin' }, '↻'), ' Generating live analysis…'
-        ),
-        !eventsLoading && econ.map(e =>
-          React.createElement('div', { key: e.id, className:'econ-card', style:{borderColor: e.border} },
-            React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8} },
-              React.createElement('span', { className:'econ-label', style:{borderColor: e.border} }, e.label),
-              e.date && React.createElement('span', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--econ-date)',letterSpacing:'0.06em'} }, e.date),
-            ),
-            React.createElement('div', { style:{color:'var(--econ-title)',fontWeight:600,marginBottom:8,fontSize:13} }, e.title),
-            React.createElement('div', { style:{color:'var(--econ-body)',lineHeight:1.75,fontSize:12} }, e.body)
-          )
-        ),
-        !eventsLoading && econ.length === 0 && React.createElement('div', { className:'ts', style:{marginTop:8} },
-          'Default analysis shown — click ↻ Refresh Analysis to update with live news.'
-        )
-      )
+    return React.createElement('div', { className:'mk-panel' },
+      header,
+      chips,
+      body,
+      failed.length > 0 && React.createElement('div', { className:'card mk-card mk-failed' },
+        React.createElement('div', { className:'card-title' }, 'Unavailable at last refresh'),
+        failed.map(f => React.createElement('div', { key: f.id, className:'mk-sub' },
+          f.label + ' — ' + (f.attempted || []).map(a => a.provider + ': ' + a.error).join('; ')))),
+      React.createElement('div', { className:'mk-disclaimer' },
+        'Free sources: Yahoo Finance (unofficial; exchange delays apply — futures ≈10 min, LSE ≈15 min), FRED (daily/monthly, with release times), Finnhub, ECB via Frankfurter, Polymarket. ',
+        'Freshness is measured from each print time at the moment of fetch. For information only.')
     );
   }
 
@@ -5810,7 +6051,7 @@ function App() {
 
   // ── MAIN RENDER ───────────────────────────────────────────────────────────
   const NAV_ITEMS = [
-    { id:'market',    label:'SNAPSHOT',  svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="9" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>' },
+    { id:'market',    label:'MARKETS',   svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="9" width="5.5" height="5.5" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>' },
     { id:'risk',      label:'RISK',      svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 2.5L14 13.5H2L8 2.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 7V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.8" r="0.6" fill="currentColor"/></svg>' },
     { id:'signals',   label:'ANALYTICS', svg:'<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 11L5 7L8.5 9.5L12 5L14.5 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
     null,
@@ -5824,11 +6065,15 @@ function App() {
   ];
 
   const TAB_LABELS = {
-    market:'SNAPSHOT', risk:'RISK', signals:'ANALYTICS', desk:'DESK', sales:'SALES',
+    market:'MARKETS', risk:'RISK', signals:'ANALYTICS', desk:'DESK', sales:'SALES',
     news:'NEWS', research:'RESEARCH', glossary:'GLOSSARY', interview:'INTERVIEW'
   };
 
-  const isLive = snapshotMeta && !snapshotMeta.stale && snapshotMeta.source === 'live';
+  const mkAgeH  = markets ? (Date.now() - Date.parse(markets.generatedAt)) / 36e5 : null;
+  const isLive  = !!(markets && markets.summary && !markets.summary.failed && !markets.summary.stale && mkAgeH < 24);
+  const mkStatusText = markets
+    ? 'MARKETS · ' + mkFmtWhen(markets.generatedAt) + (isLive ? '' : ' · CHECK')
+    : (marketsLoading ? 'LOADING…' : 'NO DATA');
 
   return React.createElement('div', { className:'app-shell' },
 
@@ -5856,9 +6101,7 @@ function App() {
       React.createElement('div', { className:'sb-footer' },
         React.createElement('div', { className:'sb-status-dot' + (isLive ? ' live' : '') }),
         React.createElement('span', { className:'sb-footer-text' },
-          snapshotMeta
-            ? snapshotMeta.source.toUpperCase() + (snapshotMeta.stale ? ' · STALE' : ' · LIVE')
-            : 'LOADING…'
+          mkStatusText
         )
       )
     ),
@@ -5882,7 +6125,7 @@ function App() {
           React.createElement('div', {
             className: 'sb-status-dot' + (isLive ? ' live' : ''),
             style: { width:6, height:6, borderRadius:'50%', flexShrink:0 },
-            title: snapshotMeta ? snapshotMeta.source.toUpperCase() + (snapshotMeta.stale ? ' · STALE' : ' · LIVE') : 'Loading…'
+            title: mkStatusText
           }),
           React.createElement('button', {
             className: 'theme-toggle',

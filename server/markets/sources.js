@@ -73,7 +73,9 @@ async function yahooQuote({ symbol }) {
     if (closes.length >= 2) prev = closes[closes.length - 2];
   }
   const asOf  = new Date(m.regularMarketTime * 1000).toISOString();
-  const venue = m.fullExchangeName || m.exchangeName || "Yahoo";
+  const VENUE = { CCY: "FX (indicative quotes)", CCC: "Crypto (CoinMarketCap)" };
+  const raw   = m.fullExchangeName || m.exchangeName || "Yahoo";
+  const venue = VENUE[raw] || raw;
   return {
     ...withChange(price, prev),
     currency:     m.currency || null,
