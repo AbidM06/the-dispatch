@@ -33,6 +33,8 @@ router.post("/refresh", requireWriteAuth, async (req, res, next) => {
       return res.json({ ...snap, refreshing: false, skipped: "refreshed under a minute ago", schedule: scheduler.getStatus() });
     }
     const fresh = await markets.refresh("manual");
+    // Journal stage 2: re-score ideas on the new prices (free data, no AI).
+    require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
     res.json({ ...fresh, refreshing: false, schedule: scheduler.getStatus() });
   } catch (err) { next(err); }
 });

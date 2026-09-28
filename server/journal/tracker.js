@@ -1,0 +1,269 @@
+/**
+ * server/journal/tracker.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Journal stage 2 — outcome tracking & scoring (DECISIONS D-16, D-18).
+ *
+ * Every logged idea is followed on free DAILY prices (the Markets history:
+ * Yahoo OHLC, FRED closes). No AI, no cost. Runs after each Markets refresh.
+ *
+ * Rules (owner-approved, D-18):
+ *   ENTRY    Only when price trades inside the entry zone [entryLow, entryHigh]
+ *            (a limit order, not "at the reference price"). Fill price = zone
+ *            midpoint. The idea may fill at any time within its horizon;
+ *            unfilled by then → "never_entered" (reported as a fill rate).
+ *   START    Tracking starts with the first daily bar AFTER the day the idea
+ *            was generated — that day's high/low includes prices from before
+ *            the idea existed.
+ *   CLOSE    The first of: target hit, stop hit, horizon expiry (closed at
+ *            that day's close). A gap through a level exits at the open.
+ *   UNCERTAIN  Daily bars cannot show intraday order. A day whose range
+ *            touches both target and stop — or, on the fill day, touches
+ *            either — is "uncertain": never guessed, no R.
+ *   HORIZON  The idea's horizonDays (or the parsed text). Undeclared → an
+ *            ASSUMED 91 days, labelled as such.
+ *   R        1R = |entry − stop|. Result R = signed move / 1R.
+ *   BENCH    S&P 500 index (^GSPC price, no dividends) over the same dates:
+ *            fill day's close → exit (or latest) close.
+ *   CLOSES-ONLY series (FRED) have no high/low: the day's range is taken as
+ *            the move between consecutive closes, and the result is labelled.
+ *
+ * State is incremental (only bars newer than the last processed one are
+ * read), so an idea older than the 6-month history window keeps its result.
+ * Final outcomes are ALSO appended to the Journal as an `outcome` event —
+ * append-only, like everything else there.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+"use strict";
+
+const fs   = require("fs");
+const path = require("path");
+
+const DAY_MS = 86_400_000;
+const ASSUMED_HORIZON_DAYS = 91;
+const FINAL = new Set(["target_hit", "stop_hit", "expired", "uncertain", "never_entered", "not_trackable"]);
+
+// ── pure scoring ─────────────────────────────────────────────────────────────
+const dateOf = (tSec) => new Date(tSec * 1000).toISOString().slice(0, 10);
+
+/** Normalise a history payload to daily bars {t, o, h, l, c, closeOnly}. */
+function toBars(history) {
+  if (!history) return [];
+  if (history.type === "ohlc") return (history.bars || []).map(b => ({ ...b, closeOnly: false }));
+  const pts = history.points || [];
+  return pts.map((p, i) => {
+    const prev = i > 0 ? pts[i - 1].v : p.v;
+    return { t: p.t, o: prev, h: Math.max(prev, p.v), l: Math.min(prev, p.v), c: p.v, closeOnly: true };
+  });
+}
+
+/** Levels + validity for one idea. */
+function plan(idea, horizon) {
+  const dir = idea.direction === "SHORT" ? -1 : 1;
+  const lo = Number(idea.entryLow), hi = Number(idea.entryHigh);
+  const zoneLow  = Number.isFinite(lo) && Number.isFinite(hi) ? Math.min(lo, hi) : (Number.isFinite(lo) ? lo : hi);
+  const zoneHigh = Number.isFinite(lo) && Number.isFinite(hi) ? Math.max(lo, hi) : (Number.isFinite(hi) ? hi : lo);
+  const entry = (zoneLow + zoneHigh) / 2;
+  const target = Number(idea.target), stop = Number(idea.stop);
+  const risk = dir * (entry - stop);
+  const reward = dir * (target - entry);
+  let problem = null;
+  if (![zoneLow, zoneHigh, target, stop].every(Number.isFinite)) problem = "Entry, target or stop is missing.";
+  else if (!(risk > 0) || !(reward > 0)) problem = "Levels are inconsistent with the direction (stop or target on the wrong side of entry).";
+  const assumed = !(horizon && Number(horizon.maxDays) > 0 && horizon.category !== "undeclared");
+  const days = assumed ? ASSUMED_HORIZON_DAYS : Number(horizon.maxDays);
+  const createdMs = Date.parse(idea.createdAt);
+  return {
+    dir, zoneLow, zoneHigh, entry, target, stop, risk, reward, problem,
+    horizonDays: days, horizonAssumed: assumed,
+    startAfter: dateOf(Math.floor(createdMs / 1000)),                         // bars strictly after this date
+    expiresOn: new Date(createdMs + days * DAY_MS).toISOString().slice(0, 10),
+  };
+}
+
+const r2 = (n) => Math.round(n * 100) / 100;
+
+function closeState(s, p, status, exitPrice, bar, note) {
+  const R = exitPrice == null ? null : r2(p.dir * (exitPrice - p.entry) / p.risk);
+  return {
+    ...s, status, exitPrice: exitPrice == null ? null : exitPrice, exitDate: dateOf(bar.t), R,
+    returnPct: exitPrice == null ? null : r2(p.dir * (exitPrice / p.entry - 1) * 100),
+    note: note || s.note || null, closeOnly: s.closeOnly || bar.closeOnly,
+  };
+}
+
+/**
+ * advance — pure. Feed an idea's state forward through new daily bars.
+ * @param {object} state  previous state (or {status:"waiting"} for a new idea)
+ * @param {object} p      plan(...)
+ * @param {Array}  bars   daily bars, ascending; only t > state.lastBarT are used
+ */
+function advance(state, p, bars) {
+  let s = { status: "waiting", lastBarT: 0, ...state };
+  if (FINAL.has(s.status)) return s;
+  for (const b of bars) {
+    if (b.t <= s.lastBarT) continue;
+    const d = dateOf(b.t);
+    if (d <= p.startAfter) { s.lastBarT = b.t; continue; }
+    if (d > p.expiresOn) {                                   // horizon over
+      if (s.status === "waiting") return { ...s, status: "never_entered", exitDate: p.expiresOn, note: "Price never traded in the entry zone within the horizon." };
+      return closeState(s, p, "expired", s.lastClose, { t: s.lastBarT, closeOnly: s.closeOnly }, "Horizon ended; closed at the last close.");
+    }
+    s.lastBarT = b.t;
+    s.closeOnly = s.closeOnly || b.closeOnly;
+    const hitsTarget = p.dir > 0 ? b.h >= p.target : b.l <= p.target;
+    const hitsStop   = p.dir > 0 ? b.l <= p.stop   : b.h >= p.stop;
+
+    if (s.status === "waiting") {
+      const inZone = b.l <= p.zoneHigh && b.h >= p.zoneLow;
+      if (!inZone) continue;
+      s = { ...s, status: "open", fillDate: d, fillPrice: p.entry };
+      if (hitsTarget || hitsStop) {
+        return closeState(s, p, "uncertain", null, b,
+          "Entered, and the same day also reached the " + (hitsTarget && hitsStop ? "target and the stop" : hitsTarget ? "target" : "stop") +
+          " — daily prices cannot show the order.");
+      }
+      s.lastClose = b.c;
+      continue;
+    }
+
+    // open
+    if (hitsTarget && hitsStop) {
+      return closeState(s, p, "uncertain", null, b, "The day's range reached both target and stop — daily prices cannot show which came first.");
+    }
+    if (hitsStop) {
+      const gap = p.dir > 0 ? b.o < p.stop : b.o > p.stop;
+      return closeState(s, p, "stop_hit", b.closeOnly ? b.c : (gap ? b.o : p.stop), b, gap && !b.closeOnly ? "Gapped through the stop; exit at the open." : null);
+    }
+    if (hitsTarget) {
+      const gap = p.dir > 0 ? b.o > p.target : b.o < p.target;
+      return closeState(s, p, "target_hit", b.closeOnly ? b.c : (gap ? b.o : p.target), b, gap && !b.closeOnly ? "Gapped through the target; exit at the open." : null);
+    }
+    s.lastClose = b.c;
+    if (d === p.expiresOn) return closeState(s, p, "expired", b.c, b, "Horizon ended; closed at the day's close.");
+  }
+  if (s.status === "open" && s.lastClose != null) {            // mark to market
+    s.R = r2(p.dir * (s.lastClose - p.entry) / p.risk);
+    s.returnPct = r2(p.dir * (s.lastClose / p.entry - 1) * 100);
+    s.markDate = dateOf(s.lastBarT);
+  }
+  return s;
+}
+
+/** S&P 500 close on or before a date (YYYY-MM-DD). */
+function closeOn(bars, date) {
+  let v = null;
+  for (const b of bars) { if (dateOf(b.t) <= date) v = b.c; else break; }
+  return v;
+}
+
+/** Attach the S&P comparison (same dates) to a state. */
+function withBenchmark(s, spxBars) {
+  if (!spxBars?.length || !s.fillDate) return s;
+  const endDate = s.exitDate || s.markDate;
+  const a = closeOn(spxBars, s.fillDate), b = endDate ? closeOn(spxBars, endDate) : null;
+  if (a == null || b == null) return s;
+  const spxPct = r2((b / a - 1) * 100);
+  return { ...s, spx: { fromDate: s.fillDate, toDate: endDate, returnPct: spxPct,
+    vsPct: s.returnPct == null ? null : r2(s.returnPct - spxPct),
+    basis: "S&P 500 index price (^GSPC), dividends excluded" } };
+}
+
+/** Summary over tracked entries. Uncertain and never-entered stay separate. */
+function stats(states) {
+  const all = Object.values(states);
+  const closed = all.filter(s => ["target_hit", "stop_hit", "expired"].includes(s.status));
+  const entered = all.filter(s => s.fillDate);
+  const decided = all.filter(s => s.status !== "not_trackable" && (s.fillDate || s.status === "never_entered"));
+  const avg = (xs) => xs.length ? r2(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
+  const vs = closed.map(s => s.spx?.vsPct).filter(v => v != null);
+  return {
+    tracked: all.filter(s => s.status !== "not_trackable").length,
+    open: all.filter(s => s.status === "open").length,
+    waiting: all.filter(s => s.status === "waiting").length,
+    closed: closed.length,
+    wins: closed.filter(s => s.R > 0).length,
+    winRate: closed.length ? r2(closed.filter(s => s.R > 0).length / closed.length * 100) : null,
+    avgR: avg(closed.map(s => s.R)),
+    totalR: closed.length ? r2(closed.reduce((a, s) => a + s.R, 0)) : null,
+    beatSpx: vs.length ? vs.filter(v => v > 0).length : null,
+    avgVsSpxPct: avg(vs),
+    uncertain: all.filter(s => s.status === "uncertain").length,
+    neverEntered: all.filter(s => s.status === "never_entered").length,
+    fillRate: decided.length ? r2(entered.length / decided.length * 100) : null,
+    notTrackable: all.filter(s => s.status === "not_trackable").length,
+  };
+}
+
+// ── persistence (derived state — recomputable, but kept for old ideas) ───────
+const IS_TEST = process.env.NODE_ENV === "test";
+const statePath = () => process.env.JOURNAL_TRACKING_PATH || path.join(__dirname, "../../data/journal_tracking.json");
+let _memory = null;
+function load() {
+  if (IS_TEST && !process.env.JOURNAL_TRACKING_PATH) return _memory || { updatedAt: null, entries: {} };
+  try { return JSON.parse(fs.readFileSync(statePath(), "utf8")); } catch { return { updatedAt: null, entries: {} }; }
+}
+function save(doc) {
+  if (IS_TEST && !process.env.JOURNAL_TRACKING_PATH) { _memory = doc; return; }
+  const f = statePath();
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f + ".tmp", JSON.stringify(doc, null, 2));
+  fs.renameSync(f + ".tmp", f);
+}
+
+// ── update (impure: reads the Journal and Markets history) ───────────────────
+let inFlight = null;
+
+async function updateAll() {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    const journal = require("./store");
+    const markets = require("../markets/service");
+    const doc = load();
+    const entries = journal.list({ limit: 100000 });
+    const needs = entries.filter(e => !FINAL.has(doc.entries[e.entryId]?.status));
+    if (!needs.length) return doc;
+
+    const histories = {};
+    const getBars = async (id) => {
+      if (!(id in histories)) {
+        try { histories[id] = toBars(await markets.getHistory(id, "1d")); }
+        catch (err) { histories[id] = null; console.warn(`[journal] no history for ${id}: ${err.message}`); }
+      }
+      return histories[id];
+    };
+    const spx = await getBars("SPX");
+
+    for (const e of needs) {
+      const p = plan(e.idea, e.horizon);
+      const prev = doc.entries[e.entryId] || { status: "waiting", lastBarT: 0 };
+      let s;
+      if (p.problem) s = { status: "not_trackable", note: p.problem };
+      else if (!e.idea.marketId) s = { status: "not_trackable", note: "No Markets instrument to price this idea against." };
+      else {
+        const bars = await getBars(e.idea.marketId);
+        if (!bars) { doc.entries[e.entryId] = { ...prev, lastError: "Price history unavailable at the last update." }; continue; }
+        s = withBenchmark(advance(prev, p, bars), spx);
+        delete s.lastError;
+      }
+      s = { ...s, plan: { entry: p.entry, zoneLow: p.zoneLow, zoneHigh: p.zoneHigh, target: p.target, stop: p.stop,
+        riskPerR: p.risk, horizonDays: p.horizonDays, horizonAssumed: p.horizonAssumed, expiresOn: p.expiresOn }, updatedAt: new Date().toISOString() };
+      doc.entries[e.entryId] = s;
+      if (FINAL.has(s.status)) {
+        try { journal.recordOutcome(e.entryId, s); } catch (err) { console.warn("[journal] outcome write failed:", err.message); }
+      }
+    }
+    doc.updatedAt = new Date().toISOString();
+    save(doc);
+    return doc;
+  })();
+  try { return await inFlight; } finally { inFlight = null; }
+}
+
+function getState() { return load(); }
+function _reset() { _memory = null; inFlight = null; }
+
+module.exports = {
+  updateAll, getState, stats,
+  _internal: { plan, advance, toBars, withBenchmark, closeOn, ASSUMED_HORIZON_DAYS },
+  _reset,
+};

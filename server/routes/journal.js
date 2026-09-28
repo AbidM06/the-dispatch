@@ -2,7 +2,7 @@
  * server/routes/journal.js — the trade-idea Journal (stage 1).
  *
  * GET  /api/journal?watched=true|false&origin=news|research&limit=
- * GET  /api/journal/:entryId
+ * GET  /api/journal/:entryId              (both include stage-2 tracking; see journal/tracker.js)
  * POST /api/journal/:entryId/watch         { watched }            (auth)
  * POST /api/journal/:entryId/pitch         { text, beforeReveal } (auth)
  * POST /api/journal/:entryId/manual-price  { price, note }        (auth)
@@ -14,6 +14,7 @@
 
 const { Router } = require("express");
 const journal    = require("../journal/store");
+const tracker    = require("../journal/tracker");
 const requireWriteAuth = require("../middleware/auth");
 
 const router = Router();
@@ -32,14 +33,16 @@ router.get("/", (req, res) => {
   const watched = req.query.watched === "true" ? true : req.query.watched === "false" ? false : undefined;
   const origin  = ["news", "research"].includes(req.query.origin) ? req.query.origin : undefined;
   const limit   = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-  res.json({ entries: journal.list({ watched, origin, limit }) });
+  const tracking = tracker.getState();
+  const entries = journal.list({ watched, origin, limit }).map(e => ({ ...e, tracking: tracking.entries[e.entryId] || null }));
+  res.json({ entries, stats: tracker.stats(tracking.entries), trackingUpdatedAt: tracking.updatedAt });
 });
 
 router.get("/:entryId", (req, res) => {
   ensureBackfilled();
   const e = journal.getEntry(req.params.entryId);
   if (!e) return res.status(404).json({ error: "Journal entry not found" });
-  res.json({ entry: e });
+  res.json({ entry: { ...e, tracking: tracker.getState().entries[e.entryId] || null } });
 });
 
 router.post("/:entryId/watch", requireWriteAuth, (req, res) =>

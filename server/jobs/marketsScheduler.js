@@ -109,6 +109,7 @@ async function tick() {
   status.running = true;
   try {
     await markets.refresh("schedule");
+    await require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
     status.lastRunAt = new Date().toISOString();
     status.lastError = null;
   } catch (err) {
