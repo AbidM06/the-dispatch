@@ -26,7 +26,7 @@ const { ensureBackfilled } = require("../journal/migrate");
 function send(res, fn) {
   // Mutations return the entry WITH its tracking, like the GETs, so the client
   // can swap it in without losing the result badge.
-  try { const e = fn(); res.json({ entry: { ...e, tracking: tracker.getState().entries[e.entryId] || null } }); }
+  try { const e = fn(); res.json({ entry: { ...e, tracking: tracker.trackingFor(e) } }); }
   catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 }
 
@@ -36,7 +36,7 @@ router.get("/", (req, res) => {
   const origin  = ["news", "research"].includes(req.query.origin) ? req.query.origin : undefined;
   const limit   = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
   const tracking = tracker.getState();
-  const trackingFor = (e) => tracking.entries[e.entryId] || (e.outcome ? { ...e.outcome, outcomeRecorded: true } : null);
+  const trackingFor = (e) => tracker.trackingFor(e, tracking);
   const entries = journal.list({ watched, origin, limit }).map(e => ({ ...e, tracking: trackingFor(e) }));
   // Stats cover every entry (not just the filtered view), including outcomes
   // restored from the Journal itself.
@@ -48,7 +48,7 @@ router.get("/:entryId", (req, res) => {
   ensureBackfilled();
   const e = journal.getEntry(req.params.entryId);
   if (!e) return res.status(404).json({ error: "Journal entry not found" });
-  res.json({ entry: { ...e, tracking: tracker.getState().entries[e.entryId] || null } });
+  res.json({ entry: { ...e, tracking: tracker.trackingFor(e) } });
 });
 
 router.post("/:entryId/watch", requireWriteAuth, (req, res) =>

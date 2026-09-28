@@ -15,13 +15,14 @@ const markets    = require("../markets/service");
 const scheduler  = require("../jobs/marketsScheduler");
 const requireWriteAuth = require("../middleware/auth");
 
+const { refreshMarkets } = require("../jobs/refreshMarkets");
 const router = Router();
 const MIN_MANUAL_GAP_MS = 60_000; // ignore double-clicks / rapid repeats
 
 router.get("/", async (req, res, next) => {
   try {
     let snap = markets.getSnapshot();
-    if (!snap) snap = await markets.refresh("first-load");
+    if (!snap) snap = await refreshMarkets("first-load");
     res.json({ ...snap, refreshing: markets.isRefreshing(), schedule: scheduler.getStatus() });
   } catch (err) { next(err); }
 });
@@ -32,11 +33,8 @@ router.post("/refresh", requireWriteAuth, async (req, res, next) => {
     if (snap && Date.now() - Date.parse(snap.generatedAt) < MIN_MANUAL_GAP_MS && !req.body?.force) {
       return res.json({ ...snap, refreshing: false, skipped: "refreshed under a minute ago", schedule: scheduler.getStatus() });
     }
-    const fresh = await markets.refresh("manual");
-    // Journal stage 2: re-score ideas on the new prices (free data, no AI).
-    // Awaited, like the scheduled path, so "refreshed" also means the Journal
-    // is up to date; a tracking failure is logged and never fails the refresh.
-    await require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
+    // Awaited through the shared helper, so "refreshed" also means the Journal is re-scored.
+    const fresh = await refreshMarkets("manual");
     res.json({ ...fresh, refreshing: false, schedule: scheduler.getStatus() });
   } catch (err) { next(err); }
 });

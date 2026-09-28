@@ -200,7 +200,8 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   price). "My pitch first" mode seals each new idea card until the owner writes a pitch
   (saved `beforeReveal: true`) or skips — in the Journal too; mode + sealed ids live in localStorage.
 - **Stage 2 — tracking & scoring** (`journal/tracker.js`, D-18). Runs after every Markets
-  refresh (scheduled + manual), on free daily history (Yahoo OHLC; FRED closes-only, labelled).
+  refresh — all refreshes go through `jobs/refreshMarkets.js` (never call `markets.refresh()`
+  directly) — and every Journal response resolves results via `tracker.trackingFor()`. It uses free daily history (Yahoo OHLC; FRED closes-only, labelled).
   No AI. Rules: tracking starts the day AFTER generation; the newest bar of each series is
   never scored (it may still be trading); **entered only when price trades in
   the entry zone** (fill = midpoint), at any time within the horizon, else `never_entered`;

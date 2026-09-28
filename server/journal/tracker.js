@@ -322,10 +322,18 @@ async function updateAll() {
 }
 
 function getState() { return load(); }
+
+/**
+ * trackingFor — THE lookup every Journal response uses: the derived state,
+ * or — if that file was lost — the durable outcome recorded in the Journal.
+ */
+function trackingFor(entry, state = load()) {
+  return state.entries[entry.entryId] || (entry.outcome ? { ...entry.outcome, outcomeRecorded: true } : null);
+}
 function _reset() { _memory = null; inFlight = null; }
 
 module.exports = {
-  updateAll, getState, stats,
+  updateAll, getState, stats, trackingFor,
   _internal: { plan, advance, toBars, withBenchmark, closeOn, ASSUMED_HORIZON_DAYS },
   _reset,
 };

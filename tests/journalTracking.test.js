@@ -268,6 +268,16 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     expect(journal.getEntry(e.entryId).outcome.status).toBe("unavailable");
   });
 
+  test("detail and edit responses fall back to the Journal outcome too", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    await tracker.updateAll();
+    tracker._reset();                                              // derived file lost, not yet rebuilt
+    const app = require("../server/index");
+    expect((await request(app).get(`/api/journal/${e.entryId}`)).body.entry.tracking).toMatchObject({ status: "target_hit" });
+    expect((await request(app).post(`/api/journal/${e.entryId}/watch`).send({ watched: true })).body.entry.tracking).toMatchObject({ status: "target_hit" });
+  });
+
   test("a prediction market that left the snapshot is still priced from the saved source", async () => {
     const { journal, tracker, markets } = setup({});
     const calls = [];
@@ -294,10 +304,26 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     expect(doc.entries[b.entryId]).toMatchObject({ status: "waiting", lastError: expect.stringMatching(/unavailable/) });
   });
 
-  test("the tracker runs after a manual Markets refresh", () => {
-    const src = require("fs").readFileSync(require("path").join(__dirname, "../server/routes/markets.js"), "utf8");
-    expect(src).toMatch(/await require\("\.\.\/journal\/tracker"\)\.updateAll\(\)/);   // awaited before responding
-    const sched = require("fs").readFileSync(require("path").join(__dirname, "../server/jobs/marketsScheduler.js"), "utf8");
-    expect(sched).toMatch(/journal\/tracker"\)\.updateAll\(\)/);
+  test("every Markets refresh path goes through the one helper that re-scores the Journal", () => {
+    const fs = require("fs"), path = require("path");
+    const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
+    expect(read("server/jobs/refreshMarkets.js")).toMatch(/await require\("\.\.\/journal\/tracker"\)\.updateAll\(\)/);
+    for (const f of ["server/routes/markets.js", "server/jobs/marketsScheduler.js"]) {
+      expect(read(f)).not.toMatch(/markets\.refresh\(/);                 // no bypass
+      expect(read(f)).toMatch(/refreshMarkets\(/);
+    }
+  });
+
+  test("refreshMarkets refreshes, then re-scores (awaited), and survives a tracking failure", async () => {
+    jest.resetModules();
+    const markets = require("../server/markets/service");
+    const tracker = require("../server/journal/tracker");
+    const order = [];
+    jest.spyOn(markets, "refresh").mockImplementation(async () => { order.push("refresh"); return { ok: 1 }; });
+    jest.spyOn(tracker, "updateAll").mockImplementation(async () => { order.push("track"); throw new Error("boom"); });
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    const snap = await require("../server/jobs/refreshMarkets").refreshMarkets("startup");
+    expect(snap).toEqual({ ok: 1 });
+    expect(order).toEqual(["refresh", "track"]);
   });
 });

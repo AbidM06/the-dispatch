@@ -108,8 +108,7 @@ async function tick() {
 
   status.running = true;
   try {
-    await markets.refresh("schedule");
-    await require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
+    await require("./refreshMarkets").refreshMarkets("schedule");
     status.lastRunAt = new Date().toISOString();
     status.lastError = null;
   } catch (err) {
@@ -126,7 +125,7 @@ async function tick() {
 function start() {
   if (process.env.MARKETS_SCHEDULE === "off" || status.intervalId) return;
   // First-ever run: no snapshot on disk → fetch once so the panel isn't empty.
-  if (!markets.getSnapshot()) markets.refresh("startup").catch(err => console.error("[marketsScheduler] startup refresh failed:", err.message));
+  if (!markets.getSnapshot()) require("./refreshMarkets").refreshMarkets("startup").catch(err => console.error("[marketsScheduler] startup refresh failed:", err.message));
   status.intervalId = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
   setTimeout(() => { tick().catch(() => {}); }, 5_000);
   const { times, tz } = cfg();
