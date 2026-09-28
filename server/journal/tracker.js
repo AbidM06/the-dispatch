@@ -49,6 +49,7 @@ const FINAL = new Set(["target_hit", "stop_hit", "expired", "uncertain", "never_
 // Larger gaps between consecutive daily bars mean the history cannot show what
 // happened in between (window moved past it, market delisted, data hole) — the
 // result is then "unavailable", never asserted. Closes-only monthly series get more room.
+const BENCHMARKED = new Set(["target_hit", "stop_hit", "expired", "uncertain"]);
 const MAX_GAP_DAYS = 10, MAX_GAP_DAYS_CLOSES_ONLY = 45;
 
 // ── pure scoring ─────────────────────────────────────────────────────────────
@@ -253,11 +254,15 @@ async function updateAll() {
     const done = (st) => FINAL.has(st?.status) && st.outcomeRecorded;
     // The Journal's outcome event is the durable record: if the derived file
     // was lost or is behind, the recorded outcome wins and is never recomputed.
+    let restored = 0;
     for (const e of entries) {
-      if (e.outcome && !done(doc.entries[e.entryId])) doc.entries[e.entryId] = { ...e.outcome, outcomeRecorded: true, restoredFromJournal: true };
+      if (e.outcome && !done(doc.entries[e.entryId])) { doc.entries[e.entryId] = { ...e.outcome, outcomeRecorded: true, restoredFromJournal: true }; restored++; }
     }
     const needs = entries.filter(e => !done(doc.entries[e.entryId]));
-    if (!needs.length) return doc;
+    if (!needs.length) {                                   // may still have restored entries from the Journal
+      if (restored) { doc.updatedAt = new Date().toISOString(); save(doc); }
+      return doc;
+    }
 
     const histories = {};
     const getBars = async (id, source) => {
@@ -277,7 +282,7 @@ async function updateAll() {
       const prev = doc.entries[e.entryId] || { status: "waiting", lastBarT: 0 };
       let s;
       if (FINAL.has(prev.status)) {
-        s = prev.fillDate && !prev.spx ? withBenchmark(prev, spx) : prev;      // result is settled; only the benchmark may be missing
+        s = BENCHMARKED.has(prev.status) && prev.fillDate && !prev.spx ? withBenchmark(prev, spx) : prev;      // result is settled; only the benchmark may be missing
       } else if (p.problem) s = { status: "not_trackable", note: p.problem };
       else if (!e.idea.marketId) s = { status: "not_trackable", note: "No Markets instrument to price this idea against." };
       else {
@@ -298,7 +303,9 @@ async function updateAll() {
         // The Journal's outcome event is written once, so it waits until the
         // S&P comparison is available for entered ideas; until then (and after
         // a failed write) the entry stays in the work list and is retried.
-        s.benchmarkPending = Boolean(s.fillDate && !s.spx);
+        // Only results with an exit (or uncertain day) have an S&P period to
+        // compare; "unavailable" has no endpoint, so it never waits for one.
+        s.benchmarkPending = Boolean(BENCHMARKED.has(s.status) && s.fillDate && !s.spx);
         s.outcomeRecorded = false;
         if (!s.benchmarkPending) {
           try { journal.recordOutcome(e.entryId, s); s.outcomeRecorded = true; }

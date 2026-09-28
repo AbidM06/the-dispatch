@@ -250,6 +250,24 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     expect(doc.entries[e.entryId]).toMatchObject({ status: "target_hit", R: 2, restoredFromJournal: true });   // …the recorded outcome wins
   });
 
+  test("a rebuild from the Journal is saved even when nothing else needs work", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    await tracker.updateAll();
+    tracker._reset();
+    expect(tracker.getState().entries[e.entryId]).toBeUndefined();
+    await tracker.updateAll();
+    expect(tracker.getState().entries[e.entryId]).toMatchObject({ status: "target_hit", restoredFromJournal: true });
+  });
+
+  test("an 'unavailable' result after a fill is recorded at once — it has no S&P period to wait for", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-25", 100, 101, 99.5, 100)] } });
+    const e = journal.logIdea({ ...IDEA });
+    const doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId]).toMatchObject({ status: "unavailable", fillDate: "2026-09-02", benchmarkPending: false, outcomeRecorded: true });
+    expect(journal.getEntry(e.entryId).outcome.status).toBe("unavailable");
+  });
+
   test("a prediction market that left the snapshot is still priced from the saved source", async () => {
     const { journal, tracker, markets } = setup({});
     const calls = [];
