@@ -326,3 +326,53 @@ describe("factCheck — dates", () => {
     expect(factCheck.checkClaims([claim("The 10-year Treasury yield hit 5% in 2023")], ctx).settledIds).toEqual([]);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+describe("SONNET_MODEL — one setting for every Sonnet job", () => {
+  afterEach(() => { delete process.env.SONNET_MODEL; delete process.env.IDEAS_MODEL; });
+
+  test("defaults to Sonnet 5 until the owner switches", () => {
+    jest.resetModules();
+    const llm = require("../server/research/llm");
+    const anthropic = require("../server/providers/anthropic");
+    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
+    for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat", "ideas"]) {
+      expect(llm.modelForRole(role)).toBe("claude-sonnet-5");
+    }
+    expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
+  });
+
+  test("SONNET_MODEL moves every Sonnet job; Haiku jobs and per-role overrides are unchanged", () => {
+    process.env.SONNET_MODEL = "claude-sonnet-5-5";
+    process.env.IDEAS_MODEL = "claude-sonnet-5";
+    jest.resetModules();
+    const llm = require("../server/research/llm");
+    const anthropic = require("../server/providers/anthropic");
+    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
+    expect(anthropic.MODEL).toBe("claude-haiku-4-5");
+    for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat"]) {
+      expect(llm.modelForRole(role)).toBe("claude-sonnet-5-5");
+    }
+    expect(llm.modelForRole("ideas")).toBe("claude-sonnet-5");        // per-role override wins
+    expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
+  });
+
+  test("Sonnet 5.5 is priced (never UNPRICED) and gets the dynamic web-search tool", () => {
+    jest.resetModules();
+    const aiCost = require("../server/providers/aiCost");
+    const p = aiCost.priceCall({ model: "claude-sonnet-5-5", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } });
+    expect(p.priced).toBe(true);
+    expect(p.usd).toBeCloseTo(12, 6);
+    expect(require("../server/providers/anthropic").webSearchTool("claude-sonnet-5-5").type).toBe("web_search_20260209");
+  });
+
+  test("receipts record how long the run took", () => {
+    jest.resetModules();
+    const aiCost = require("../server/providers/aiCost");
+    const r = aiCost.newReceipt();
+    const out = aiCost.finalizeReceipt(r);
+    expect(typeof out.durationMs).toBe("number");
+    expect(out.durationMs).toBeGreaterThanOrEqual(0);
+    expect(out).not.toHaveProperty("startedAt");
+  });
+});

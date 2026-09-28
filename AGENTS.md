@@ -69,7 +69,8 @@ npm run test:coverage
 | `ALPHA_VANTAGE_API_KEY` | No longer used by any route (provider kept, tested) |
 | `MARKETS_REFRESH_TIMES` / `MARKETS_TZ` / `MARKETS_SCHEDULE` | Markets refresh slots (default `07:45,14:45` Europe/London, weekdays; `off` disables) |
 | `POLYMARKET_TAGS` / `POLYMARKET_COUNT` | Prediction markets shown (default economy,geopolitics / 4) |
-| `IDEAS_MODEL` | Model for idea cards (default `claude-sonnet-5`) |
+| `SONNET_MODEL` | The Sonnet every Sonnet job uses — research pipeline, chat, idea cards (default `claude-sonnet-5`; `claude-sonnet-5-5` under evaluation, D-17) |
+| `IDEAS_MODEL` | Model for idea cards (default: `SONNET_MODEL`) |
 | `PORT` | Default 3001 |
 | `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
 | `ANTHROPIC_DAILY_CAP` | **USD** cap per UTC day, measured from real usage (default $5; 0 = off) |
@@ -446,7 +447,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
   QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
 - Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
-  All calls pass through the USD budget gate. Models: Sonnet 5, Haiku 4.5 for extraction.
+  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5; `server/providers/models.js`), Haiku 4.5 for extraction.
 - **Every agent receives the verified FRED block** (`verifiedBlock`) — reviewers used to judge
   the draft with no market data of their own.
 - **Fact check before audit**: `factCheck.checkClaims()` settles FACT claims naming exactly one
@@ -500,8 +501,9 @@ a cloud sandbox and could never reach `localhost:3001`. Auto-start at login:
 4. **Budget caps are USD**, measured from real usage and persisted; a budget error never falls
    through to another paid provider. $20/month warn-only, $5/day hard.
 4b. **No AI on a schedule by default** — research, bulletin and events/risk are button-driven.
-5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-haiku-4-5`. The web_search
-   tool type is model-dependent (`web_search_20260209` for Sonnet 5, `web_search_20250305` for
+5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`. Never
+   hardcode a Sonnet id: use `models.sonnetModel()`. The web_search
+   tool type is model-dependent (`web_search_20260209` for Sonnet 5 / 5.5, `web_search_20250305` for
    Haiku 4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
 6. **Markets data is free-only** (budget £0). Yahoo is unofficial — keep fallbacks per instrument.
 7. **Freshness is measured, not assumed** — never label a value "live" without its print time.

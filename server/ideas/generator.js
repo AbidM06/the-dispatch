@@ -12,7 +12,7 @@
  * cannot invent a URL. Price levels are checked against the latest price.
  *
  * No direction/universe restrictions (long or short, any instrument).
- * Model: IDEAS_MODEL env (default Sonnet 5). Cost ≈ $0.02–0.05 per idea,
+ * Model: IDEAS_MODEL env, else SONNET_MODEL (default Sonnet 5). Cost ≈ $0.02–0.05 per idea,
  * counted against ANTHROPIC_DAILY_CAP / MONTHLY_CAP via the shared budget gate.
  *
  * Every generated idea is written to the append-only Journal (server/journal)
