@@ -31,9 +31,10 @@ npm run test:coverage
 | `PORT` | Default 3001 |
 | `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
 | `ANTHROPIC_DAILY_CAP` | **USD** cap per UTC day, measured from real usage (default $5; 0 = off) |
-| `ANTHROPIC_MONTHLY_CAP` | **USD** cap per UTC month (default $50; 0 = off) |
+| `ANTHROPIC_MONTHLY_CAP` / `_MODE` | **USD** cap per UTC month (default $20) — `warn` (default: banner + confirm warning, never blocks) or `block` |
 | `RESEARCH_CONFIRM_ABOVE_USD` | Manual refreshes estimated above this need `confirm: true` (default 0 = always) |
-| `RESEARCH_BATCH_TIME` / `RESEARCH_BATCH_TYPES` | Daily batched pipeline run (default 06:40, all seven types) |
+| `RESEARCH_BATCH` / `BULLETIN_SCHEDULE` / `AI_REFRESH_SCHEDULE` | Scheduled AI jobs — **all off by default**; `on` to schedule |
+| `RESEARCH_BATCH_TIME` / `RESEARCH_BATCH_TYPES` | When `RESEARCH_BATCH=on`: 06:40, all seven types |
 
 ---
 
@@ -77,8 +78,8 @@ server/ideas/              generator.js · store.js — on-demand idea cards
 server/research/           five-agent pipeline — see "Institutional Research" below
 server/jobs/
   marketsScheduler.js      Markets refresh, weekdays 07:45 + 14:45 UK, one catch-up after sleep
-  researchBatchJob.js      06:40 weekdays: full pipeline per report type, every call batched
-  bulletinScheduler.js · aiRefreshJob.js
+  researchBatchJob.js      opt-in (RESEARCH_BATCH=on): 06:40 full pipeline per type, every call batched
+  bulletinScheduler.js · aiRefreshJob.js   opt-in (BULLETIN_SCHEDULE / AI_REFRESH_SCHEDULE=on)
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry(), fetchWithTimeout(), isRetryable()
 server/schemas/index.js    Zod schemas — validate() wrapper
@@ -197,6 +198,7 @@ measured data; the client renders it as a separate table. `unverified[]` is what
 not confirm — surfacing that is the point, not a defect.
 
 ## Research batching
+**Off by default** (owner's choice: reports are generated on demand; `RESEARCH_BATCH=on` enables).
 `server/jobs/researchBatchJob.js` runs `routes/research.generateReport(type, "", { batch: true })`
 for each type in `RESEARCH_BATCH_TYPES` (default all seven) at `RESEARCH_BATCH_TIME` (06:40).
 That is the SAME five-agent pipeline the Research tab uses — it used to batch bare drafts
@@ -240,8 +242,12 @@ Every Messages API request goes through `providers/claudeTransport.js`. Do not a
 - **Receipts**: `transport.runWithContext({ receipt, batch, role }, fn)` uses AsyncLocalStorage,
   so every call inside — including the draft via `anthropic.js` — lands on the receipt under
   its role. The orchestrator stores it as `report.meta.cost`; the client shows it (`RpCostReceipt`).
+- **Nothing spends on a schedule.** `server/index.js` starts the three AI jobs only when
+  their flag is `on`; every GET that could call AI is read-only or button-triggered.
 - **Budget** (`providers/budget.js`): `ANTHROPIC_DAILY_CAP` / `_MONTHLY_CAP` are **dollars**
-  checked against the ledger before each call. (It used to count calls, and `parseInt(undefined)
+  checked against the ledger before each call. Daily ($5) is always a hard stop (runaway
+  guard); monthly ($20) is `warn` by default — `getStatus().monthly.overCap` drives a banner
+  and the refresh confirm warns when a run would cross it. (It used to count calls, and `parseInt(undefined)
   ?? 5` made an unset cap NaN = off.) A budget error never escalates to the OpenAI tier.
   One call can overshoot a cap by its own cost — there is no pre-reservation of a guess.
 - **Refresh estimate**: `GET /api/research/report/estimate` averages recent synchronous
@@ -398,7 +404,8 @@ a cloud sandbox and could never reach `localhost:3001`. Auto-start at login:
 2. **No fabricated fallbacks** — research failure is a 503 `available: false`, never a seeded report.
 3. **Every Claude call goes through `claudeTransport`** — priced, recorded, on the receipt.
 4. **Budget caps are USD**, measured from real usage and persisted; a budget error never falls
-   through to another paid provider.
+   through to another paid provider. $20/month warn-only, $5/day hard.
+4b. **No AI on a schedule by default** — research, bulletin and events/risk are button-driven.
 5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-haiku-4-5`. The web_search
    tool type is model-dependent (`web_search_20260209` for Sonnet 5, `web_search_20250305` for
    Haiku 4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.

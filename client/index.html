@@ -2169,12 +2169,18 @@ function App() {
     const sp = est.spend || { today: {}, month: {} };
     const bs = budgetStatus || {};
     const capTxt = (used, cap) => '$' + (used || 0).toFixed(2) + (cap ? ' of $' + cap.toFixed(2) + ' cap' : '');
+    const mCap = bs.monthly && bs.monthly.cap;
+    const projected = (sp.month.usd || 0) + est.estimateUSD;
+    const overWarn = mCap && projected > mCap
+      ? '\n\n⚠ This would take you to ~$' + projected.toFixed(2) + ' this month — over your $' + mCap.toFixed(2) + ' monthly budget.'
+      : '';
     const ok = window.confirm(
       'Generate a new ' + researchType.toUpperCase() + ' report?\n\n' +
       'Estimated cost: ~$' + est.estimateUSD.toFixed(2) + ' (range $' + est.lowUSD.toFixed(2) + '–$' + est.highUSD.toFixed(2) + ')\n' +
       est.basisDetail + '\n\n' +
       'Spent today: ' + capTxt(sp.today.usd, bs.daily && bs.daily.cap) + '\n' +
-      'Spent this month: ' + capTxt(sp.month.usd, bs.monthly && bs.monthly.cap)
+      'Spent this month: ' + capTxt(sp.month.usd, bs.monthly && bs.monthly.cap) +
+      overWarn
     );
     if (!ok) return;
 
@@ -6778,6 +6784,14 @@ function App() {
           ' · All AI-powered sections showing cached or seeded data'
         ),
 
+      // Monthly AI budget is a warning, not a stop (owner's choice) — so it must be loud.
+      budgetStatus && budgetStatus.monthly && budgetStatus.monthly.overCap &&
+        React.createElement('div', { className:'ai-fallback-banner' },
+          '⚠ OVER MONTHLY AI BUDGET — ',
+          React.createElement('strong', null, '$' + budgetStatus.monthly.used.toFixed(2) + ' of $' + budgetStatus.monthly.cap.toFixed(2)),
+          ' spent this month. Generating still works; every run adds to the overspend.'
+        ),
+
       // Topbar
       React.createElement('div', { className:'topbar' },
         React.createElement('div', { className:'topbar-brand' }, 'The Dispatch'),
@@ -6790,7 +6804,9 @@ function App() {
                    ' · ' + budgetStatus.daily.calls + ' calls today',
           },
           'AI TODAY ', React.createElement('strong', null, '$' + (budgetStatus.daily.used || 0).toFixed(2)),
-          budgetStatus.daily.cap ? ' / $' + budgetStatus.daily.cap.toFixed(0) : ''
+          budgetStatus.daily.cap ? ' / $' + budgetStatus.daily.cap.toFixed(0) : '',
+          ' · MONTH ', React.createElement('strong', null, '$' + (budgetStatus.monthly.used || 0).toFixed(2)),
+          budgetStatus.monthly.cap ? ' / $' + budgetStatus.monthly.cap.toFixed(0) : ''
         ),
         React.createElement('div', { className:'topbar-actions' },
           React.createElement('div', {

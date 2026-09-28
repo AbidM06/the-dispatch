@@ -786,3 +786,26 @@ describe("Glossary endpoints", () => {
     expect(res.body.data.terms.every(t => t.category === "islamic")).toBe(true);
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Nothing spends money on a schedule unless opted in.
+// ══════════════════════════════════════════════════════════════════════════════
+describe("AI schedulers are opt-in", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../server/index.js"), "utf8");
+
+  test.each([
+    ["AI_REFRESH_SCHEDULE", "./jobs/aiRefreshJob"],
+    ["BULLETIN_SCHEDULE",   "./jobs/bulletinScheduler"],
+    ["RESEARCH_BATCH",      "./jobs/researchBatchJob"],
+  ])("%s gates %s", (flag, mod) => {
+    expect(src).toMatch(new RegExp(`\\["${flag}",\\s*"[^"]+",\\s*"${mod.replace(/[./]/g, "\\$&")}"\\]`));
+  });
+
+  test("no AI job is started unconditionally", () => {
+    for (const mod of ["aiRefreshJob", "bulletinScheduler", "researchBatchJob"]) {
+      expect(src).not.toMatch(new RegExp(`require\\("\\./jobs/${mod}"\\)`));
+    }
+    expect(src).toMatch(/process\.env\[name\] === "on"/);
+  });
+});

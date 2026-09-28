@@ -35,6 +35,7 @@ beforeEach(() => {
   process.env.ANTHROPIC_API_KEY = "test-key";
   delete process.env.ANTHROPIC_DAILY_CAP;
   delete process.env.ANTHROPIC_MONTHLY_CAP;
+  delete process.env.ANTHROPIC_MONTHLY_CAP_MODE;
   delete process.env.RESEARCH_CONFIRM_ABOVE_USD;
 });
 
@@ -80,11 +81,29 @@ describe("aiCost.priceCall — dollars from real usage", () => {
 
 // ══════════════════════════════════════════════════════════════════════════════
 describe("budget — caps are USD, not call counts", () => {
-  test("an unset cap defaults to $5/day (not NaN, not off)", () => {
+  test("unset caps default to $5/day and $20/month, monthly in warn mode (not NaN, not off)", () => {
     const s = budget.getStatus();
     expect(s.currency).toBe("USD");
     expect(s.daily.cap).toBe(5);
-    expect(s.monthly.cap).toBe(50);
+    expect(s.monthly.cap).toBe(20);
+    expect(s.monthly.mode).toBe("warn");
+    expect(s.monthly.overCap).toBe(false);
+  });
+
+  test("monthly cap in warn mode: over $20 is flagged but never blocks", () => {
+    process.env.ANTHROPIC_DAILY_CAP = "0";   // isolate the monthly dimension
+    aiCost.record(aiCost.priceCall({ model: "claude-sonnet-5", usage: { output_tokens: 2_100_000 } }));   // $21
+    expect(() => budget.checkAndIncrement()).not.toThrow();
+    expect(budget.getStatus().monthly).toMatchObject({ overCap: true, mode: "warn", remaining: 0 });
+  });
+
+  test("monthly cap in block mode stops calls", () => {
+    process.env.ANTHROPIC_DAILY_CAP = "0";
+    process.env.ANTHROPIC_MONTHLY_CAP_MODE = "block";
+    aiCost.record(aiCost.priceCall({ model: "claude-sonnet-5", usage: { output_tokens: 2_100_000 } }));
+    let err;
+    try { budget.checkAndIncrement(); } catch (e) { err = e; }
+    expect(err.code).toBe("BUDGET_MONTHLY");
   });
 
   test("many cheap calls do not trip the cap; dollars do", () => {

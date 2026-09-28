@@ -6,8 +6,12 @@
  * Spend is measured from each call's real token usage (providers/aiCost.js)
  * and persisted to data/ai_spend.json, so a restart does not reset it.
  * Caps are read from env at call time:
- *   ANTHROPIC_DAILY_CAP    USD per UTC day    (default 5)
- *   ANTHROPIC_MONTHLY_CAP  USD per UTC month  (default 50)
+ *   ANTHROPIC_DAILY_CAP         USD per UTC day    (default 5)  — always a hard stop:
+ *                               the guard against a runaway loop or retry storm
+ *   ANTHROPIC_MONTHLY_CAP       USD per UTC month  (default 20)
+ *   ANTHROPIC_MONTHLY_CAP_MODE  "warn" (default) or "block". The owner chose
+ *                               warn: going over is allowed but flagged in the
+ *                               top bar and in every refresh confirmation.
  * Set a cap to 0 to disable that dimension. DISABLE_AI=true blocks all calls.
  *
  * History: this used to count CALLS while every doc called it a USD cap, and
@@ -20,7 +24,7 @@
  * invented number.
  *
  * Usage:
- *   budget.checkAndIncrement();   // throws BUDGET_DAILY / BUDGET_MONTHLY if over cap
+ *   budget.checkAndIncrement();   // throws BUDGET_DAILY (or BUDGET_MONTHLY in block mode)
  *   budget.getStatus();           // { daily, monthly } in USD
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -41,12 +45,14 @@ function _cap(name, dflt) {
   return Number.isFinite(v) && v >= 0 ? v : dflt;
 }
 function _dailyCap()   { return _cap("ANTHROPIC_DAILY_CAP", 5); }
-function _monthlyCap() { return _cap("ANTHROPIC_MONTHLY_CAP", 50); }
+function _monthlyCap() { return _cap("ANTHROPIC_MONTHLY_CAP", 20); }
+function _monthlyMode() { return process.env.ANTHROPIC_MONTHLY_CAP_MODE === "block" ? "block" : "warn"; }
 
 /**
  * Check spend so far against the USD caps. Name kept for its callers; nothing
  * is incremented here — aiCost.record() adds each call's real cost afterwards.
- * Throws an Error with err.code === "BUDGET_DAILY" or "BUDGET_MONTHLY".
+ * Throws an Error with err.code === "BUDGET_DAILY", or "BUDGET_MONTHLY" when the
+ * monthly cap is in block mode. In warn mode the monthly cap never throws.
  */
 function checkAndIncrement() {
   const s = aiCost.spendSummary();
@@ -60,7 +66,7 @@ function checkAndIncrement() {
     err.code = "BUDGET_DAILY";
     throw err;
   }
-  if (monthly > 0 && s.month.usd >= monthly) {
+  if (monthly > 0 && _monthlyMode() === "block" && s.month.usd >= monthly) {
     const err = new Error(
       `Anthropic monthly budget reached ($${s.month.usd.toFixed(2)} of $${monthly.toFixed(2)} this month).`
     );
@@ -77,7 +83,8 @@ function getStatus() {
   return {
     currency: "USD",
     daily:   { used: round(s.today.usd), cap: daily,   remaining: daily   > 0 ? round(Math.max(0, daily   - s.today.usd)) : null, calls: s.today.calls, webSearches: s.today.webSearches, unpricedCalls: s.today.unpricedCalls },
-    monthly: { used: round(s.month.usd), cap: monthly, remaining: monthly > 0 ? round(Math.max(0, monthly - s.month.usd)) : null, calls: s.month.calls, webSearches: s.month.webSearches, unpricedCalls: s.month.unpricedCalls },
+    monthly: { used: round(s.month.usd), cap: monthly, remaining: monthly > 0 ? round(Math.max(0, monthly - s.month.usd)) : null, calls: s.month.calls, webSearches: s.month.webSearches, unpricedCalls: s.month.unpricedCalls,
+               mode: _monthlyMode(), overCap: monthly > 0 && s.month.usd >= monthly },
     pricesChecked: s.pricesChecked,
   };
 }

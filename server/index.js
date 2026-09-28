@@ -183,14 +183,21 @@ if (require.main === module) {
     if (process.env.NODE_ENV !== "test") {
       const { start: startMarkets } = require("./jobs/marketsScheduler");
       startMarkets();
-      const { start: startAiRefresh } = require("./jobs/aiRefreshJob");
-      startAiRefresh();
-      const { start: startBulletin } = require("./jobs/bulletinScheduler");
-      startBulletin();
-      // Pre-generates the research reports through the five-agent pipeline,
-      // every call via the Batch API at 50% cost (06:40 weekdays).
-      const { start: startResearchBatch } = require("./jobs/researchBatchJob");
-      startResearchBatch();
+
+      // AI jobs are OFF unless switched on: nothing spends money without a
+      // button press. Each has a manual equivalent in the UI (Refresh on
+      // Events/Risk, Generate on the bulletin and on each research report).
+      const optIn = (name) => process.env[name] === "on";
+      const aiJobs = [
+        ["AI_REFRESH_SCHEDULE",  "Events/Risk/Econ refresh (07:30)", "./jobs/aiRefreshJob"],
+        ["BULLETIN_SCHEDULE",    "Morning bulletin (07:00 UTC)",     "./jobs/bulletinScheduler"],
+        // Full five-agent pipeline per report, every call batched at 50% (06:40).
+        ["RESEARCH_BATCH",       "Daily research reports (06:40)",   "./jobs/researchBatchJob"],
+      ];
+      for (const [flag, label, mod] of aiJobs) {
+        if (optIn(flag)) require(mod).start();
+        else console.log(`[scheduler] ${label}: manual only (set ${flag}=on to schedule)`);
+      }
     }
   });
 }
