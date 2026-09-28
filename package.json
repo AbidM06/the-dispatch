@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "jest --runInBand --forceExit",
-    "test:coverage": "jest --coverage --runInBand --forceExit"
+    "test:coverage": "jest --coverage --runInBand --forceExit",
+    "context-pack": "node scripts/context-pack.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -25,7 +26,12 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/tests/**/*.test.js"],
-    "collectCoverageFrom": ["server/**/*.js", "seeds/**/*.js"]
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "server/**/*.js",
+      "seeds/**/*.js"
+    ]
   }
 }
