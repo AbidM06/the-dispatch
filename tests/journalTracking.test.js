@@ -66,6 +66,12 @@ describe("tracker.advance — pure rules", () => {
     expect(never.status).toBe("never_entered");
   });
 
+  test("an unfilled idea is settled ON its expiry day, not the day after", () => {
+    const weekly = (from, to) => { const out = []; for (let t = Date.parse(from); t <= Date.parse(to); t += 7 * 86400000) out.push(bar(new Date(t).toISOString().slice(0, 10), 104, 105, 103, 104)); return out; };
+    const s = advance({}, p, [...weekly("2026-09-06", "2026-10-11"), bar("2026-10-13", 104, 105, 103, 104)]);
+    expect(s).toMatchObject({ status: "never_entered", exitDate: "2026-10-13" });
+  });
+
   test("open ideas are marked to market; state is incremental", () => {
     const s1 = advance({}, p, [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-03", 102, 103, 101, 102)]);
     expect(s1).toMatchObject({ status: "open", R: 0.4, markDate: "2026-09-03" });
@@ -276,6 +282,19 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const app = require("../server/index");
     expect((await request(app).get(`/api/journal/${e.entryId}`)).body.entry.tracking).toMatchObject({ status: "target_hit" });
     expect((await request(app).post(`/api/journal/${e.entryId}/watch`).send({ watched: true })).body.entry.tracking).toMatchObject({ status: "target_hit" });
+  });
+
+  test("closes-only series get the 45-day allowance before 'series stopped' → unavailable", async () => {
+    const { journal, tracker, markets } = setup({});
+    const now = Date.now(), iso = (ms) => new Date(ms).toISOString();
+    // monthly closes; horizon ended 20 days ago, next observation not published yet
+    markets.getHistory.mockImplementation(async (id) => id === "SPX"
+      ? { type: "ohlc", bars: [bar(iso(now - 60 * 86400000).slice(0, 10), 0, 0, 0, 5000), bar("2099-01-01", 1, 1, 1, 1)] }
+      : { type: "line", points: [{ t: Math.floor((now - 55 * 86400000) / 1000), v: 2.9 }, { t: Math.floor((now - 25 * 86400000) / 1000), v: 3.0 }, { t: Math.floor(now / 1000), v: 3.1 }] });
+    const e = journal.logIdea({ ...IDEA, id: "IDEA-cpi", marketId: "CPI", createdAt: iso(now - 60 * 86400000), horizonDays: 40,
+      entryLow: 2.8, entryHigh: 3.05, target: 4, stop: 2 });
+    const doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId].status).not.toBe("unavailable");
   });
 
   test("a prediction market that left the snapshot is still priced from the saved source", async () => {

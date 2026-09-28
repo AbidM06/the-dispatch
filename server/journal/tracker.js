@@ -133,7 +133,11 @@ function advance(state, p, bars) {
 
     if (s.status === "waiting") {
       const inZone = b.l <= p.zoneHigh && b.h >= p.zoneLow;
-      if (!inZone) continue;
+      if (!inZone) {
+        // The whole horizon has now been seen without a fill.
+        if (d === p.expiresOn) return { ...s, status: "never_entered", exitDate: p.expiresOn, note: "Price never traded in the entry zone within the horizon." };
+        continue;
+      }
       s = { ...s, status: "open", fillDate: d, fillPrice: p.entry };
       if (hitsTarget || hitsStop) {
         return closeState(s, p, "uncertain", null, b,
@@ -292,7 +296,9 @@ async function updateAll() {
         delete s.lastError;
         // The series stopped (market closed / delisted) before the horizon ended.
         const lastSeen = s.lastBarT ? dateOf(s.lastBarT) : p.startAfter;
-        const graceOver = (Date.now() - Date.parse(p.expiresOn)) / DAY_MS > MAX_GAP_DAYS;
+        // Same allowance as advance(): closes-only (e.g. monthly FRED) series publish less often.
+        const grace = (s.closeOnly || bars.some(x => x.closeOnly)) ? MAX_GAP_DAYS_CLOSES_ONLY : MAX_GAP_DAYS;
+        const graceOver = (Date.now() - Date.parse(p.expiresOn)) / DAY_MS > grace;
         if (!FINAL.has(s.status) && graceOver && lastSeen < p.expiresOn) {
           s = { ...s, status: "unavailable", R: null, note: `Price history stops at ${lastSeen}, before the horizon ended (${p.expiresOn}) — no result is asserted.` };
         }
