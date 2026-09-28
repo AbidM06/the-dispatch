@@ -39,7 +39,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
-| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | `codex/<topic>` (Codex to name) | Starting — approved by owner 2026-09-28 |
+| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6; fixes on `codex/<topic>` | Auditing — evidence posted on PR #5, fixes proposed as small separate PRs |
 | Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | Starting — approved by owner 2026-09-28 |
 
 ## 3. Next up (agreed with the owner, not started)
