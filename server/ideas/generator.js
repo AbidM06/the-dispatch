@@ -67,6 +67,7 @@ function marketContext() {
       kind: "market", ref, label: `${it.label} ${q.value}${it.unit === "%" ? "%" : ""}`,
       url: q.sourceUrl, publisher: q.source, publishedAt: q.releasedAt || q.asOf, observedAt: q.asOf || null, marketId: it.id, value: q.value,
       freshness: it.stale ? "stale" : it.freshness?.label, cadence: q.cadence || null,
+      history: it.history || null,   // dynamic markets: lets the Journal find history after the market leaves the snapshot
     };
     const chg = q.changePct != null ? `${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%` :
                 q.change != null ? `${q.change >= 0 ? "+" : ""}${q.change}` : "n/a";
@@ -234,6 +235,7 @@ Today is ${new Date().toISOString()}. Return the JSON object only.`;
       : { reportId: input.report.reportId, reportType: input.report.reportType, reportVersion: input.report.version },
     ...idea,
     marketId: marketRef ? marketRef.marketId : null,
+    marketHistory: marketRef?.history || null,
     // asOf is the OBSERVATION time (FRED: the observation date); releasedAt is when the
     // provider published it (FRED: series last_updated). The Journal ages the former.
     priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.observedAt || marketRef.publishedAt, releasedAt: marketRef.publishedAt || null, url: marketRef.url, freshness: marketRef.freshness || null, cadence: marketRef.cadence || null } : null,

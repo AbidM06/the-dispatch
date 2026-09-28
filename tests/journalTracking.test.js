@@ -58,9 +58,11 @@ describe("tracker.advance — pure rules", () => {
   });
 
   test("horizon expiry closes at that day's close; unfilled by expiry → never_entered", () => {
-    const filled = advance({}, p, [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-10-13", 103, 104, 102, 103)]);
+    // weekly bars in between (a gap of more than 10 days would be "unavailable")
+    const weekly = (from, to, o, h, l, c) => { const out = []; for (let t = Date.parse(from); t <= Date.parse(to); t += 7 * 86400000) out.push(bar(new Date(t).toISOString().slice(0, 10), o, h, l, c)); return out; };
+    const filled = advance({}, p, [bar("2026-09-02", 100, 101, 99.5, 100), ...weekly("2026-09-09", "2026-10-07", 102, 103, 101, 102), bar("2026-10-13", 103, 104, 102, 103)]);
     expect(filled).toMatchObject({ status: "expired", exitPrice: 103, R: 0.6 });
-    const never = advance({}, p, [bar("2026-09-02", 104, 105, 103, 104), bar("2026-10-14", 104, 105, 103, 104)]);
+    const never = advance({}, p, [...weekly("2026-09-02", "2026-10-07", 104, 105, 103, 104), bar("2026-10-14", 104, 105, 103, 104)]);
     expect(never.status).toBe("never_entered");
   });
 
@@ -93,6 +95,17 @@ describe("tracker.advance — pure rules", () => {
     expect(withBenchmark({ ...s, spxAtFill: 5000 }, recent).spx).toMatchObject({ returnPct: 10, vsPct: 0 });
     const lagging = [bar("2026-03-02", 0, 0, 0, 5000), bar("2026-08-01", 0, 0, 0, 5200)];   // nothing near the exit date
     expect(withBenchmark(s, lagging)).toMatchObject({ spx: null, spxAtFill: 5000 });
+  });
+
+  test("history that starts after the horizon ended → unavailable, never 'never entered'", () => {
+    const s = advance({}, p, [bar("2026-11-20", 100, 101, 99, 100), bar("2026-11-21", 100, 101, 99, 100)]);
+    expect(s.status).toBe("unavailable");
+    expect(s.note).toMatch(/No price history between 2026-09-01 and 2026-11-20/);
+  });
+
+  test("a hole in the history mid-trade → unavailable", () => {
+    const s = advance({}, p, [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-25", 100, 101, 99.5, 100)]);
+    expect(s).toMatchObject({ status: "unavailable", fillDate: "2026-09-02", R: null });
   });
 
   test("undeclared horizon → assumed 91 days, labelled", () => {
@@ -225,6 +238,32 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const e2 = s2.journal.logIdea({ ...IDEA });
     doc = await s2.tracker.updateAll();
     expect(doc.entries[e2.entryId]).toMatchObject({ status: "open", markDate: "2026-09-02" });
+  });
+
+  test("a lost tracking file is rebuilt from the Journal's outcome, not recomputed", async () => {
+    const { journal, tracker, markets } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    await tracker.updateAll();
+    tracker._reset();                                              // derived file lost
+    markets.getHistory.mockImplementation(async () => ({ type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 90, 91, 89, 90), bar("2026-09-07", 1, 1, 1, 1)] }));
+    const doc = await tracker.updateAll();                         // revised history would say "stop"…
+    expect(doc.entries[e.entryId]).toMatchObject({ status: "target_hit", R: 2, restoredFromJournal: true });   // …the recorded outcome wins
+  });
+
+  test("a prediction market that left the snapshot is still priced from the saved source", async () => {
+    const { journal, tracker, markets } = setup({});
+    const calls = [];
+    markets.getHistory.mockImplementation(async (id, tf, opts) => {
+      calls.push({ id, source: opts && opts.source });
+      if (id === "SPX") return { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-07", 1, 1, 1, 1)] };
+      if (opts && opts.source && opts.source.tokenId === "tok1") return { type: "line", points: [{ t: T("2026-09-02"), v: 0.40 }, { t: T("2026-09-07"), v: 0.41 }] };
+      throw new Error("not in snapshot");
+    });
+    const e = journal.logIdea({ ...IDEA, id: "IDEA-pm", marketId: "PM-fed-cut", marketHistory: { provider: "polymarket", tokenId: "tok1" },
+      entryLow: 0.39, entryHigh: 0.41, target: 0.6, stop: 0.3 });
+    const doc = await tracker.updateAll();
+    expect(calls.find(c => c.id === "PM-fed-cut").source).toEqual({ provider: "polymarket", tokenId: "tok1" });
+    expect(doc.entries[e.entryId].status).toBe("open");
   });
 
   test("no instrument or no history → says so, never invents a result", async () => {

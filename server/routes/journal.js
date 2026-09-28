@@ -36,8 +36,12 @@ router.get("/", (req, res) => {
   const origin  = ["news", "research"].includes(req.query.origin) ? req.query.origin : undefined;
   const limit   = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
   const tracking = tracker.getState();
-  const entries = journal.list({ watched, origin, limit }).map(e => ({ ...e, tracking: tracking.entries[e.entryId] || null }));
-  res.json({ entries, stats: tracker.stats(tracking.entries), trackingUpdatedAt: tracking.updatedAt });
+  const trackingFor = (e) => tracking.entries[e.entryId] || (e.outcome ? { ...e.outcome, outcomeRecorded: true } : null);
+  const entries = journal.list({ watched, origin, limit }).map(e => ({ ...e, tracking: trackingFor(e) }));
+  // Stats cover every entry (not just the filtered view), including outcomes
+  // restored from the Journal itself.
+  const all = Object.fromEntries(journal.list({ limit: 100000 }).map(e => [e.entryId, trackingFor(e)]).filter(([, t]) => t));
+  res.json({ entries, stats: tracker.stats(all), trackingUpdatedAt: tracking.updatedAt });
 });
 
 router.get("/:entryId", (req, res) => {

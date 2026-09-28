@@ -1193,7 +1193,7 @@ tbody tr:hover td { background: var(--bg-alt); }
 .jr-out.pos { color: var(--pos); } .jr-out.neg { color: var(--neg); }
 .jr-badge.target_hit { color: var(--pos); border-color: var(--pos); }
 .jr-badge.stop_hit { color: var(--neg); border-color: var(--neg); }
-.jr-badge.uncertain, .jr-badge.never_entered, .jr-badge.not_trackable { color: var(--gold); border-color: var(--gold-border); }
+.jr-badge.uncertain, .jr-badge.never_entered, .jr-badge.not_trackable, .jr-badge.unavailable { color: var(--gold); border-color: var(--gold-border); }
 .jr-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 12px; font-family: var(--mono); font-size: 11px; color: var(--ink-mid); }
 .jr-stats b { color: var(--ink); font-weight: 600; }
 .jr-body { padding: 6px 12px 12px; border-top: 1px solid var(--rule); font-size: 12px; line-height: 1.6; color: var(--ink); }
@@ -6866,7 +6866,7 @@ function App() {
     };
     const refLabel = { ok: 'price ok', stale: 'stale price', missing: 'no price', unknown: 'freshness unknown' };
     const outLabel = { waiting: 'waiting for entry', open: 'open', target_hit: 'target hit', stop_hit: 'stopped out', expired: 'expired',
-                       uncertain: 'uncertain', never_entered: 'never entered', not_trackable: 'not trackable' };
+                       uncertain: 'uncertain', never_entered: 'never entered', not_trackable: 'not trackable', unavailable: 'history unavailable' };
     const hzLabel  = { tactical: 'Tactical ≤2w', swing: 'Swing 1–3m', strategic: 'Strategic 3–12m', undeclared: 'Horizon undeclared' };
     const list = journalEntries
       .filter(e => journalFilter.watched === 'all' || (journalFilter.watched === 'watched' ? e.watched : !e.watched))

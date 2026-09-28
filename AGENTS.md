@@ -206,7 +206,12 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   the entry zone** (fill = midpoint), at any time within the horizon, else `never_entered`;
   closes at target / stop (gap → the open) / horizon expiry (that day's close); a day touching
   both levels — or the fill day touching either — is `uncertain`, no R. 1R = |entry − stop|.
-  Undeclared horizon → **assumed 91 days**, labelled (a declared one of any length is honoured). Benchmark: S&P 500 index (^GSPC price, no
+  Undeclared horizon → **assumed 91 days**, labelled (a declared one of any length is honoured).
+  If the history cannot cover the idea's period (starts too late, a gap > 10 days — 45 for
+  closes-only series — or stops before the horizon ends) the result is `unavailable`, never
+  asserted. The Journal's `outcome` event wins over the derived file (a lost file is rebuilt
+  from it, not recomputed). Dynamic markets (Polymarket) keep their history source on the
+  card (`marketHistory`) so they can be priced after leaving the snapshot. Benchmark: S&P 500 index (^GSPC price, no
   dividends) from the fill close (stored as `spxAtFill`, since history only reaches ~6 months)
   to the exit close; if either close is unavailable the outcome waits (`benchmarkPending`). State is incremental in
   `data/journal_tracking.json` (gitignored); a final result is also appended to the Journal as

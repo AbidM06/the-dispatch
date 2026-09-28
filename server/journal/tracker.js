@@ -26,6 +26,9 @@
  *   R        1R = |entry − stop|. Result R = signed move / 1R.
  *   BENCH    S&P 500 index (^GSPC price, no dividends) over the same dates:
  *            fill day's close → exit (or latest) close.
+ *   UNAVAILABLE  If the history does not cover the idea's period (it starts
+ *            too late, has a gap, or stops before the horizon ends), the
+ *            result is "unavailable" — never "never entered" by default.
  *   CLOSES-ONLY series (FRED) have no high/low: the day's range is taken as
  *            the move between consecutive closes, and the result is labelled.
  *
@@ -42,7 +45,11 @@ const path = require("path");
 
 const DAY_MS = 86_400_000;
 const ASSUMED_HORIZON_DAYS = 91;
-const FINAL = new Set(["target_hit", "stop_hit", "expired", "uncertain", "never_entered", "not_trackable"]);
+const FINAL = new Set(["target_hit", "stop_hit", "expired", "uncertain", "never_entered", "not_trackable", "unavailable"]);
+// Larger gaps between consecutive daily bars mean the history cannot show what
+// happened in between (window moved past it, market delisted, data hole) — the
+// result is then "unavailable", never asserted. Closes-only monthly series get more room.
+const MAX_GAP_DAYS = 10, MAX_GAP_DAYS_CLOSES_ONLY = 45;
 
 // ── pure scoring ─────────────────────────────────────────────────────────────
 const dateOf = (tSec) => new Date(tSec * 1000).toISOString().slice(0, 10);
@@ -108,6 +115,12 @@ function advance(state, p, bars) {
     if (b.t <= s.lastBarT) continue;
     const d = dateOf(b.t);
     if (d <= p.startAfter) { s.lastBarT = b.t; continue; }
+    const seen = s.lastBarT && dateOf(s.lastBarT) > p.startAfter ? dateOf(s.lastBarT) : p.startAfter;
+    const gap = (Date.parse(d) - Date.parse(seen)) / DAY_MS;
+    if (gap > (b.closeOnly ? MAX_GAP_DAYS_CLOSES_ONLY : MAX_GAP_DAYS)) {
+      return { ...s, status: "unavailable", R: null,
+        note: `No price history between ${seen} and ${d}, so what happened then cannot be seen — no result is asserted.` };
+    }
     if (d > p.expiresOn) {                                   // horizon over
       if (s.status === "waiting") return { ...s, status: "never_entered", exitDate: p.expiresOn, note: "Price never traded in the entry zone within the horizon." };
       return closeState(s, p, "expired", s.lastClose, { t: s.lastBarT, closeOnly: s.closeOnly }, "Horizon ended; closed at the last close.");
@@ -186,11 +199,11 @@ function stats(states) {
   const all = Object.values(states);
   const closed = all.filter(s => ["target_hit", "stop_hit", "expired"].includes(s.status));
   const entered = all.filter(s => s.fillDate);
-  const decided = all.filter(s => s.status !== "not_trackable" && (s.fillDate || s.status === "never_entered"));
+  const decided = all.filter(s => s.fillDate || s.status === "never_entered");
   const avg = (xs) => xs.length ? r2(xs.reduce((a, b) => a + b, 0) / xs.length) : null;
   const vs = closed.map(s => s.spx?.vsPct).filter(v => v != null);
   return {
-    tracked: all.filter(s => s.status !== "not_trackable").length,
+    tracked: all.filter(s => !["not_trackable", "unavailable"].includes(s.status)).length,
     open: all.filter(s => s.status === "open").length,
     waiting: all.filter(s => s.status === "waiting").length,
     closed: closed.length,
@@ -204,6 +217,7 @@ function stats(states) {
     neverEntered: all.filter(s => s.status === "never_entered").length,
     fillRate: decided.length ? r2(entered.length / decided.length * 100) : null,
     notTrackable: all.filter(s => s.status === "not_trackable").length,
+    unavailable: all.filter(s => s.status === "unavailable").length,
   };
 }
 
@@ -237,16 +251,21 @@ async function updateAll() {
     // event has not been written yet (a failed append, or a benchmark still
     // missing) — so neither is lost to a one-off error.
     const done = (st) => FINAL.has(st?.status) && st.outcomeRecorded;
+    // The Journal's outcome event is the durable record: if the derived file
+    // was lost or is behind, the recorded outcome wins and is never recomputed.
+    for (const e of entries) {
+      if (e.outcome && !done(doc.entries[e.entryId])) doc.entries[e.entryId] = { ...e.outcome, outcomeRecorded: true, restoredFromJournal: true };
+    }
     const needs = entries.filter(e => !done(doc.entries[e.entryId]));
     if (!needs.length) return doc;
 
     const histories = {};
-    const getBars = async (id) => {
+    const getBars = async (id, source) => {
       if (!(id in histories)) {
         // The newest daily bar may still be trading (the 14:45 UK refresh runs
         // just after the US open; FX never closes), so it is never scored —
         // it is read again, complete, at a later refresh.
-        try { histories[id] = toBars(await markets.getHistory(id, "1d")).slice(0, -1); }
+        try { histories[id] = toBars(await markets.getHistory(id, "1d", { source })).slice(0, -1); }
         catch (err) { histories[id] = null; console.warn(`[journal] no history for ${id}: ${err.message}`); }
       }
       return histories[id];
@@ -262,10 +281,16 @@ async function updateAll() {
       } else if (p.problem) s = { status: "not_trackable", note: p.problem };
       else if (!e.idea.marketId) s = { status: "not_trackable", note: "No Markets instrument to price this idea against." };
       else {
-        const bars = await getBars(e.idea.marketId);
+        const bars = await getBars(e.idea.marketId, e.idea.marketHistory || undefined);
         if (!bars) { doc.entries[e.entryId] = { ...prev, lastError: "Price history unavailable at the last update." }; continue; }
         s = withBenchmark(advance(prev, p, bars), spx);
         delete s.lastError;
+        // The series stopped (market closed / delisted) before the horizon ended.
+        const lastSeen = s.lastBarT ? dateOf(s.lastBarT) : p.startAfter;
+        const graceOver = (Date.now() - Date.parse(p.expiresOn)) / DAY_MS > MAX_GAP_DAYS;
+        if (!FINAL.has(s.status) && graceOver && lastSeen < p.expiresOn) {
+          s = { ...s, status: "unavailable", R: null, note: `Price history stops at ${lastSeen}, before the horizon ended (${p.expiresOn}) — no result is asserted.` };
+        }
       }
       s = { ...s, plan: { entry: p.entry, zoneLow: p.zoneLow, zoneHigh: p.zoneHigh, target: p.target, stop: p.stop,
         riskPerR: p.risk, horizonDays: p.horizonDays, horizonAssumed: p.horizonAssumed, expiresOn: p.expiresOn }, updatedAt: new Date().toISOString() };

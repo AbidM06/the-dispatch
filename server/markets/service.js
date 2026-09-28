@@ -212,7 +212,7 @@ function refresh(trigger = "manual") {
 
 function isRefreshing() { return !!inFlight; }
 
-async function getHistory(id, tf = "1d") {
+async function getHistory(id, tf = "1d", { source } = {}) {
   if (!["1d", "1h"].includes(tf)) tf = "1d";
   const key = `${id}:${tf}`;
   const hit = historyCache.get(key);
@@ -224,7 +224,9 @@ async function getHistory(id, tf = "1d") {
     chain = inst.sources.filter(s => sources.HISTORY[s.provider]);
   } else {
     const pm = (getSnapshot()?.items || []).find(i => i.id === id && i.history);
-    chain = pm ? [pm.history] : [];
+    // A dynamic market (Polymarket) is found in the current snapshot, or via a
+    // source the caller saved earlier — it may have left the top list since.
+    chain = pm ? [pm.history] : (source && sources.HISTORY[source.provider] ? [source] : []);
   }
   if (!chain.length) { const e = new Error(`No chart source for ${id}`); e.status = 404; throw e; }
 
