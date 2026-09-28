@@ -82,6 +82,19 @@ describe("tracker.advance — pure rules", () => {
     expect(plan({ ...IDEA, stop: 120 }, HZ).problem).toMatch(/inconsistent/);
   });
 
+  test("a declared horizon beyond a year is honoured, not replaced by the assumption", () => {
+    expect(plan(IDEA, { category: "undeclared", maxDays: 540 })).toMatchObject({ horizonDays: 540, horizonAssumed: false });
+  });
+
+  test("benchmark: the fill-day S&P close is kept, and a stale end date is dropped", () => {
+    const s = { status: "target_hit", fillDate: "2026-03-02", exitDate: "2026-09-04", returnPct: 10 };
+    const recent = [bar("2026-08-01", 0, 0, 0, 5200), bar("2026-09-04", 0, 0, 0, 5500)];   // history no longer reaches March
+    expect(withBenchmark(s, recent).spx).toBeNull();                                        // cannot compare → pending
+    expect(withBenchmark({ ...s, spxAtFill: 5000 }, recent).spx).toMatchObject({ returnPct: 10, vsPct: 0 });
+    const lagging = [bar("2026-03-02", 0, 0, 0, 5000), bar("2026-08-01", 0, 0, 0, 5200)];   // nothing near the exit date
+    expect(withBenchmark(s, lagging)).toMatchObject({ spx: null, spxAtFill: 5000 });
+  });
+
   test("undeclared horizon → assumed 91 days, labelled", () => {
     expect(plan(IDEA, { category: "undeclared", maxDays: null })).toMatchObject({ horizonDays: 91, horizonAssumed: true });
   });
@@ -130,8 +143,10 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     jest.resetModules();
     const markets = require("../server/markets/service");
     jest.spyOn(markets, "getHistory").mockImplementation(async (id) => {
-      if (id === "SPX") return { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-04", 0, 0, 0, 5100)] };
-      if (history[id]) return history[id];
+      // every series ends with a still-trading bar, which the tracker must ignore
+      const live = bar("2026-09-07", 1, 1, 1, 1);
+      if (id === "SPX") return { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-04", 0, 0, 0, 5100), live] };
+      if (history[id]) return { ...history[id], bars: [...history[id].bars, live] };
       throw new Error("no source");
     });
     const journal = require("../server/journal/store"); journal._reset();
@@ -193,6 +208,23 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     expect(w.body.entry.tracking).toMatchObject({ status: "target_hit" });
     const p = await request(app).post(`/api/journal/${e.entryId}/pitch`).send({ text: "mine", beforeReveal: false });
     expect(p.body.entry.tracking).toMatchObject({ status: "target_hit" });
+  });
+
+  test("the newest (possibly still-trading) bar is never scored", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-03", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    // setup() appends a live bar; here the target-hit day is the last COMPLETE bar, so it counts…
+    let doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId].status).toBe("target_hit");
+    // …but a target touched only on the live bar would not.
+    const s2 = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100)] } });
+    const markets = require("../server/markets/service");
+    markets.getHistory.mockImplementation(async (id) => ({ type: "ohlc", bars: id === "SPX"
+      ? [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-03", 0, 0, 0, 5050)]
+      : [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-03", 104, 111, 103, 110)] }));
+    const e2 = s2.journal.logIdea({ ...IDEA });
+    doc = await s2.tracker.updateAll();
+    expect(doc.entries[e2.entryId]).toMatchObject({ status: "open", markDate: "2026-09-02" });
   });
 
   test("no instrument or no history → says so, never invents a result", async () => {

@@ -201,12 +201,14 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   (saved `beforeReveal: true`) or skips — in the Journal too; mode + sealed ids live in localStorage.
 - **Stage 2 — tracking & scoring** (`journal/tracker.js`, D-18). Runs after every Markets
   refresh (scheduled + manual), on free daily history (Yahoo OHLC; FRED closes-only, labelled).
-  No AI. Rules: tracking starts the day AFTER generation; **entered only when price trades in
+  No AI. Rules: tracking starts the day AFTER generation; the newest bar of each series is
+  never scored (it may still be trading); **entered only when price trades in
   the entry zone** (fill = midpoint), at any time within the horizon, else `never_entered`;
   closes at target / stop (gap → the open) / horizon expiry (that day's close); a day touching
   both levels — or the fill day touching either — is `uncertain`, no R. 1R = |entry − stop|.
-  Undeclared horizon → **assumed 91 days**, labelled. Benchmark: S&P 500 index (^GSPC price, no
-  dividends) from the fill close to the exit close. State is incremental in
+  Undeclared horizon → **assumed 91 days**, labelled (a declared one of any length is honoured). Benchmark: S&P 500 index (^GSPC price, no
+  dividends) from the fill close (stored as `spxAtFill`, since history only reaches ~6 months)
+  to the exit close; if either close is unavailable the outcome waits (`benchmarkPending`). State is incremental in
   `data/journal_tracking.json` (gitignored); a final result is also appended to the Journal as
   one `outcome` event. `GET /api/journal` returns `tracking` per entry and `stats` (win rate
   and R over closed ideas; uncertain, never-entered and fill rate reported separately).

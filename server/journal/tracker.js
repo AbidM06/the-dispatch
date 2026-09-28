@@ -14,6 +14,8 @@
  *   START    Tracking starts with the first daily bar AFTER the day the idea
  *            was generated — that day's high/low includes prices from before
  *            the idea existed.
+ *   LIVE BAR The newest bar of every series is skipped: it may still be
+ *            trading, and a result on a half-finished day could be wrong.
  *   CLOSE    The first of: target hit, stop hit, horizon expiry (closed at
  *            that day's close). A gap through a level exits at the open.
  *   UNCERTAIN  Daily bars cannot show intraday order. A day whose range
@@ -69,7 +71,9 @@ function plan(idea, horizon) {
   let problem = null;
   if (![zoneLow, zoneHigh, target, stop].every(Number.isFinite)) problem = "Entry, target or stop is missing.";
   else if (!(risk > 0) || !(reward > 0)) problem = "Levels are inconsistent with the direction (stop or target on the wrong side of entry).";
-  const assumed = !(horizon && Number(horizon.maxDays) > 0 && horizon.category !== "undeclared");
+  // Any positive declared length is honoured — including beyond a year (the
+  // display bucket is "undeclared" then, but the idea still said how long).
+  const assumed = !(horizon && Number(horizon.maxDays) > 0);
   const days = assumed ? ASSUMED_HORIZON_DAYS : Number(horizon.maxDays);
   const createdMs = Date.parse(idea.createdAt);
   return {
@@ -150,20 +154,29 @@ function advance(state, p, bars) {
 }
 
 /** S&P 500 close on or before a date (YYYY-MM-DD). */
+const BENCH_MAX_GAP_DAYS = 5;   // a benchmark close further than this from the date asked for is not used
 function closeOn(bars, date) {
-  let v = null;
-  for (const b of bars) { if (dateOf(b.t) <= date) v = b.c; else break; }
+  let v = null, at = null;
+  for (const b of bars) { if (dateOf(b.t) <= date) { v = b.c; at = dateOf(b.t); } else break; }
+  if (v == null || (Date.parse(date) - Date.parse(at)) / DAY_MS > BENCH_MAX_GAP_DAYS) return null;
   return v;
 }
 
 /** Attach the S&P comparison (same dates) to a state. */
+// The S&P close on the fill day is stored the first time it is seen
+// (spxAtFill), because Yahoo's daily history only reaches back ~6 months and a
+// long-held idea would otherwise lose its starting point. The end close must
+// match the CURRENT exit/mark date — a comparison over other dates is dropped,
+// never kept (the outcome then waits as benchmarkPending).
 function withBenchmark(s, spxBars) {
-  if (!spxBars?.length || !s.fillDate) return s;
+  if (!s.fillDate) return s;
   const endDate = s.exitDate || s.markDate;
-  const a = closeOn(spxBars, s.fillDate), b = endDate ? closeOn(spxBars, endDate) : null;
-  if (a == null || b == null) return s;
+  const a = s.spxAtFill != null ? s.spxAtFill : (spxBars?.length ? closeOn(spxBars, s.fillDate) : null);
+  const b = endDate && spxBars?.length ? closeOn(spxBars, endDate) : null;
+  const base = a != null ? { ...s, spxAtFill: a } : s;
+  if (a == null || b == null) return { ...base, spx: null };
   const spxPct = r2((b / a - 1) * 100);
-  return { ...s, spx: { fromDate: s.fillDate, toDate: endDate, returnPct: spxPct,
+  return { ...base, spx: { fromDate: s.fillDate, toDate: endDate, returnPct: spxPct,
     vsPct: s.returnPct == null ? null : r2(s.returnPct - spxPct),
     basis: "S&P 500 index price (^GSPC), dividends excluded" } };
 }
@@ -230,7 +243,10 @@ async function updateAll() {
     const histories = {};
     const getBars = async (id) => {
       if (!(id in histories)) {
-        try { histories[id] = toBars(await markets.getHistory(id, "1d")); }
+        // The newest daily bar may still be trading (the 14:45 UK refresh runs
+        // just after the US open; FX never closes), so it is never scored —
+        // it is read again, complete, at a later refresh.
+        try { histories[id] = toBars(await markets.getHistory(id, "1d")).slice(0, -1); }
         catch (err) { histories[id] = null; console.warn(`[journal] no history for ${id}: ${err.message}`); }
       }
       return histories[id];
