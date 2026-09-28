@@ -34,7 +34,7 @@ const GLOSSARY = [
     category: "basics",
     definition: "Borrowing an asset and selling it with the expectation of buying it back cheaper. Profit from price declines. PROHIBITED under Shariah (gharar — selling what you do not own).",
     example: "Short-seller borrows AMD at $190, sells it, buys back at $150 = $40 profit per share.",
-    islamicNote: "Short-selling is prohibited (gharar). The Islamic Fiqh Academy of Mecca ruled that selling goods not in one's possession is invalid. The Dispatch engine never generates SHORT ideas.",
+    islamicNote: "Short-selling is prohibited (gharar). The Islamic Fiqh Academy of Mecca ruled that selling goods not in one's possession is invalid. The Dispatch's idea cards are unrestricted and may suggest SHORT ideas.",
     interviewAngle: "S&T interviewers may ask for short ideas — frame your response around risk management rather than refusing: 'I'd express this bearish view through options or reducing long exposure.'",
   },
   {
@@ -550,7 +550,7 @@ const GLOSSARY = [
     category: "interview",
     definition: "Option sensitivity measures. Delta: price sensitivity to underlying move. Gamma: rate of change of delta. Vega: sensitivity to volatility. Theta: daily time decay.",
     example: "AMD call option delta 0.6: if AMD rises $1, the call gains ~$0.60. Delta hedging: sell 60 shares of AMD per 100 calls to be delta-neutral.",
-    islamicNote: "Options are generally prohibited (gharar) in Islamic finance. Understanding the Greeks is important for education but The Dispatch engine never generates options-based ideas.",
+    islamicNote: "Options are generally prohibited (gharar) in Islamic finance. Understanding the Greeks is important for education. The Dispatch's idea cards are unrestricted and may suggest option structures.",
     interviewAngle: "Derivatives S&T roles require fluent Greeks knowledge. Key interview question: 'If you're long gamma, what do you want the market to do?' Answer: move a lot, in either direction (you dynamically delta-hedge and profit from large moves).",
   },
   {

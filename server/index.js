@@ -27,6 +27,7 @@ const path     = require("path");
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 const marketsRouter   = require("./routes/markets");
+const ideasRouter     = require("./routes/ideas");
 const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
@@ -59,6 +60,7 @@ app.use((req, _res, next) => {
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use("/api/markets",   marketsRouter);
+app.use("/api/ideas",     ideasRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
@@ -135,6 +137,8 @@ if (require.main === module) {
     console.log(`  GET  /api/markets`);
     console.log(`  POST /api/markets/refresh`);
     console.log(`  GET  /api/markets/history/:id?tf=1d|1h`);
+    console.log(`  POST /api/ideas/news | /api/ideas/research   (on-demand idea cards)`);
+    console.log(`  GET  /api/ideas`);
     console.log(`  GET  /api/risk`);
     console.log(`  POST /api/risk/refresh`);
     console.log(`  GET  /api/events`);

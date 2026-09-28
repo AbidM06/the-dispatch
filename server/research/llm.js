@@ -36,6 +36,7 @@ const ROLE_DEFAULTS = {
   portfolio: MODEL_SONNET,
   chair:     MODEL_SONNET,
   chat:      MODEL_SONNET,
+  ideas:     MODEL_SONNET,
 };
 
 const ROLE_ENV = {
@@ -46,6 +47,7 @@ const ROLE_ENV = {
   portfolio: "RESEARCH_PORTFOLIO_MODEL",
   chair:     "RESEARCH_CHAIR_MODEL",
   chat:      "RESEARCH_CHAT_MODEL",
+  ideas:     "IDEAS_MODEL",
 };
 
 function modelForRole(role) {

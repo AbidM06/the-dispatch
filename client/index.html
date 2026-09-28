@@ -966,6 +966,7 @@ tbody tr:hover td { background: var(--bg-alt); }
 .mk-row:hover, .mk-row.open { background: var(--bg-card); }
 .mk-row.stale td { opacity: .75; }
 .mk-name { color: var(--ink); font-family: var(--sans); font-size: 12px; }
+.mk-pitch { margin-left: 8px; display: inline-block; vertical-align: middle; }
 .mk-caret { display: inline-block; width: 14px; color: var(--ink-low); font-size: 9px; }
 .mk-last { font-weight: 600; color: var(--ink); }
 .mk-up { color: var(--pos); } .mk-down { color: var(--neg); }
@@ -1003,6 +1004,39 @@ tbody tr:hover td { background: var(--bg-alt); }
   .mk-table th:nth-child(5), .mk-table td:nth-child(5) { display: none; }
   .mk-grid { grid-template-columns: 1fr; }
 }
+/* ── TRADE IDEA CARDS ──────────────────────────────────────────────────── */
+.idc-panel { margin-bottom: 18px; }
+.idc-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.idc-panel-title { font-size: 9px; letter-spacing: .18em; color: var(--ink-low); margin-bottom: 3px; }
+.idc { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 10px; background: var(--bg); }
+.idc.open { border-color: var(--gold-border); }
+.idc-head { display: flex; gap: 12px; align-items: center; padding: 10px 12px 6px; cursor: pointer; }
+.idc-dir { font-size: 9px; letter-spacing: .12em; padding: 3px 8px; border-radius: 3px; border: 1px solid; font-weight: 600; }
+.idc-long { color: var(--pos); border-color: var(--pos); } .idc-short { color: var(--neg); border-color: var(--neg); }
+.idc-title { flex: 1; min-width: 0; }
+.idc-instr { font-family: var(--sans); font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.idc-ac { font-weight: 400; color: var(--ink-low); font-size: 10px; }
+.idc-headline { font-family: var(--serif); font-size: 14px; color: var(--ink); line-height: 1.35; }
+.idc-meta { text-align: right; font-size: 10px; color: var(--ink-mid); white-space: nowrap; }
+.idc-sub { font-size: 9.5px; color: var(--ink-low); }
+.idc-levels { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 4px 12px 10px; }
+.idc-lv span { display: block; font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-low); }
+.idc-lv strong { font-size: 11.5px; color: var(--ink); font-weight: 600; }
+.idc-warn { margin: 0 12px 10px; font-size: 10px; color: var(--neg); }
+.idc-body { padding: 4px 12px 12px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--ink); line-height: 1.6; }
+.idc-body p { margin: 8px 0; font-family: var(--sans); }
+.idc-expr { font-weight: 600; margin-top: 8px; }
+.idc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; font-family: var(--sans); }
+.idc-lbl { font-size: 8.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); margin: 8px 0 3px; }
+.idc-risks, .idc-src { margin: 0 0 6px 16px; font-family: var(--sans); font-size: 11.5px; }
+.idc-src a { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--border-med); }
+.idc-src a:hover { color: var(--gold); }
+.idc-ref { font-family: var(--mono); font-size: 9px; color: var(--ink-low); }
+.idc-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 10px; font-size: 9.5px; color: var(--ink-low); }
+.news-idea-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-mid); font-family: var(--font); font-size: 8.5px; letter-spacing: .1em; padding: 1px 7px; border-radius: 2px; cursor: pointer; margin-left: 8px; }
+.news-idea-btn:hover:not(:disabled) { border-color: var(--gold-border); color: var(--gold); }
+.news-idea-btn:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 760px) { .idc-levels { grid-template-columns: repeat(3, 1fr); } .idc-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -1100,6 +1134,8 @@ const EXPLAINERS = {
 // on as the licence asks). History is fetched on demand per instrument and
 // cached client-side for the session; the server caches it too.
 const MK_TZ = 'Europe/London';
+// Single stocks that get the on-demand AI equity pitch button (moved here from the old Snapshot tab)
+const MK_PITCHABLE = new Set(['AMD','NVDA','MSFT','TSLA','MU','AMAT','LRCX']);
 const mkHistoryCache = new Map();
 
 function mkCssVar(name) {
@@ -1364,6 +1400,10 @@ function App() {
   const [bulletin, setBulletin]             = useState(null);
   const [bulletinLoading, setBulletinLoading] = useState(false);
   const [tickerNews, setTickerNews]   = useState(null);
+  const [ideaCards, setIdeaCards]     = useState([]);
+  const [ideaBusy, setIdeaBusy]       = useState(null);   // { origin, headlineId? } while generating
+  const [ideaOpen, setIdeaOpen]       = useState(null);   // id of expanded card
+  const [ideaShowAll, setIdeaShowAll] = useState({});
 
   // ── Glossary tab state ───────────────────────────────────────────────────
   const [glossary, setGlossary]             = useState(null);
@@ -1493,6 +1533,7 @@ function App() {
     loadRisk();
     loadBrief();
     loadNews();
+    loadIdeaCards();
     loadBulletin();
     loadGlossary();
     loadBudgetStatus();
@@ -1654,6 +1695,36 @@ function App() {
       showToast('News error: ' + err.message, 'error');
     }
     setNewsLoading(false);
+  }
+
+  async function loadIdeaCards() {
+    try {
+      const resp = await apiFetch('/api/ideas?limit=100');
+      setIdeaCards(resp.ideas || []);
+    } catch (err) { /* non-critical */ }
+  }
+
+  async function generateIdea(origin, body) {
+    setIdeaBusy({ origin, headlineId: body && body.headlineId != null ? body.headlineId : null });
+    try {
+      const resp = await apiFetch('/api/ideas/' + origin, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+      });
+      setIdeaCards(list => [resp.idea].concat(list));
+      setIdeaOpen(resp.idea.id);
+      showToast('Idea ready: ' + resp.idea.direction + ' ' + resp.idea.instrument, 'success');
+      loadBudgetStatus();
+    } catch (err) {
+      showToast('Idea failed: ' + err.message, 'error');
+    }
+    setIdeaBusy(null);
+  }
+
+  async function dismissIdea(id) {
+    try {
+      await apiFetch('/api/ideas/' + encodeURIComponent(id), { method: 'DELETE' });
+      setIdeaCards(list => list.filter(c => c.id !== id));
+    } catch (err) { showToast('Could not dismiss: ' + err.message, 'error'); }
   }
 
   async function loadTickerNews(ticker) {
@@ -2319,6 +2390,7 @@ function App() {
               React.createElement('td', { className:'mk-name' },
                 React.createElement('span', { className:'mk-caret' }, open ? '▾' : '▸'),
                 it.label,
+                MK_PITCHABLE.has(it.id) && React.createElement('span', { className:'mk-pitch' }, PitchButton(it.id)),
                 it.eventTitle && React.createElement('div', { className:'mk-sub' }, it.eventTitle + ' · ' + it.outcome)),
               React.createElement('td', { className:'num mk-last' }, mkFmtValue(it, it.quote.value),
                 it.quote.currency && it.kind === 'price' && it.group !== 'fx' ? React.createElement('span', { className:'mk-sub' }, ' ' + it.quote.currency) : null),
@@ -4635,6 +4707,7 @@ function App() {
     return React.createElement('div', null,
       typeTabs, controls,
       renderQAStrip(r),
+      IdeasPanel('research', r),
       renderQAPanel(r),
       renderSourcesPanel(r),
       content,
@@ -5128,6 +5201,91 @@ function App() {
     return Math.floor(hrs / 24) + 'd ago';
   }
 
+  // ── TRADE IDEA CARDS (News + Research) ─────────────────────────────────────
+  // On-demand only: each "Generate idea" is one Claude call (≈$0.02–0.05,
+  // counted against the daily AI cap). View-only — nothing is executed.
+  function IdeaCard(c, opts) {
+    opts = opts || {};
+    const open = opts.open;
+    const f = (v) => {
+      if (v == null || !isFinite(v)) return '—';
+      const a = Math.abs(v);
+      const d = a >= 1000 ? 0 : a >= 100 ? 2 : a >= 1 ? 3 : 4;
+      return Number(v).toLocaleString('en-GB', { maximumFractionDigits: d });
+    };
+    const dirCls = c.direction === 'LONG' ? 'idc-long' : 'idc-short';
+    return React.createElement('div', { key: c.id, className: 'idc' + (open ? ' open' : '') },
+      React.createElement('div', { className: 'idc-head', onClick: () => setIdeaOpen(open ? null : c.id), role: 'button', tabIndex: 0,
+        onKeyDown: e => { if (e.key === 'Enter') setIdeaOpen(open ? null : c.id); } },
+        React.createElement('span', { className: 'idc-dir ' + dirCls }, c.direction),
+        React.createElement('div', { className: 'idc-title' },
+          React.createElement('div', { className: 'idc-instr' }, c.instrument, React.createElement('span', { className: 'idc-ac' }, ' · ' + c.assetClass)),
+          React.createElement('div', { className: 'idc-headline' }, c.headline)),
+        React.createElement('div', { className: 'idc-meta' },
+          React.createElement('div', null, 'Conf. ' + c.confidence + '%'),
+          React.createElement('div', { className: 'idc-sub' }, mkFmtWhen(c.createdAt)))
+      ),
+      React.createElement('div', { className: 'idc-levels' },
+        [['Entry', f(c.entryLow) + (c.entryHigh !== c.entryLow ? '–' + f(c.entryHigh) : '')], ['Target', f(c.target)], ['Stop', f(c.stop)],
+         ['R:R', c.riskReward != null ? c.riskReward.toFixed(2) : '—'], ['Horizon', c.horizon],
+         ['Last', c.priceAtIdea ? f(c.priceAtIdea.value) : '—']].map(([k, v]) =>
+          React.createElement('div', { key: k, className: 'idc-lv' }, React.createElement('span', null, k), React.createElement('strong', null, v)))
+      ),
+      c.warnings && c.warnings.length > 0 && React.createElement('div', { className: 'idc-warn' }, '⚠ ' + c.warnings.join(' ')),
+      open && React.createElement('div', { className: 'idc-body' },
+        React.createElement('div', { className: 'idc-expr' }, c.expression),
+        React.createElement('p', null, c.thesis),
+        React.createElement('div', { className: 'idc-grid' },
+          React.createElement('div', null, React.createElement('div', { className: 'idc-lbl' }, 'Catalyst'), c.catalyst),
+          React.createElement('div', null, React.createElement('div', { className: 'idc-lbl' }, 'Invalidation'), c.invalidation)),
+        React.createElement('div', { className: 'idc-lbl' }, 'Key risks'),
+        React.createElement('ul', { className: 'idc-risks' }, (c.keyRisks || []).map((r, i) => React.createElement('li', { key: i }, r))),
+        React.createElement('div', { className: 'idc-lbl' }, 'Based on'),
+        React.createElement('ul', { className: 'idc-src' }, (c.basedOn || []).map(s =>
+          React.createElement('li', { key: s.ref },
+            React.createElement('span', { className: 'idc-ref' }, s.ref), ' ',
+            s.url ? React.createElement('a', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, s.label, ' ↗') : s.label,
+            React.createElement('span', { className: 'idc-sub' }, ' · ' + (s.publisher || '') + (s.publishedAt ? ' · ' + mkFmtWhen(s.publishedAt) : '') + (s.freshness ? ' · ' + s.freshness : ''))))),
+        c.priceAtIdea && React.createElement('div', { className: 'idc-sub' },
+          'Last price when generated: ' + f(c.priceAtIdea.value) + ' (' + c.priceAtIdea.source + ', ' + mkFmtFull(c.priceAtIdea.asOf) + ')'),
+        React.createElement('div', { className: 'idc-foot' },
+          React.createElement('span', null, 'Generated ' + mkFmtFull(c.createdAt) + ' · ' + c.model + ' · markets snapshot ' + mkFmtWhen(c.marketsSnapshotAt) + ' · for information only, not advice'),
+          React.createElement('button', { className: 'btn', onClick: () => dismissIdea(c.id) }, 'Dismiss'))
+      )
+    );
+  }
+
+  function IdeasPanel(origin, report) {
+    const list = ideaCards.filter(c => origin === 'research'
+      ? (c.origin === 'research' && (!report || c.context.reportType === (report.reportType || researchType)))
+      : c.origin === 'news');
+    const busy = ideaBusy && ideaBusy.origin === origin;
+    const btnLabel = origin === 'news' ? 'Generate idea from today\'s news' : 'Generate idea from this report';
+    const canRun = origin === 'news' || (report && (report.reportId || report.reportType || researchType));
+    const shown = ideaShowAll[origin] ? list : list.slice(0, 3);
+    return React.createElement('div', { className: 'card idc-panel' },
+      React.createElement('div', { className: 'idc-panel-head' },
+        React.createElement('div', null,
+          React.createElement('div', { className: 'idc-panel-title' }, 'TRADE IDEAS'),
+          React.createElement('div', { className: 'idc-sub' }, origin === 'news'
+            ? 'Built from the headlines below + the Markets snapshot + the macro calendar. Use "Idea" on a headline to focus on it.'
+            : 'Built from this report + its sources + the Markets snapshot. Sources shown on every card.')),
+        React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          React.createElement('button', { className: 'btn btn-primary', disabled: !!ideaBusy || !canRun,
+            onClick: () => generateIdea(origin, origin === 'research' ? { reportId: report && report.reportId, type: (report && report.reportType) || researchType } : {}) },
+            busy && !ideaBusy.headlineId ? React.createElement(React.Fragment, null, React.createElement('span', { className: 'spin' }, '↻'), ' Generating…') : btnLabel),
+          React.createElement('span', { className:'ai-cost-badge', title:'One Anthropic call per idea, no web search — counted against your daily/monthly AI cap' }, '⚡ 1 AI call · ~$0.03'))
+      ),
+      busy && ideaBusy.headlineId && React.createElement('div', { className: 'idc-sub', style: { margin: '6px 0' } },
+        React.createElement('span', { className: 'spin' }, '↻'), ' Generating an idea from the selected headline…'),
+      list.length === 0 && !busy && React.createElement('div', { className: 'idc-sub', style: { padding: '8px 0' } }, 'No ideas yet.'),
+      shown.map(c => IdeaCard(c, { open: ideaOpen === c.id })),
+      list.length > 3 && React.createElement('button', { className: 'btn', style: { marginTop: 6 },
+        onClick: () => setIdeaShowAll(s => ({ ...s, [origin]: !s[origin] })) },
+        ideaShowAll[origin] ? 'Show fewer' : `Show all ${list.length}`)
+    );
+  }
+
   // ── NEWS TAB ──────────────────────────────────────────────────────────────
   function renderNews() {
     var headlines      = (news && news.market && news.market.headlines) || [];
@@ -5310,6 +5468,8 @@ function App() {
         )
       ),
 
+      IdeasPanel('news'),
+
       // Main grid: Headlines + Economic Calendar
       React.createElement('div', { className:'news-grid' },
         React.createElement('div', { className:'news-panel' },
@@ -5322,7 +5482,12 @@ function App() {
                   return React.createElement('div', { key: i, className:'news-item' },
                     React.createElement('div', { className:'news-headline' }, h.headline || h.title || ''),
                     React.createElement('div', { className:'news-meta' },
-                      (h.source || '') + (h.datetime ? ' · ' + timeAgoGlobal(typeof h.datetime === 'number' ? new Date(h.datetime * 1000).toISOString() : h.datetime) : '')
+                      (h.source || '') + (h.datetime ? ' · ' + timeAgoGlobal(typeof h.datetime === 'number' ? new Date(h.datetime * 1000).toISOString() : h.datetime) : ''),
+                      h.id != null && React.createElement('button', {
+                        className:'news-idea-btn', disabled: !!ideaBusy,
+                        title:'Generate a trade idea focused on this headline (1 AI call)',
+                        onClick: function() { generateIdea('news', { headlineId: h.id }); },
+                      }, ideaBusy && ideaBusy.headlineId === h.id ? '…' : 'IDEA')
                     )
                   );
                 })
