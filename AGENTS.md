@@ -22,6 +22,10 @@ future agent. Keep it current; do not fork a model-specific copy.
 - **Cross-review.** A PR written by one model is reviewed by the other before the owner
   merges it. The reviewer leaves GitHub review comments; the author addresses each one or
   replies why not. The PR description and review thread are how the models communicate.
+  **The author requests the review itself** — the owner does not: after opening a PR, and
+  again after pushing fixes for review findings, post a PR comment `@codex review` (Claude's
+  PRs) so Codex reviews the current head. Codex, on its PRs, asks the owner to relay a
+  review request to Claude, or tags it in the PR description.
 - **Claim work.** Put the task, your agent name and branch under "In progress" in
   `docs/HANDOFF.md` so two models never edit the same thing at once.
 - **Before you stop — including when you are near a usage limit:** tests green, commit and
