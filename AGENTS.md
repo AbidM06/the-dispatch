@@ -230,8 +230,8 @@ becomes shell or AppleScript source).
   from the hand-typed `MACRO_CAL` / `EARNINGS_CAL` (year-less dates, year guessed). Loaded
   on every page open.
 - `server/jobs/aiRefreshJob.js` — `WATCHLIST_SEED` when no snapshot (opt-in job only).
-- `server/routes/scenario.js` — seeded positions when no T212 snapshot (labelled; D-15 in
-  the key-decisions list below).
+- `server/routes/scenario.js` — seeded positions when no T212 snapshot (labelled; key decision
+  15 at the end of this file).
 
 Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
 produces comes from training data — that path sets `grounded: false` and the client shows
