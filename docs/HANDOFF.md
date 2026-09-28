@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-09-28 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/zen-gates-3v2jhm`
+**Last updated:** 2026-09-28 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/journal-logging`
 
 ---
 
@@ -32,16 +32,14 @@ Working and merged (PR #4, 2026-09-28):
   calendar return "unavailable" rather than invented content. **Coverage is not yet
   complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
   audit tracks where the code does not meet it yet.
-- Tests on `main` (14780c6): `npm test` → 304 passing (10 suites). Open PRs add more
-  (PR #5: 307; PR #6 Journal: 334).
+- Tests on `main` (6746a7e, after PR #5): `npm test` → 307 passing. PR #6 (Journal): 346.
 
 ## 2. In progress
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
-| Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
 | Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
-| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | Starting — approved by owner 2026-09-28 |
+| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | PR #6 open — Codex's four review findings fixed; awaiting re-review |
 
 ## 3. Next up (agreed with the owner, not started)
 
@@ -140,6 +138,20 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-09-28 — Claude (Journal stage 1)
+- Built stage 1 on `claude/journal-logging`: every generated idea is written to an
+  append-only `data/journal.jsonl` with a fingerprint, reference-price status and horizon
+  bucket; watch / pitch / manual price are separate events; no edit or delete routes;
+  JOURNAL tab; "my pitch first" seals new idea cards. Checked in a browser.
+- Fixed Codex's four review findings on PR #6: pre-Journal cards are backfilled at server
+  start and logged before any dismissal; monthly series are not marked stale by age (only
+  the Markets stale flag counts); horizons read every number–unit pair ("2 weeks to
+  3 months" → swing); sealed ideas stay sealed in the Journal. 346 tests.
+- Next (stage 2, propose first): outcome tracking on daily closes with D-16's
+  close-based rule, R multiples and vs-S&P comparison.
+- Addressed Codex's two review findings on PR #5 (safe `--ff-only` update; honest
+  no-fabrication coverage) and replied on GitHub.
 
 ### 2026-09-28 — Owner, Codex, Claude (first joint planning)
 - Codex connected; proposed cross-reviewing #5 first, then the data-accuracy audit, then

@@ -43,6 +43,7 @@ data/idea_cards.json
 data/ai_spend.json
 data/ai_spend.json.tmp
 data/redteam_log.jsonl
+data/journal.jsonl
 
 # launchd auto-start logs
 logs/
