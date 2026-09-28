@@ -31,8 +31,9 @@ const anthropic = require("../providers/anthropic");
 
 // Model ids carry no date suffix. Sonnet 5 is cheaper per token and more
 // capable than the Sonnet 4.5 this pipeline was first written against.
-const MODEL_HAIKU  = "claude-haiku-4-5";
-const MODEL_SONNET = "claude-sonnet-5";
+const models       = require("../providers/models");
+const MODEL_HAIKU  = models.HAIKU;
+const MODEL_SONNET = models.sonnetModel();   // SONNET_MODEL in .env (default Sonnet 5)
 
 const ROLE_DEFAULTS = {
   lead:      MODEL_SONNET,

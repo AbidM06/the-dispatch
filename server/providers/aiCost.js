@@ -13,7 +13,8 @@
  *
  * PRICES — Anthropic list prices, USD per million tokens, checked 2026-09-28.
  * If Anthropic changes prices, update PRICES and PRICES_CHECKED together.
- *   Sonnet 5   $2 in / $10 out      Haiku 4.5  $1 in / $5 out
+ *   Sonnet 5.5 $2 in / $10 out      Sonnet 5   $2 in / $10 out
+ *   Haiku 4.5  $1 in / $5 out
  *   Cache write 1.25x input (5-min TTL) · cache read 0.1x input
  *   Message Batches: 50% of the synchronous rate
  *   Web search: $10 per 1,000 searches
@@ -28,6 +29,7 @@ const path = require("path");
 
 const PRICES_CHECKED = "2026-09-28";
 const PRICES = {
+  "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-5":  { input: 2, output: 10 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
@@ -147,6 +149,7 @@ function newReceipt() {
   return {
     currency: "USD", totalUSD: 0, calls: 0, unpricedCalls: 0, webSearches: 0,
     batchSavingsUSD: 0, cacheSavingsUSD: 0, byRole: {}, pricesChecked: PRICES_CHECKED,
+    startedAt: Date.now(),
   };
 }
 
@@ -180,6 +183,10 @@ function finalizeReceipt(receipt) {
   if (!receipt) return null;
   const round = (n) => Math.round(n * 10_000) / 10_000;
   const out = { ...receipt, byRole: {} };
+  // Wall-clock time from the first stage to the receipt closing — how long the
+  // owner waited. Batched runs include batch queueing, so compare like with like.
+  delete out.startedAt;
+  if (receipt.startedAt) out.durationMs = Date.now() - receipt.startedAt;
   for (const k of ["totalUSD", "batchSavingsUSD", "cacheSavingsUSD"]) out[k] = round(receipt[k]);
   for (const [role, r] of Object.entries(receipt.byRole)) out.byRole[role] = { ...r, usd: round(r.usd) };
   return out;

@@ -3969,6 +3969,7 @@ function App() {
         React.createElement('span', null, 'COST OF THIS REPORT'),
         React.createElement('span', { className:'rp-cost-total' }, usd(c.totalUSD)),
         React.createElement('span', null, c.calls + ' AI calls · ' + c.webSearches + ' web searches' +
+          (c.durationMs ? ' · took ' + (c.durationMs >= 60000 ? Math.floor(c.durationMs / 60000) + 'm ' + Math.round((c.durationMs % 60000) / 1000) + 's' : Math.round(c.durationMs / 1000) + 's') : '') +
           (c.unpricedCalls ? ' · ' + c.unpricedCalls + ' unpriced' : '') +
           (savings.length ? ' · ' + savings.join(' · ') : '')),
         React.createElement('span', null, '▸ breakdown')

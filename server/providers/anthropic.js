@@ -19,14 +19,16 @@ const { callOpenAI } = require("./openai");
 
 // Requests are sent by ./claudeTransport.js (pricing, receipts, batch mode).
 // Model IDs are complete as written — never append a date suffix.
-const MODEL        = "claude-haiku-4-5";  // Haiku — events, risk, econ, explains, fx, rates
-const MODEL_SONNET = "claude-sonnet-5";   // Sonnet 5 — macro, commodities, equity, thematic
+const models       = require("./models");
+const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, explains, fx, rates
+const MODEL_SONNET = models.sonnetModel();  // SONNET_MODEL (default Sonnet 5) — macro, commodities, equity, thematic
 
 // Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
 // must keep the basic variant. Sending the wrong variant for a model is a 400.
 const WEB_SEARCH_DYNAMIC = "web_search_20260209";
 const WEB_SEARCH_BASIC   = "web_search_20250305";
-const DYNAMIC_SEARCH_MODELS = new Set(["claude-sonnet-5", "claude-opus-5", "claude-opus-4-8"]);
+// Dynamic filtering (web_search_20260209) needs Claude 4.6 or later; Haiku 4.5 takes the basic tool.
+const DYNAMIC_SEARCH_MODELS = new Set(["claude-sonnet-5-5", "claude-sonnet-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"]);
 
 function webSearchTool(model) {
   const type = DYNAMIC_SEARCH_MODELS.has(model) ? WEB_SEARCH_DYNAMIC : WEB_SEARCH_BASIC;
