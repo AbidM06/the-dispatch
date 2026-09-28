@@ -113,6 +113,11 @@ describe("journal store", () => {
     ["2-year and 5-year notes for 1 month", "swing"], ["3 months vs 6 months", "strategic"],
     // comma baskets join only compactly written tenors; a worded duration stays a horizon
     ["2-year, 10-year and 30-year yields over 6 months", "strategic"], ["2y, 5y, 10y swaps, 2 weeks", "tactical"],
+    // instrument nouns as written on a desk (Codex review: "Treasury" never matched)
+    ["10-year Treasury, 6-month horizon", "strategic"], ["10y Treasuries over 3 months", "swing"],
+    ["2-year T-note, 1 month", "swing"], ["3-month T-bill, 2 weeks", "tactical"], ["5-year TIPS for 3 months", "swing"],
+    ["10-year Bund vs 10-year gilt, 1 month", "swing"], ["2-year German Schatz, 1 month", "swing"],
+    ["10-year JGB yields, 6 months", "strategic"], ["10-year OAT-Bund spread over 3 months", "swing"],
   ])("horizon %p → %s", (raw, category) => {
     expect(journal._internal.horizonFrom(raw).category).toBe(category);
   });
