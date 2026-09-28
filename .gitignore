@@ -46,3 +46,6 @@ data/redteam_log.jsonl
 
 # launchd auto-start logs
 logs/
+
+# Generated for chat-only AI models (npm run context-pack)
+context-pack.md
