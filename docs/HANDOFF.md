@@ -32,14 +32,15 @@ Working and merged (PR #4, 2026-09-28):
   calendar return "unavailable" rather than invented content. **Coverage is not yet
   complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
   audit tracks where the code does not meet it yet.
-- Tests: `npm test` → 307 passing (11 suites).
+- Tests on `main` (14780c6): `npm test` → 304 passing (10 suites). Open PRs add more
+  (PR #5: 307; PR #6 Journal: 334).
 
 ## 2. In progress
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
-| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6; fixes on `codex/<topic>` | Auditing — evidence posted on PR #5, fixes proposed as small separate PRs |
+| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
 | Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | Starting — approved by owner 2026-09-28 |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -77,13 +78,28 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## 4. Open items / known issues
 
-- **Brief still serves seed data** (found by Codex, 2026-09-28; audit on `main` 14780c6):
-  `server/routes/brief.js` substitutes March-2026 `RATES_SEED` when rates are missing —
-  **including per-series inside a partially cached rates object, while the response still
-  says `source: "cache"`, `stale: false`** — compares "what changed" against fixed March
-  `PREV_RATES`, and builds "next event" from hand-typed `MACRO_CAL` / `EARNINGS_CAL` with
-  the current year guessed. Loaded on every page open. → Codex's data-accuracy audit
-  (read-only first; fixes in small separate PRs).
+- **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
+  [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
+  Confirmed with mocked checks; no fixes implemented yet:
+  1. **P1 Brief** (`server/routes/brief.js`) manufactures missing values: March-2026
+     `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
+     reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
+     hand-typed calendars with the current year guessed; fixed catalysts and instrument
+     claims in prose. Loaded on every page open.
+  2. **P2 FRED** (`server/providers/fred.js`) requests `limit=1`, so a newest "." (no data)
+     row loses a series that has a valid previous value.
+  3. **P1 Bulletin** (`server/routes/bulletin.js`) calls `toFixed` on FRED observation
+     objects, so a normal response silently drops the whole grounding block; HY OAS
+     3.17 (%) becomes "3bps" instead of 317bps; no observation dates.
+  4. **P2 Schemas** (`server/schemas/index.js`) strip metadata such as `basis` from
+     events on validate.
+  5. **P2 Markets freshness** is labelled at fetch time and never aged on read; the
+     compatibility cache drops `stale`/`staleSince` and resets cache age, which the Brief
+     then reads as fresh.
+  6. **P2 Research `dataAsOf`** uses generation/retrieval time, not the observation dates of
+     the inputs (`routes/research.js`, `research/orchestrator.js`).
+  Superseded: the old sync-vs-batch validation split no longer applies (the batch job now
+  runs the same pipeline); consolidating the per-type validators is a low-priority follow-up.
 - **PR #3** (`claude/relaxed-brown-8q5ynd`, older review branch) — do **not** merge (built on
   the old code). Its four important fixes are in `main`. Smaller items **not yet checked
   against current code**: FRED `limit=1` losing a series on a "." holiday row; Zod schemas
