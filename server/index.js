@@ -31,7 +31,6 @@ const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
 const pitchRouter     = require("./routes/pitch");
-const ideasRouter     = require("./routes/ideas");
 const briefRouter     = require("./routes/brief");
 const newsRouter      = require("./routes/news");
 const glossaryRouter  = require("./routes/glossary");
@@ -64,7 +63,6 @@ app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
 app.use("/api/pitch",     pitchRouter);
-app.use("/api/ideas",     ideasRouter);
 app.use("/api/brief",     briefRouter);
 app.use("/api/news",      newsRouter);
 app.use("/api/glossary",  glossaryRouter);
@@ -144,20 +142,6 @@ if (require.main === module) {
     console.log(`  GET  /api/analytics/strategy-backtest`);
     console.log(`  GET  /api/analytics/strategy-backtest/strategies`);
     console.log(`  GET  /api/brief`);
-    console.log(`  GET  /api/ideas`);
-    console.log(`  POST /api/ideas`);
-    console.log(`  GET  /api/ideas/stats`);
-    console.log(`  POST /api/ideas/generate`);
-    console.log(`  GET  /api/ideas/latest`);
-    console.log(`  GET  /api/ideas/history`);
-    console.log(`  GET  /api/ideas/playbooks`);
-    console.log(`  GET  /api/ideas/performance`);
-    console.log(`  POST /api/ideas/weekly-report`);
-    console.log(`  GET  /api/ideas/alpaca`);
-    console.log(`  GET  /api/ideas/exits`);
-    console.log(`  GET  /api/ideas/backtest`);
-    console.log(`  GET  /api/ideas/execution-log`);
-    console.log(`  POST /api/ideas/sync`);
     console.log(`  GET  /api/news`);
     console.log(`  GET  /api/news/calendar`);
     console.log(`  GET  /api/news/:ticker`);
@@ -181,10 +165,8 @@ if (require.main === module) {
       console.warn(`   Copy .env.example → .env and add your keys.\n`);
     }
 
-    // ── Start idea engine scheduler ──────────────────────────────────────────
+    // ── Start background jobs ────────────────────────────────────────────────
     if (process.env.NODE_ENV !== "test") {
-      const { start: startScheduler } = require("./jobs/ideaScheduler");
-      startScheduler();
       const { start: startAiRefresh } = require("./jobs/aiRefreshJob");
       startAiRefresh();
       const { start: startBulletin } = require("./jobs/bulletinScheduler");

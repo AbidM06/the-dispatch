@@ -535,87 +535,6 @@ async function fetchWatchlistPrices(symbols) {
 }
 
 /**
- * generateTradeIdeas — generate 1–3 trade idea drafts using Claude.
- *
- * Calls the API WITHOUT web search (context is supplied by the caller).
- * Cheaper than callClaude (no tool loop) and faster (~2–4s vs 8–15s).
- *
- * @param {string} portfolioContext  Pre-formatted string: portfolio + rates + regime
- * @param {number} count             Number of ideas to generate (1–3)
- * @returns {object[]}               Array of idea draft objects (not persisted)
- */
-async function generateTradeIdeas(portfolioContext, count = 3) {
-  budget.checkAndIncrement();
-
-  const body = {
-    model:      MODEL,
-    max_tokens: 2000,
-    system:     "You are an institutional equity analyst. Return ONLY valid JSON — no markdown fences, no preamble, no commentary.",
-    messages:   [{
-      role:    "user",
-      content: `Based on the portfolio and market context below, generate exactly ${count} trade idea(s).\n` +
-               `Use ONLY instruments from: AMD, SGLN, HIES, HIUS, HIJS, HBKS, NVDA, MU.\n\n` +
-               `${portfolioContext}\n\n` +
-               `Return JSON:\n` +
-               `{ "ideas": [ {\n` +
-               `  "ticker": string,\n` +
-               `  "direction": "LONG"|"SHORT",\n` +
-               `  "thesis": string (2-3 sentences, include strategy type e.g. macro hedge/earnings momentum/mean reversion/duration long),\n` +
-               `  "catalyst": string (1 sentence, specific and near-term),\n` +
-               `  "entry": number,\n` +
-               `  "stop": number,\n` +
-               `  "target": number,\n` +
-               `  "invalidation": string (1 sentence),\n` +
-               `  "horizon": string (e.g. "3 months"),\n` +
-               `  "confidence": integer 0-100,\n` +
-               `  "sizePct": number 1-8,\n` +
-               `  "notes": string (risk/sizing context)\n` +
-               `} ] }`,
-    }],
-  };
-
-  const res = await fetchWithTimeout(
-    API_URL,
-    {
-      method:  "POST",
-      headers: {
-        "content-type":      "application/json",
-        "x-api-key":         apiKey(),
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(body),
-    },
-    35_000
-  );
-
-  if (!res.ok) {
-    const errJson = await res.json().catch(() => ({}));
-    const msg = errJson?.error?.message || `HTTP ${res.status}`;
-    const err = new Error(`Anthropic: ${msg}`);
-    const isBillingErr = res.status === 402 || /credit|billing|balance|payment|plan|quota/i.test(msg);
-    if (isBillingErr) { err.code = "API_CREDITS_EXHAUSTED"; budget.setApiFallback(); }
-    throw err;
-  }
-
-  const json = await res.json();
-  const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-  const data = extractJSON(text, "object");
-
-  if (!data?.ideas || !Array.isArray(data.ideas)) {
-    throw new Error("generateTradeIdeas: could not parse ideas JSON");
-  }
-
-  const REQUIRED = ["ticker", "direction", "thesis", "catalyst", "entry", "stop", "target",
-                    "invalidation", "horizon", "confidence", "sizePct"];
-  const valid = data.ideas.filter(idea =>
-    REQUIRED.every(f => idea[f] !== undefined && idea[f] !== null && idea[f] !== "")
-  );
-  if (valid.length === 0) throw new Error("generateTradeIdeas: no valid ideas returned");
-
-  return valid.slice(0, count);
-}
-
-/**
  * fetchMacroView — institutional-grade morning note for S&T Sales.
  *
  * Produces a JPMorgan/Goldman-quality briefing a salesperson can use
@@ -1416,7 +1335,6 @@ module.exports = {
   fetchWatchlistPrices,
   fetchTickerExplain,
   evaluateThesis,
-  generateTradeIdeas,
   generatePitch,
   fetchMacroView,
   fetchClientImpact,

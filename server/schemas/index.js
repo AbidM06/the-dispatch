@@ -227,54 +227,6 @@ const PitchResponse = Envelope.extend({
   data: PitchPayload,
 });
 
-// ── /api/ideas ────────────────────────────────────────────────────────────────
-const RiskCheckItem = z.object({
-  name:   z.string(),
-  status: z.enum(["OK", "WARN", "BLOCK"]),
-  detail: z.string(),
-});
-
-const RiskCheckResult = z.object({
-  pass:   z.boolean(),
-  level:  z.enum(["OK", "WARN", "BLOCK"]),
-  checks: z.array(RiskCheckItem),
-});
-
-const IdeaItem = z.object({
-  id:           z.string(),
-  ticker:       z.string(),
-  direction:    z.enum(["LONG", "SHORT"]),
-  thesis:       z.string(),
-  catalyst:     z.string(),
-  entry:        z.number(),
-  stop:         z.number(),
-  target:       z.number(),
-  invalidation: z.string(),
-  horizon:      z.string(),
-  confidence:   z.number().int().min(0).max(100),
-  sizePct:      z.number().positive(),
-  status:       z.enum(["OPEN", "CLOSED", "CANCELLED"]),
-  outcome:      z.enum(["HIT", "STOPPED", "CANCELLED"]).nullable(),
-  openedAt:     z.string(),
-  closedAt:     z.string().nullable(),
-  actualPnLPct: z.number().nullable(),
-  notes:        z.string(),
-  riskCheck:    RiskCheckResult.optional(),
-});
-
-const IdeaStats = z.object({
-  total:             z.number(),
-  open:              z.number(),
-  closed:            z.number(),
-  cancelled:         z.number(),
-  hitRate:           z.number().nullable(),
-  stopRate:          z.number().nullable(),
-  avgConfidenceWin:  z.number().nullable(),
-  avgConfidenceLoss: z.number().nullable(),
-  avgRMultiple:      z.number().nullable(),
-  avgHoldDays:       z.number().nullable(),
-});
-
 // ── /api/brief ────────────────────────────────────────────────────────────────
 const WhatChangedItem = z.object({
   series:   z.string(),
@@ -298,7 +250,6 @@ const BriefPayload = z.object({
   whatChanged:     z.array(WhatChangedItem),
   whyItMatters:    z.string(),
   actionableSetup: z.array(ActionableSetupItem),
-  openIdeas:       z.number(),
   nextEvent: z.object({
     date:       z.string(),
     event:      z.string(),
@@ -308,74 +259,6 @@ const BriefPayload = z.object({
 });
 
 const BriefResponse = Envelope.extend({ data: BriefPayload });
-
-// ── /api/ideas engine tickets ─────────────────────────────────────────────────
-const LearningContent = z.object({
-  traderInterpretation:    z.string(),
-  economicsInterpretation: z.string(),
-  keyTerms:  z.array(z.object({ term: z.string(), definition: z.string() })),
-  falsification: z.array(z.string()),
-});
-
-const EngineTicket = z.object({
-  id:                    z.string(),
-  generatedAt:           z.string(),
-  regime:                z.string(),
-  playbook:              z.string(),
-  strategyType:          z.string(),
-  ticker:                z.string(),
-  direction:             z.enum(["LONG", "SHORT"]),
-  horizon:               z.string(),
-  entryLogic:            z.string(),
-  stopLogic:             z.string(),
-  targetLogic:           z.string(),
-  sizingRule:            z.string(),
-  invalidation:          z.string(),
-  rationale:             z.string(),
-  confidence:            z.number().int().min(0).max(100),
-  riskFlags:             z.array(z.any()),
-  engineDecision:        z.enum(["allowed", "blocked", "caution"]),
-  engineReasons:         z.array(z.string()),
-  expectedDrivers:       z.array(z.string()),
-  requiredDataFreshness: z.string(),
-  sourceMode:            z.enum(["deterministic", "ai-enriched"]),
-  learning:              LearningContent.nullable(),
-});
-
-// ── PaperMetrics ──────────────────────────────────────────────────────────────
-const TickerStat = z.object({
-  count:   z.number(),
-  hitRate: z.number().nullable(),
-  avgPnL:  z.number().nullable(),
-});
-
-const DirectionStat = z.object({
-  count:   z.number(),
-  hitRate: z.number().nullable(),
-  avgPnL:  z.number().nullable(),
-});
-
-const PaperMetrics = z.object({
-  total:        z.number(),
-  open:         z.number(),
-  closed:       z.number(),
-  cancelled:    z.number(),
-  hitRate:      z.number().nullable(),
-  stopRate:     z.number().nullable(),
-  avgPnLPct:    z.number().nullable(),
-  avgWinPct:    z.number().nullable(),
-  avgLossPct:   z.number().nullable(),
-  expectancy:   z.number().nullable(),
-  avgRMultiple: z.number().nullable(),
-  avgHoldDays:  z.number().nullable(),
-  mfe:          z.number().nullable(),
-  mae:          z.number().nullable(),
-  byTicker:     z.record(z.string(), TickerStat),
-  byDirection:  z.object({
-    LONG:  DirectionStat,
-    SHORT: DirectionStat,
-  }),
-});
 
 // ── Validation helper ─────────────────────────────────────────────────────────
 function validate(schema, payload) {
@@ -394,10 +277,6 @@ module.exports = {
     ExplainResponse,
     PitchResponse,
     BriefResponse,
-    IdeaItem,
-    IdeaStats,
-    EngineTicket,
-    PaperMetrics,
   },
   validate,
 };
