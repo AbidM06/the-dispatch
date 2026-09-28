@@ -376,3 +376,13 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     expect(out).not.toHaveProperty("startedAt");
   });
 });
+
+test("the no-receipts estimate names the model the run will use (SONNET_MODEL)", () => {
+  process.env.SONNET_MODEL = "claude-sonnet-5-5";
+  try {
+    jest.resetModules();
+    expect(require("../server/providers/aiCost").estimateReport("macro", []).basisDetail).toMatch(/claude-sonnet-5-5/);
+  } finally { delete process.env.SONNET_MODEL; }
+  jest.resetModules();
+  expect(require("../server/providers/aiCost").estimateReport("macro", []).basisDetail).toMatch(/claude-sonnet-5 with/);
+});
