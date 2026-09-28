@@ -239,7 +239,7 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
 
   test("the tracker runs after a manual Markets refresh", () => {
     const src = require("fs").readFileSync(require("path").join(__dirname, "../server/routes/markets.js"), "utf8");
-    expect(src).toMatch(/journal\/tracker"\)\.updateAll\(\)/);
+    expect(src).toMatch(/await require\("\.\.\/journal\/tracker"\)\.updateAll\(\)/);   // awaited before responding
     const sched = require("fs").readFileSync(require("path").join(__dirname, "../server/jobs/marketsScheduler.js"), "utf8");
     expect(sched).toMatch(/journal\/tracker"\)\.updateAll\(\)/);
   });

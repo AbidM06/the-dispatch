@@ -34,7 +34,9 @@ router.post("/refresh", requireWriteAuth, async (req, res, next) => {
     }
     const fresh = await markets.refresh("manual");
     // Journal stage 2: re-score ideas on the new prices (free data, no AI).
-    require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
+    // Awaited, like the scheduled path, so "refreshed" also means the Journal
+    // is up to date; a tracking failure is logged and never fails the refresh.
+    await require("../journal/tracker").updateAll().catch(err => console.warn("[journal] tracking update failed:", err.message));
     res.json({ ...fresh, refreshing: false, schedule: scheduler.getStatus() });
   } catch (err) { next(err); }
 });
