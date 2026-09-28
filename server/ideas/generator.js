@@ -12,8 +12,11 @@
  * cannot invent a URL. Price levels are checked against the latest price.
  *
  * No direction/universe restrictions (long or short, any instrument).
- * Model: IDEAS_MODEL env (default Sonnet 4.5). Cost ≈ $0.02–0.05 per idea,
+ * Model: IDEAS_MODEL env (default Sonnet 5). Cost ≈ $0.02–0.05 per idea,
  * counted against ANTHROPIC_DAILY_CAP / MONTHLY_CAP via the shared budget gate.
+ *
+ * Every generated idea is written to the append-only Journal (server/journal)
+ * before it is returned — all of them, not a hand-picked subset (D-16).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 "use strict";
@@ -23,6 +26,7 @@ const { z }    = require("zod");
 const { callAgent, modelForRole } = require("../research/llm");
 const markets  = require("../markets/service");
 const store    = require("./store");
+const journal  = require("../journal/store");
 
 // Long model text is clipped rather than rejected (a paid call shouldn't fail on length).
 const clip = (n) => z.string().min(1).transform(v => (v.length > n ? v.slice(0, n - 1).trimEnd() + "…" : v));
@@ -227,7 +231,7 @@ Today is ${new Date().toISOString()}. Return the JSON object only.`;
       : { reportId: input.report.reportId, reportType: input.report.reportType, reportVersion: input.report.version },
     ...idea,
     marketId: marketRef ? marketRef.marketId : null,
-    priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.publishedAt, url: marketRef.url } : null,
+    priceAtIdea: marketRef ? { value: marketRef.value, source: marketRef.publisher, asOf: marketRef.publishedAt, url: marketRef.url, freshness: marketRef.freshness || null } : null,
     riskReward: riskReward(idea),
     basedOn,
     warnings,
@@ -235,6 +239,16 @@ Today is ${new Date().toISOString()}. Return the JSON object only.`;
     model,
     usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
   };
+  // Journal first (frozen copy of the card exactly as generated), then the card
+  // list. If the Journal write fails the idea is still returned, but says so —
+  // "every idea is logged" must never fail silently.
+  try {
+    card.journalEntryId = journal.logIdea(card).entryId;
+  } catch (err) {
+    console.error("[ideas] journal write failed:", err.message);
+    card.journalEntryId = null;
+    card.warnings.push("This idea could not be written to the Journal: " + err.message);
+  }
   store.add(card);
   return card;
 }

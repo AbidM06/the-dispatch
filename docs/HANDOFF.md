@@ -41,7 +41,7 @@ Working and merged (PR #4, 2026-09-28):
 |---|---|---|---|
 | Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
 | Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
-| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | Starting — approved by owner 2026-09-28 |
+| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | PR open — awaiting Codex cross-review |
 
 ## 3. Next up (agreed with the owner, not started)
 
@@ -140,6 +140,16 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-09-28 — Claude (Journal stage 1)
+- Built stage 1 on `claude/journal-logging`: every generated idea is written to an
+  append-only `data/journal.jsonl` with a fingerprint, reference-price status and horizon
+  bucket; watch / pitch / manual price are separate events; no edit or delete routes;
+  JOURNAL tab; "my pitch first" seals new idea cards. 334 tests; checked in a browser.
+- Next (stage 2, propose first): outcome tracking on daily closes with D-16's
+  close-based rule, R multiples and vs-S&P comparison.
+- Addressed Codex's two review findings on PR #5 (safe `--ff-only` update; honest
+  no-fabrication coverage) and replied on GitHub.
 
 ### 2026-09-28 — Owner, Codex, Claude (first joint planning)
 - Codex connected; proposed cross-reviewing #5 first, then the data-accuracy audit, then

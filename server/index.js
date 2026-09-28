@@ -28,6 +28,7 @@ const path     = require("path");
 // ── Route handlers ────────────────────────────────────────────────────────────
 const marketsRouter   = require("./routes/markets");
 const ideasRouter     = require("./routes/ideas");
+const journalRouter   = require("./routes/journal");
 const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
@@ -61,6 +62,7 @@ app.use((req, _res, next) => {
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use("/api/markets",   marketsRouter);
 app.use("/api/ideas",     ideasRouter);
+app.use("/api/journal",   journalRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
