@@ -130,8 +130,24 @@ const UNIT_DAYS = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 };
 // yield", "2y swap"), not how long the trade runs, so it is not a horizon.
 // Multi-leg phrases are followed through ("2-year vs 10-year yields", "2y/10y
 // curve"): every maturity in the chain belongs to the instrument.
-const TENOR_LEG = String.raw`\s*(?:vs\.?|versus|/|&|and|-|–)\s*\d+(?:\.\d+)?\s*-?\s*(?:years?|yrs?|y|months?|mos?|m|weeks?|wks?|w)\b`;
-const TENOR_NOUN = new RegExp(String.raw`^[a-z]*(?:${TENOR_LEG})*\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur|gilts?|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b`);
+//
+// Commas are ambiguous: "2-year, 10-year and 30-year yields" is a basket of
+// tenors, but "1 month, 10-year real yields" is a horizon then an instrument.
+// The difference is how the first duration is written — tenors are written
+// compactly ("2-year", "10y", "5yr"), holding periods in words ("1 month").
+// So a comma joins legs only after a compactly written duration.
+const TENOR_UNIT = String.raw`(?:years?|yrs?|y|months?|mos?|m|weeks?|wks?|w)\b`;
+const INSTRUMENT = String.raw`\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur|gilts?|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b`;
+function tenorChain(separators) {
+  const leg = String.raw`\s*(?:${separators})\s*\d+(?:\.\d+)?\s*-?\s*${TENOR_UNIT}`;
+  return new RegExp(String.raw`^[a-z]*(?:${leg})*${INSTRUMENT}`);
+}
+const TENOR_AFTER       = tenorChain(String.raw`vs\.?|versus|/|&|and|-|–`);
+const TENOR_AFTER_COMMA = tenorChain(String.raw`vs\.?|versus|/|&|and|-|–|,`);
+const COMPACT_TENOR = /^\d+(?:\.\d+)?(?:-[a-z]+|(?:y|yr|yrs|m|mo|w|wk))$/;   // "2-year", "10y", "5yr"
+function isTenor(match, rest) {
+  return (COMPACT_TENOR.test(match) ? TENOR_AFTER_COMMA : TENOR_AFTER).test(rest);
+}
 function horizonFrom(raw) {
   const text = String(raw || "").toLowerCase();
   // Number, then an optional space or hyphen ("6 months", "6-month"), then a unit;
@@ -141,7 +157,7 @@ function horizonFrom(raw) {
   while ((m = re.exec(text))) {
     const n = parseFloat(m[1]);
     if (!m[2]) { pending.push(n); continue; }          // "2" in "2-6 weeks": unit comes next
-    if (TENOR_NOUN.test(text.slice(m.index + m[0].length))) { pending = []; continue; }
+    if (isTenor(m[0], text.slice(m.index + m[0].length))) { pending = []; continue; }
     const per = UNIT_DAYS[m[2][0]];
     for (const v of [...pending, n]) maxDays = Math.max(maxDays ?? 0, Math.round(v * per));
     pending = [];
