@@ -135,7 +135,7 @@ server/routes/
                            GET /api/glossary/category/:cat
                            GET /api/glossary/search?q=
                            GET /api/glossary/:slug
-seeds/fallback.js          Seed data for graceful degradation when all providers fail
+seeds/fallback.js          Legacy seed data — still read by brief.js / aiRefreshJob / scenario (see "Known seed usage")
 data/                      portfolio_snapshot.json lives here (gitignored)
 ```
 
@@ -212,7 +212,7 @@ They are gone and must not come back. On failure the route returns HTTP 503 with
 renders an unavailable panel. A report that invents a crisis is worse than no report.
 A test asserts the seed builders stay deleted.
 
-The same rule now covers every surface (ported from the external review on
+The same rule now covers most surfaces (ported from the external review on
 `claude/relaxed-brown-8q5ynd`): `/api/macro/view` and `/api/macro/clients` return 503
 `available: false` (their fallbacks invented a Fed level, a trade idea and catalysts, and the
 old `rateVal()` fed the live model hardcoded rates labelled as FRED); the no-AI
@@ -223,6 +223,15 @@ never serve the old seed stories; the economic calendar has no hand-typed dates
 carry no fixed topic list or event-laden worked examples. `tests/reviewFixes.test.js`
 guards all of this, plus the bulletin notification (execFile + argv — AI text never
 becomes shell or AppleScript source).
+
+### Known seed usage (not yet compliant with D-02 — being audited)
+- `server/routes/brief.js` — falls back to `RATES_SEED` (Mar 2026) when no snapshot is
+  cached, compares "what changed" against hardcoded `PREV_RATES`, and builds "next event"
+  from the hand-typed `MACRO_CAL` / `EARNINGS_CAL` (year-less dates, year guessed). Loaded
+  on every page open.
+- `server/jobs/aiRefreshJob.js` — `WATCHLIST_SEED` when no snapshot (opt-in job only).
+- `server/routes/scenario.js` — seeded positions when no T212 snapshot (labelled; D-15 in
+  the key-decisions list below).
 
 Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
 produces comes from training data — that path sets `grounded: false` and the client shows
@@ -268,11 +277,15 @@ under a cent per report and parallel writes would pay the 1.25x write premium fo
 Revisit only if the reviewers become sequential.
 
 ## Cache strategy
-All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
+Routes that use `resolveWithFallback(key, fetchFn, ttl, fallback)` (currently `news.js`) resolve:
 1. Warm cache → serve immediately (no fetch)
 2. Live fetch → cache it
 3. Stale cache (expired but present) → serve with `stale: true`
-4. Seed fallback → last resort, always available
+4. The route's fallback — for news this is an **empty list**, never invented content.
+
+`seeds/fallback.js` still exists and is **still read** by a few paths — see "Known seed
+usage" below. Under D-02 no seed value may be presented as current data; removing the
+remaining uses is tracked in `docs/HANDOFF.md` (data-accuracy audit).
 
 TTLs:
 - FRED data (Brief/correlations): 60 min (`CACHE_TTL_FRED` env override)

@@ -36,13 +36,17 @@ Working and merged (PR #4, 2026-09-28):
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
-| Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR open — awaiting owner review / cross-review |
+| Multi-agent handoff set-up (AGENTS.md, HANDOFF, DECISIONS, CI, PR template, context pack) | Claude | `claude/zen-gates-3v2jhm` | PR #5 open — Codex cross-review in progress |
+| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | `codex/<topic>` (Codex to name) | Starting — approved by owner 2026-09-28 |
+| Journal, stage 1: immutable logging of every idea, browsing, "watch closely" flag, pitch toggle (see D-16) | Claude | `claude/journal-logging` | Starting — approved by owner 2026-09-28 |
 
 ## 3. Next up (agreed with the owner, not started)
 
 In the owner's order of interest. **Propose and confirm before building each one.**
 
-1. **Journal tab** — design agreed:
+1. **Journal tab** — design agreed; build in three reviewed stages (D-16):
+   stage 1 logging/browsing/pitch toggle → stage 2 outcome tracking & scoring →
+   stage 3 reflections & lessons ledger.
    - Every generated idea is logged **as written, never edited**, with the entry price's
      source, timestamp and link.
    - Each idea declares a horizon: **tactical ≤2 weeks, swing 1–3 months, strategic 3–12 months**.
@@ -71,6 +75,10 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## 4. Open items / known issues
 
+- **Brief still serves seed data** (found by Codex, 2026-09-28): `server/routes/brief.js`
+  falls back to March-2026 `RATES_SEED`, measures "what changed" against hardcoded
+  `PREV_RATES`, and builds "next event" from hand-typed `MACRO_CAL` / `EARNINGS_CAL`.
+  Loaded on every page open. → Codex's data-accuracy audit.
 - **PR #3** (`claude/relaxed-brown-8q5ynd`, older review branch) — do **not** merge (built on
   the old code). Its four important fixes are in `main`. Smaller items **not yet checked
   against current code**: FRED `limit=1` losing a series on a "." holiday row; Zod schemas
@@ -103,6 +111,12 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-09-28 — Owner, Codex, Claude (first joint planning)
+- Codex connected; proposed cross-reviewing #5 first, then the data-accuracy audit, then
+  the Journal, then calendar/prediction markets. Codex spotted that the brief still
+  describes seed fallbacks and that `brief.js` still serves seed data (confirmed by Claude).
+- Owner approved the split (Codex: audit; Claude: Journal) and the Journal defaults (D-16).
 
 ### 2026-09-28 — Claude
 - Merged Cowork's local-only work (Markets, idea cards, five-agent research) with `main`,
