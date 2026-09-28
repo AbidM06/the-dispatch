@@ -14,8 +14,9 @@
  *   START    Tracking starts with the first daily bar AFTER the day the idea
  *            was generated — that day's high/low includes prices from before
  *            the idea existed.
- *   LIVE BAR The newest bar of every series is skipped: it may still be
- *            trading, and a result on a half-finished day could be wrong.
+ *   LIVE BAR The newest bar of a series is skipped while recent (< 4 days):
+ *            it may still be trading. An older newest bar is a completed
+ *            final bar (instrument stopped trading) and is scored.
  *   CLOSE    The first of: target hit, stop hit, horizon expiry (closed at
  *            that day's close). A gap through a level exits at the open.
  *   UNCERTAIN  Daily bars cannot show intraday order. A day whose range
@@ -226,6 +227,20 @@ function stats(states) {
   };
 }
 
+/**
+ * dropLiveBar — the newest bar may still be trading (the 14:45 UK refresh is
+ * just after the US open; FX never closes), so it is not scored while RECENT.
+ * A newest bar older than LIVE_BAR_DAYS is a completed terminal bar (the
+ * instrument stopped trading, e.g. delisted or a market closed) and is kept,
+ * so an idea can still settle on it.
+ */
+const LIVE_BAR_DAYS = 4;
+function dropLiveBar(bars, now = Date.now()) {
+  if (!bars.length) return bars;
+  const last = bars[bars.length - 1];
+  return (now - last.t * 1000) / DAY_MS < LIVE_BAR_DAYS ? bars.slice(0, -1) : bars;
+}
+
 // ── persistence (derived state — recomputable, but kept for old ideas) ───────
 const IS_TEST = process.env.NODE_ENV === "test";
 const statePath = () => process.env.JOURNAL_TRACKING_PATH || path.join(__dirname, "../../data/journal_tracking.json");
@@ -274,7 +289,7 @@ async function updateAll() {
         // The newest daily bar may still be trading (the 14:45 UK refresh runs
         // just after the US open; FX never closes), so it is never scored —
         // it is read again, complete, at a later refresh.
-        try { histories[id] = toBars(await markets.getHistory(id, "1d", { source })).slice(0, -1); }
+        try { histories[id] = dropLiveBar(toBars(await markets.getHistory(id, "1d", { source }))); }
         catch (err) { histories[id] = null; console.warn(`[journal] no history for ${id}: ${err.message}`); }
       }
       return histories[id];
@@ -340,6 +355,6 @@ function _reset() { _memory = null; inFlight = null; }
 
 module.exports = {
   updateAll, getState, stats, trackingFor,
-  _internal: { plan, advance, toBars, withBenchmark, closeOn, ASSUMED_HORIZON_DAYS },
+  _internal: { plan, advance, toBars, withBenchmark, closeOn, dropLiveBar, ASSUMED_HORIZON_DAYS },
   _reset,
 };

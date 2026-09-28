@@ -157,13 +157,15 @@ describe("horizonDays from the model", () => {
   });
 });
 
+const tracker_internal = () => require("../server/journal/tracker")._internal;
+
 describe("updateAll — end to end over the Journal and Markets history", () => {
   function setup(history) {
     jest.resetModules();
     const markets = require("../server/markets/service");
     jest.spyOn(markets, "getHistory").mockImplementation(async (id) => {
       // every series ends with a still-trading bar, which the tracker must ignore
-      const live = bar("2026-09-07", 1, 1, 1, 1);
+      const live = bar(new Date().toISOString().slice(0, 10), 1, 1, 1, 1);   // today: may still be trading
       if (id === "SPX") return { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-04", 0, 0, 0, 5100), live] };
       if (history[id]) return { ...history[id], bars: [...history[id].bars, live] };
       throw new Error("no source");
@@ -240,7 +242,7 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const markets = require("../server/markets/service");
     markets.getHistory.mockImplementation(async (id) => ({ type: "ohlc", bars: id === "SPX"
       ? [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-03", 0, 0, 0, 5050)]
-      : [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-03", 104, 111, 103, 110)] }));
+      : [bar("2026-09-02", 100, 101, 99.5, 100), bar(new Date().toISOString().slice(0, 10), 104, 111, 103, 110)] }));
     const e2 = s2.journal.logIdea({ ...IDEA });
     doc = await s2.tracker.updateAll();
     expect(doc.entries[e2.entryId]).toMatchObject({ status: "open", markDate: "2026-09-02" });
@@ -311,6 +313,31 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const doc = await tracker.updateAll();
     expect(calls.find(c => c.id === "PM-fed-cut").source).toEqual({ provider: "polymarket", tokenId: "tok1" });
     expect(doc.entries[e.entryId].status).toBe("open");
+  });
+
+  test("dropLiveBar: a recent newest bar is held back; an old final bar is kept", () => {
+    const { dropLiveBar } = tracker_internal();
+    const now = Date.parse("2026-10-20T12:00:00Z");
+    const bars = [bar("2026-10-12", 1, 1, 1, 1), bar("2026-10-13", 1, 1, 1, 1)];
+    expect(dropLiveBar(bars, now)).toHaveLength(2);                                  // 7 days old: completed terminal bar
+    expect(dropLiveBar(bars, Date.parse("2026-10-14T12:00:00Z"))).toHaveLength(1);   // 1 day old: may still be trading
+  });
+
+  test("a delisted instrument whose last bar is the expiry day settles as never_entered (production path)", async () => {
+    // history ends ON expiry (2026-10-13) and no later bar will ever come
+    const bars = [];
+    for (let t = Date.parse("2026-09-02"); t <= Date.parse("2026-10-13"); t += 86400000) {
+      const d = new Date(t); if (d.getUTCDay() % 6 === 0) continue;
+      bars.push(bar(d.toISOString().slice(0, 10), 104, 105, 103, 104));
+    }
+    const { journal, tracker, markets } = setup({});
+    markets.getHistory.mockImplementation(async (id) => id === "SPX" ? { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000)] } : { type: "ohlc", bars });
+    const e = journal.logIdea({ ...IDEA });
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-30T12:00:00Z"));
+    try {
+      const doc = await tracker.updateAll();
+      expect(doc.entries[e.entryId]).toMatchObject({ status: "never_entered", exitDate: "2026-10-13" });
+    } finally { Date.now.mockRestore(); }
   });
 
   test("no instrument or no history → says so, never invents a result", async () => {

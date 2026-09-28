@@ -203,7 +203,8 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   refresh — all refreshes go through `jobs/refreshMarkets.js` (never call `markets.refresh()`
   directly) — and every Journal response resolves results via `tracker.trackingFor()`. It uses free daily history (Yahoo OHLC; FRED closes-only, labelled).
   No AI. Rules: tracking starts the day AFTER generation; the newest bar of each series is
-  never scored (it may still be trading); **entered only when price trades in
+  not scored while recent (< 4 days — it may still be trading; an older final bar is a
+  completed terminal bar and is scored); **entered only when price trades in
   the entry zone** (fill = midpoint), at any time within the horizon, else `never_entered`;
   closes at target / stop (gap → the open) / horizon expiry (that day's close); a day touching
   both levels — or the fill day touching either — is `uncertain`, no R. 1R = |entry − stop|.
