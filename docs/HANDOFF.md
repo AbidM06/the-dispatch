@@ -40,7 +40,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
-| Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | PR open — awaiting Codex review |
+| Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | PR #8 open — Codex reviewed up to 814eb30 (7 rounds, all findings fixed). **9ebaea6 not yet Codex-reviewed: Codex hit its review usage limit** — re-request `@codex review` when it resets |
 | Sonnet 5.5 evaluation (D-17): `SONNET_MODEL` setting, 5.5 price, time on receipts; owner runs the A/B on the Mac | Claude | `claude/sonnet-5-5` | Merged (PR #7) — default still Sonnet 5; waiting for the owner's A/B receipts, then a one-line PR to switch |
 
 ## 3. Next up (agreed with the owner, not started)
