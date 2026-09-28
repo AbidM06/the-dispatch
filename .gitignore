@@ -40,3 +40,6 @@ reports/
 data/markets_snapshot.json
 data/markets_snapshot.json.tmp
 data/idea_cards.json
+
+# launchd auto-start logs
+logs/
