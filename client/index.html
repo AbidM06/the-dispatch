@@ -1525,6 +1525,7 @@ function App() {
   const [briefLoading, setBriefLoading] = useState(true);
   // ── SALES tab state ────────────────────────────────────────────────────────
   const [macroView, setMacroView]           = useState(null);
+  const [salesUnavailable, setSalesUnavailable] = useState(null);   // 503 payload — no fabricated fallback
   const [macroClients, setMacroClients]     = useState([]);
   const [salesLoading, setSalesLoading]     = useState(false);
   const [salesClientLoading, setSalesClientLoading] = useState(false);
@@ -2270,9 +2271,17 @@ function App() {
     try {
       const resp = await apiFetch('/api/macro/view' + (force ? '?refresh=true' : ''));
       setMacroView(resp.data);
+      setSalesUnavailable(null);
       if (force) showToast('Macro view refreshed (' + resp.source + ')', 'success');
+      loadBudgetStatus();
     } catch (err) {
-      showToast('Macro view error: ' + err.message, 'error');
+      const payload = err.payload && err.payload.data;
+      if (payload && payload.available === false) {
+        setMacroView(null);
+        setSalesUnavailable(payload);
+      } else {
+        showToast('Macro view error: ' + err.message, 'error');
+      }
     }
     setSalesLoading(false);
   }
@@ -2282,8 +2291,11 @@ function App() {
     try {
       const resp = await apiFetch('/api/macro/clients' + (force ? '?refresh=true' : ''));
       setMacroClients(resp.data || []);
+      loadBudgetStatus();
     } catch (err) {
-      showToast('Client impact error: ' + err.message, 'error');
+      const payload = err.payload && err.payload.data;
+      if (payload && payload.available === false) setMacroClients([]);
+      else showToast('Client impact error: ' + err.message, 'error');
     }
     setSalesClientLoading(false);
   }
@@ -2977,7 +2989,8 @@ function App() {
     return React.createElement('div', null,
       controls,
       morningNote && React.createElement('div', { className:'card', style:{marginBottom:20} }, morningNote),
-      !mv && !salesLoading && React.createElement('div', { className:'engine-empty', style:{marginBottom:20} },
+      !mv && !salesLoading && salesUnavailable && RpUnavailable(salesUnavailable, () => { loadMacroView(true); loadMacroClients(true); }, 'MACRO VIEW'),
+      !mv && !salesLoading && !salesUnavailable && React.createElement('div', { className:'engine-empty', style:{marginBottom:20} },
         React.createElement('div', { style:{marginBottom:8} }, 'GLOBAL MACRO VIEW NOT LOADED'),
         React.createElement('div', { style:{fontSize:10,marginTop:4} }, 'Click LOAD ANALYSIS to generate a global macro view with cross-asset matrix, scenarios, and central bank outlook')
       ),
@@ -5998,7 +6011,10 @@ function App() {
         React.createElement('div', { className:'news-panel' },
           React.createElement('div', { className:'news-panel-title' }, 'ECONOMIC CALENDAR'),
           ecoEvents.length === 0
-            ? React.createElement('div', { style:{color:'var(--steel)',fontSize:11,padding:'10px 0'} }, 'No upcoming events')
+            ? React.createElement('div', { style:{color:'var(--steel)',fontSize:11,padding:'10px 0'} },
+                (news && news.calendar && news.calendar.economicSource === 'unavailable')
+                  ? (news.calendar.economicNote || 'Economic calendar unavailable.')
+                  : 'No upcoming events')
             : ecoEvents.slice(0, 10).map(function(ev, i) {
                 var impCls = (ev.importance||'').toUpperCase() === 'HIGH' ? 'imp-high-news' : (ev.importance||'').toUpperCase() === 'MEDIUM' ? 'imp-med-news' : 'imp-low-news';
                 return React.createElement('div', { key: i, className:'cal-event-news' },

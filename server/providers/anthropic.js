@@ -448,13 +448,16 @@ async function fetchAllAnalysis(newsContext = "") {
   const isoDate = new Date().toISOString().slice(0, 10);
   const system  = `Today is ${today}. You MUST use web_search before answering. Return ONLY a single valid JSON object — no markdown fences, no preamble, no commentary.`;
 
-  const prompt = `Search for the latest financial and geopolitical news as of ${today}. Focus on: US-Iran conflict, tariffs, AI semiconductors, Federal Reserve, credit markets, EM currencies, Bank of Japan.
+  // No topic list: the model ranks what current sources actually show. A fixed
+  // list ("US/Israel-Iran war" as risk #1 on every run) presupposed events and
+  // made a quiet week read like a crisis.
+  const prompt = `Search for the most market-moving financial and geopolitical news of the past 7 days as of ${today}, across central banks, rates, credit, FX, commodities, equities and geopolitics. Choose topics by what current sources show — do not assume any conflict, tariff or policy action is ongoing unless you found it this session.
 
 Return a single JSON object with EXACTLY these three keys:
 
-"events": array of exactly 5 objects, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD", "detail": string (one concise sentence with specific data) }
+"events": array of exactly 5 objects, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD" (the date the event happened per your source — not today's date unless it happened today), "detail": string (one concise sentence with specific data from your search) }
 
-"risks": array of exactly 7 objects in this order — (1) US/Israel-Iran War, (2) US Tariffs Canada/Mexico, (3) AMD ASIC Competitive Threat, (4) Rising Real Yields, (5) EM Currency Stress, (6) Credit Spread Widening, (7) Japan YCC Exit — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100, "date": "${isoDate}", "detail": string (2 sentences max, specific data), "affects": string }
+"risks": array of exactly 7 objects — the seven most material risks for a cross-asset portfolio right now, ranked by severity, each supported by evidence you found this session (include a risk only if current sources support it) — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100, "date": "${isoDate}" (the assessment date), "detail": string (2 sentences max, specific data from your search), "affects": string (asset classes) }
 
 "econ": array of exactly 3 objects: { "id": number, "label": string, "color": string, "bg": string, "border": string, "date": "${isoDate}", "title": string, "body": string (3 sentences max, specific current data) }
 Labels/colors: ["MACRO THEME","RATES ANALYSIS","EQUITY DEEP DIVE"] / ["#c8392b","#1a3a5c","#2c6e49"]
@@ -523,7 +526,7 @@ async function fetchRiskScores() {
   const today = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
   const system = `Today is ${today}. Use web_search. Return ONLY valid JSON array.`;
-  const prompt = `Search latest news on 7 portfolio risks (AMD, HIES, HIUS, HIJS, SGLN, HBKS): (1) US/Israel-Iran conflict, (2) US tariffs Canada/Mexico, (3) AMD ASIC threats, (4) US real yields, (5) EM currency stress, (6) HY credit spreads, (7) BoJ normalisation. Return JSON array of 7 objects: { "title", "level": "HIGH"|"MEDIUM"|"LOW", "score": 0-100, "date": "${isoDate}", "detail" (2 sentences), "affects" }. Be concise.`;
+  const prompt = `Search current news and identify the 7 most material risks for a cross-asset portfolio right now, ranked by severity. Include a risk only if sources you found this session support it — do not assume any conflict, tariff or policy action is ongoing. Return JSON array of 7 objects: { "title", "level": "HIGH"|"MEDIUM"|"LOW", "score": 0-100, "date": "${isoDate}", "detail" (2 sentences, specific data from your search), "affects" (asset classes) }. Be concise.`;
   const raw  = await callClaude(system, prompt, 1600);
   const data = extractJSON(raw, "array");
   if (!data || data.length < 7) throw new Error("Insufficient risk items from AI");
@@ -535,7 +538,7 @@ async function fetchEconAnalysis() {
   const today = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
   const system = `Today is ${today}. Use web_search. Return ONLY valid JSON array.`;
-  const prompt = `Search today's macro/markets. Return JSON array of 3 objects — MACRO THEME (Iran/oil), RATES ANALYSIS (Fed/yields), EQUITY DEEP DIVE (AMD). Each: { "id", "label", "color", "bg", "border", "date": "${isoDate}", "title", "body" (3 sentences, specific data) }. Colors: #c8392b,#1a3a5c,#2c6e49. Be concise.`;
+  const prompt = `Search today's macro/markets. Return JSON array of 3 objects — MACRO THEME (the dominant theme current sources show), RATES ANALYSIS (Fed/yields), EQUITY DEEP DIVE (the most newsworthy equity story current sources show). Each: { "id", "label", "color", "bg", "border", "date": "${isoDate}", "title", "body" (3 sentences, specific data) }. Colors: #c8392b,#1a3a5c,#2c6e49. Be concise.`;
   const raw  = await callClaude(system, prompt, 2000);
   const data = extractJSON(raw, "array");
   if (!data || data.length !== 3) throw new Error("Expected 3 econ items");
@@ -688,7 +691,7 @@ CRITICAL OUTPUT RULES — violating any of these makes the note unusable:
 
 Return a single JSON object with ALL of the following keys:
 
-"headline": string — one sentence with the dominant theme and 2-3 specific levels. Example: "10Y at 4.37% (+5bps) as oil hits $111 on Iran escalation — SPX futures -0.8%, VIX 25"
+"headline": string — one sentence with the dominant theme and 2-3 specific levels. Levels must come from the verified data block or your search this session — no remembered figures.
 
 "regimeLabel": string — 2-4 words
 
@@ -698,15 +701,15 @@ Return a single JSON object with ALL of the following keys:
   "dominantTheme": string — 1 sentence, the single biggest force in markets right now
 
 "keyLevels": object — append source tag to each value, return null if unavailable:
-  "spxFutures": string or null (e.g. "5,210 (-0.8%) (web search)")
-  "us10y": string or null (e.g. "4.37% (+5bps) (web search)")
+  "spxFutures": string or null — format "<level> (<change>) (<source>)"
+  "us10y": string or null — format "<yield>% (<change>bps) (<source>)"
   "us2y": string or null
   "dxy": string or null
   "cable": string or null — GBP/USD ONLY, null if not found
   "brent": string or null
   "gold": string or null — ONE price only, math-checked against pct move
   "vix": string or null
-  "hyOas": string or null — must include overnight bps move (e.g. "376bps (+8bps overnight) (web search)")
+  "hyOas": string or null — must include overnight bps move — format "<spread>bps (<change>bps overnight) (<source>)"
   "vix3m": string or null — CBOE 3-Month VIX level with source tag (e.g. "23.1 (Yahoo Finance)")
   "skew": string or null — CBOE SKEW Index level with interpretation (e.g. "132 — elevated tail risk (Yahoo Finance)")
 
@@ -1247,7 +1250,7 @@ Use web_search to find: current Brent/WTI/gold/copper prices, OPEC+ production f
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<GS-style punchy title e.g. 'Mounting Upside Risks to Oil Prices From Hormuz'>",
+  "title": "<GS-style punchy title naming the dominant commodity driver current sources show>",
   "subtitle": "<one sentence — the core tension: supply shock vs demand response>",
   "reportType": "commodities",
   "date": "${isoDate}",
@@ -1403,7 +1406,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 "title": string — punchy title like "Global Economic Impacts of [event]" (never vague)
 
-"subtitle": string — one sentence contextualising the event (e.g. "Oil rises 14% as Iran conflict escalates; we assess the macro transmission channels")
+"subtitle": string — one sentence contextualising the event (name the move and its cause as found in your search; no assumed events)
 
 "date": "${isoDate}"
 
@@ -1460,7 +1463,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 "dispatch_angle": object — THE one overlooked second-order consequence that consensus is missing. Be opinionated and specific. Format:
 {
-  "headline": string — max 12 words. The contrarian or overlooked angle (e.g. "Iran closure accelerates Gulf states' pivot to renewables"),
+  "headline": string — max 12 words. The contrarian or overlooked angle (an angle grounded in what your search found this session),
   "mechanism": string — 3 sentences. The causal chain: A leads to B because C; B leads to D which the market is underpricing. Be specific with magnitudes where possible,
   "winners": array of 2-3 strings — each naming a specific asset class, sector, or geography + one-sentence reason why they benefit from this angle,
   "losers": array of 2-3 strings — each naming a specific loser + one-sentence reason,

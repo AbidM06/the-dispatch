@@ -344,12 +344,35 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
 });
 
 // ── macOS notification ────────────────────────────────────────────────────────
+/**
+ * The title is a news headline and the body is generated text — both are
+ * attacker-influenceable, so neither may reach a shell or an AppleScript
+ * source string.
+ *
+ * execFile does not spawn a shell, and the script below reads its text out of
+ * `argv` rather than having it interpolated in, so there is no quoting context
+ * for a headline to escape from. The previous implementation built a
+ * single-quoted shell string and replaced `"` with `'` — which manufactured
+ * the very character that terminated the quoting (a headline containing
+ * `"; do shell script "…` became arbitrary command execution).
+ * Ported from the external review fixes on claude/relaxed-brown-8q5ynd.
+ */
+const NOTIFY_SCRIPT =
+  "on run argv\n" +
+  "  display notification (item 1 of argv) " +
+  "with title \"The Dispatch\" subtitle (item 2 of argv) sound name \"Default\"\n" +
+  "end run";
+
 function sendMacNotification(title, body) {
+  if (process.platform !== "darwin") return;   // osascript is macOS-only
   try {
-    const { exec } = require("child_process");
-    const safeTitle = (title || "").replace(/"/g, "'").slice(0, 100);
-    const safeBody  = (body  || "").replace(/"/g, "'").slice(0, 200);
-    exec(`osascript -e 'display notification "${safeBody}" with title "The Dispatch" subtitle "${safeTitle}" sound name "Default"'`,
+    const { execFile } = require("child_process");
+    const safeTitle = String(title || "").slice(0, 100);
+    const safeBody  = String(body  || "").slice(0, 200);
+    execFile(
+      "osascript",
+      ["-e", NOTIFY_SCRIPT, safeBody, safeTitle],
+      { timeout: 5_000 },
       (err) => { if (err) console.warn("[bulletin] macOS notification failed:", err.message); }
     );
   } catch (err) {
@@ -404,6 +427,7 @@ function buildFallbackBulletin(top, articles) {
 }
 
 module.exports = router;
+module.exports._internal = { sendMacNotification, NOTIFY_SCRIPT };
 module.exports.generateBulletin = async function() {
   // Callable by the scheduler without going through HTTP
   const existing = getTodaysBulletin();

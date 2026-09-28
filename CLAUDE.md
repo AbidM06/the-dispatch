@@ -174,6 +174,18 @@ They are gone and must not come back. On failure the route returns HTTP 503 with
 renders an unavailable panel. A report that invents a crisis is worse than no report.
 A test asserts the seed builders stay deleted.
 
+The same rule now covers every surface (ported from the external review on
+`claude/relaxed-brown-8q5ynd`): `/api/macro/view` and `/api/macro/clients` return 503
+`available: false` (their fallbacks invented a Fed level, a trade idea and catalysts, and the
+old `rateVal()` fed the live model hardcoded rates labelled as FRED); the no-AI
+`narrativeEngine` describes only fetched, dated FRED figures (no events, no back-filled
+defaults, no seed rates — with no data it returns empty arrays); the Events/Risk routes
+never serve the old seed stories; the economic calendar has no hand-typed dates
+(`economicSource: "unavailable"` when Finnhub's paid endpoint refuses); and AI prompts
+carry no fixed topic list or event-laden worked examples. `tests/reviewFixes.test.js`
+guards all of this, plus the bulletin notification (execFile + argv — AI text never
+becomes shell or AppleScript source).
+
 Reports also carry `grounded`. The OpenAI fallback tier has no web_search, so anything it
 produces comes from training data — that path sets `grounded: false` and the client shows
 a warning rather than presenting the output as searched.

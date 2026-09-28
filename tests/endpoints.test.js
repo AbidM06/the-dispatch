@@ -99,6 +99,17 @@ afterAll(() => {
 
 // ── Shared fixture helpers ────────────────────────────────────────────────────
 
+// Real-shaped, dated rates as the Markets service writes them. The no-AI
+// narrative only ever describes fetched data, so tests that expect cards seed it.
+const LIVE_RATES = {
+  dgs10:     { value: 4.37, date: "2026-09-25", source: "FRED" },
+  dfii10:    { value: 1.91, date: "2026-09-25", source: "FRED" },
+  t10yie:    { value: 2.46, date: "2026-09-25", source: "FRED" },
+  hy_spread: { value: 3.05, date: "2026-09-25", source: "FRED" },
+  t10y2y:    { value: 0.41, date: "2026-09-25", source: "FRED" },
+};
+function seedLiveRates() { cache.set("snapshot:data", { rates: LIVE_RATES }, 3600_000); }
+
 /** Build a complete fetchAllAnalysis mock response and register it. */
 function mockAllAnalysis(overrides = {}) {
   const events = overrides.events ?? [
@@ -162,13 +173,20 @@ describe("GET /api/health", () => {
 // /api/risk — Phase 2b + Phase 1 (LOW_COST_MODE, budget exhaustion, cooldown)
 // ─────────────────────────────────────────────────────────────────────────────
 describe("/api/risk", () => {
-  test("GET returns seeded risks with stale:true when cache is empty", async () => {
+  test("GET with an empty cache serves rules-based risks from real rates, dated by observation", async () => {
+    seedLiveRates();
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe("seeded");
-    expect(res.body.stale).toBe(true);
-    expect(res.body.data.risks).toBeInstanceOf(Array);
-    expect(res.body.data.risks.length).toBe(7);
+    expect(res.body.analysisMode).toBe("deterministic");
+    expect(res.body.data.risks.length).toBeGreaterThan(0);
+    for (const r of res.body.data.risks) expect(r.date).toBe("2026-09-25");
+    expect(JSON.stringify(res.body.data.risks)).not.toMatch(/Iran|Hormuz|tariff|ASIC|MI450/i);
+  });
+
+  test("GET with no fetched rates serves NO risks — never the old seed list", async () => {
+    const res = await request(app).get("/api/risk");
+    expect(res.status).toBe(200);
+    expect(res.body.data.risks).toEqual([]);
   });
 
   test("POST /refresh calls fetchAllAnalysis once (merged call)", async () => {
@@ -239,6 +257,7 @@ describe("/api/risk", () => {
 
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
+    seedLiveRates();
 
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
@@ -274,6 +293,7 @@ describe("/api/risk", () => {
     const budgetErr = new Error("Daily budget exhausted (5/5 calls today).");
     budgetErr.code  = "BUDGET_DAILY";
     anthropicMock.fetchAllAnalysis.mockRejectedValue(budgetErr);
+    seedLiveRates();
 
     const res = await request(app).post("/api/risk/refresh").send({ force: true });
     expect(res.status).toBe(200);
@@ -368,6 +388,7 @@ describe("/api/events", () => {
 
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
+    seedLiveRates();
 
     const res = await request(app).get("/api/events");
     expect(res.status).toBe(200);

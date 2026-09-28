@@ -139,7 +139,7 @@ async function runRefresh() {
         const snapData      = cache.get("snapshot:data");
         const portfolioData = cache.get("portfolio:data");
         const ctx = {
-          rates:     snapData?.rates     ?? seeds.RATES_SEED,
+          rates:     snapData?.rates     ?? {},   // never narrate seed rates as current
           watchlist: snapData?.watchlist ?? seeds.WATCHLIST_SEED,
           portfolio: portfolioData       ?? [],
         };
