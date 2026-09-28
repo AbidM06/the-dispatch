@@ -519,30 +519,6 @@ describe("Polygon provider", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 3: webhook provider
-// ─────────────────────────────────────────────────────────────────────────────
-describe("Phase 3: webhook provider", () => {
-  it("is a no-op when WEBHOOK_URL not set", async () => {
-    delete process.env.WEBHOOK_URL;
-    const { fireWebhook } = require("../server/providers/webhook");
-    // Should not throw
-    await expect(fireWebhook("test.event", { foo: "bar" })).resolves.toBeUndefined();
-  });
-
-  it("fires POST when WEBHOOK_URL is set", async () => {
-    process.env.WEBHOOK_URL = "http://fake-webhook.test/hook";
-    global.fetch = jest.fn().mockResolvedValue({ ok: true });
-    const { fireWebhook } = require("../server/providers/webhook");
-    await fireWebhook("idea.pending", { count: 1 });
-    expect(global.fetch).toHaveBeenCalled();
-    // Verify the first arg is the URL
-    const callArgs = global.fetch.mock.calls[0];
-    expect(callArgs[0]).toBe("http://fake-webhook.test/hook");
-    delete process.env.WEBHOOK_URL;
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Finnhub provider
 // ─────────────────────────────────────────────────────────────────────────────
 describe("Finnhub provider", () => {

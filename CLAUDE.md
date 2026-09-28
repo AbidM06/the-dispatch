@@ -2,28 +2,38 @@
 
 ## What this is
 A personal market intelligence dashboard. Express API server (port 3001) + single-page
-React frontend (`client/index.html`). Tracks a watchlist of equity positions, overlaid with macro rates, AI-generated analysis, and a scenario/stress-test engine.
+React frontend (`client/index.html`). View-only: a free multi-source Markets panel (FX, rates & credit, equities, commodities, crypto,
+macro, prediction markets) with provenance on every value, AI analysis, on-demand trade idea
+cards (News + Research), research reports and interview prep. **Nothing is executed** — the
+Alpaca/auto-execution and rules-based idea engine were removed (Sep 2026; see git history).
 
 ## How to run
 ```bash
 npm start          # production
 npm run dev        # nodemon-style watch (node --watch)
-npm test           # Jest, 94 tests, ~2s
+npm test           # Jest, all suites in tests/
 npm run test:coverage
 ```
 
 ## Environment variables (copy `.env.example` → `.env`)
 | Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API — events, risk, economic analysis, thesis, explain |
-| `ALPHA_VANTAGE_API_KEY` | AMD quote + USD/GBP FX rate (2 calls/refresh) |
-| `FRED_API_KEY` | Rates: DGS10, DFII10, T10YIE, BAMLH0A0HYM2, T10Y2Y |
-| `POLYGON_API_KEY` | 6 watchlist peers: NVDA, MSFT, TSLA, MU, AMAT, LRCX |
-| `FINNHUB_API_KEY` | News headlines, earnings/economic calendar, sentiment |
+| `ANTHROPIC_API_KEY` | Claude API — research, idea cards, events/risk, explain, pitch, interrogation |
+| `FRED_API_KEY` | Markets panel series + the verified macro facts every research report uses |
+| `FINNHUB_API_KEY` | News, earnings/economic calendar, sentiment; US-stock price fallback |
+| `EIA_API_KEY` | Commodities report price-history chart |
+| `POLYGON_API_KEY` | Strategy backtester / momentum history, vol surface (not used by Markets) |
+| `OPENAI_API_KEY` | Optional research fallback tier (no web search → `grounded: false`; UNPRICED on receipts) |
+| `ALPHA_VANTAGE_API_KEY` | No longer used by any route (provider kept, tested) |
+| `MARKETS_REFRESH_TIMES` / `MARKETS_TZ` / `MARKETS_SCHEDULE` | Markets refresh slots (default `07:45,14:45` Europe/London, weekdays; `off` disables) |
+| `POLYMARKET_TAGS` / `POLYMARKET_COUNT` | Prediction markets shown (default economy,geopolitics / 4) |
+| `IDEAS_MODEL` | Model for idea cards (default `claude-sonnet-5`) |
 | `PORT` | Default 3001 |
-| `LOW_COST_MODE=true` | Disables all AI calls; returns deterministic narrative |
-| `ANTHROPIC_DAILY_CAP` | USD budget cap per day (default $5) |
-| `ANTHROPIC_MONTHLY_CAP` | USD budget cap per month (default $50) |
+| `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
+| `ANTHROPIC_DAILY_CAP` | **USD** cap per UTC day, measured from real usage (default $5; 0 = off) |
+| `ANTHROPIC_MONTHLY_CAP` | **USD** cap per UTC month (default $50; 0 = off) |
+| `RESEARCH_CONFIRM_ABOVE_USD` | Manual refreshes estimated above this need `confirm: true` (default 0 = always) |
+| `RESEARCH_BATCH_TIME` / `RESEARCH_BATCH_TYPES` | Daily batched pipeline run (default 06:40, all seven types) |
 
 ---
 
@@ -33,8 +43,8 @@ npm run test:coverage
 client/index.html          Single-file React app (createElement, no JSX build)
 server/index.js            Express entry point — mounts all routes
 server/routes/
-  snapshot.js              GET /api/snapshot  — rates + FX + watchlist + history
-                           POST /api/snapshot/prefetch  — daily cache-bust job
+  markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id
+  ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
   portfolio.js             GET /api/portfolio — T212 holdings + P&L computation
   events.js                GET /api/events  |  POST /api/events/refresh
   risk.js                  GET /api/risk    |  POST /api/risk/refresh
@@ -51,18 +61,27 @@ server/providers/
   macroContext.js          Cross-asset fact layer — 11 free FRED series with per-fact
                            provenance; feeds EVERY research report. Also derives the
                            labelled Fed policy-path proxy (DGS2 − DFF).
-  anthropicBatch.js        Message Batches API — 50% rate for the daily report run
-  alphaVantage.js          AV_SUPPORTED = ["AMD"] only (peers moved to Polygon)
-  polygon.js               Free-tier /v2/aggs endpoint — 6 peers, parallel calls
+  claudeTransport.js       THE single exit for Messages API calls — prices every call, records
+                           spend, attributes it to the open cost receipt, batch mode
+  aiCost.js                USD prices, persistent spend ledger (data/ai_spend.json), receipts,
+                           refresh estimates
+  anthropicBatch.js        Message Batches API — 50% rate (used by claudeTransport in batch mode)
+  alphaVantage.js          Unused since the Markets panel (kept + tested)
+  polygon.js               Free-tier /v2/aggs — strategy backtester / momentum history, vol surface
   fred.js                  Rates and history — getAllRates(), getRecentHistory()
-  anthropic.js             fetchAllAnalysis(), fetchTickerExplain(), callClaude()
+  anthropic.js             fetchAllAnalysis(), fetchTickerExplain(), callClaude(), fetchResearchReport()
   finnhub.js               News, earnings calendar, economic calendar, sentiment
-  budget.js                Per-day/month spend tracking + auto API-fallback state machine
+  budget.js                USD caps over the spend ledger + auto API-fallback state machine
+server/markets/            instruments.js · sources.js · service.js — free Markets data + provenance
+server/ideas/              generator.js · store.js — on-demand idea cards
+server/research/           five-agent pipeline — see "Institutional Research" below
+server/jobs/
+  marketsScheduler.js      Markets refresh, weekdays 07:45 + 14:45 UK, one catch-up after sleep
+  researchBatchJob.js      06:40 weekdays: full pipeline per report type, every call batched
+  bulletinScheduler.js · aiRefreshJob.js
 server/cache.js            In-memory TTL cache singleton
 server/retry.js            withRetry(), fetchWithTimeout(), isRetryable()
 server/schemas/index.js    Zod schemas — validate() wrapper
-server/jobs/
-  researchBatchJob.js      Daily batched generation of all six research reports
 server/analytics/
   narrativeEngine.js       Deterministic fallback narrative (no AI)
 server/importers/
@@ -70,7 +89,6 @@ server/importers/
 server/engine/
   glossary.js              80+ trading terms across 7 categories with definitions,
                            examples, Islamic notes, and S&T interview angles
-  universeScanner.js       Scans all 33 Shariah-compliant tickers against macro regime
 server/routes/
   glossary.js              GET /api/glossary — full glossary
                            GET /api/glossary/term-of-the-day
@@ -84,37 +102,34 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 
 ---
 
-## Provider split — critical context
+## Markets panel — data sources & provenance (`server/markets/`)
+- `instruments.js` — the universe; each instrument lists sources in fallback order.
+- `sources.js` — adapters, all free: **Yahoo Finance** chart API (unofficial, no key; primary
+  for FX, yields ^TNX/^TYX, ETFs, indices, futures, stocks, crypto), **FRED** (daily/monthly
+  series + `last_updated` release time), **Finnhub** `/quote` (US-stock fallback), **Frankfurter**
+  (ECB reference FX fallback), **Polymarket** Gamma/CLOB (top economy/geopolitics events).
+- Every quote: `value, change, changePct, asOf, releasedAt, cadence, source, sourceDetail, sourceUrl`.
+- `service.js` — `refresh(trigger)` (dedupes concurrent calls), persists
+  `data/markets_snapshot.json`, carries forward the last value **flagged `stale`** if every
+  source fails, and writes the legacy `snapshot:rates` / `snapshot:data` cache keys that
+  Events/Risk/Brief/AI-refresh read. Freshness is **measured** from the print time
+  (≤2 min Real-time, ≤30 min Delayed ~N, else Last trade; FRED = Daily close / Monthly).
+- `jobs/marketsScheduler.js` — in-process weekday slots at 07:45 (pre-LSE) and 14:45
+  (post-NYSE-open) London, DST-safe via Intl. Each slot runs once, keyed `YYYY-MM-DD@HH:MM`
+  in `lastScheduledDate`; asleep through several slots → ONE catch-up for the latest.
+  Marks the slot done even on failure. A bare-date marker (pre-slot format) means "day done".
+- Routes: `GET /api/markets` (never fetches unless no snapshot exists), `POST /api/markets/refresh`
+  (manual; ignored if <60 s since last), `GET /api/markets/history/:id?tf=1d|1h`, `GET /api/markets/status`.
+- UI: MARKETS tab (table ↔ chart grid, click a row for its chart; TradingView Lightweight
+  Charts 4.2.3 from jsDelivr, Apache-2.0 — keep the attribution logo).
 
-### Alpha Vantage (free tier: 25 calls/day, 5/min)
-- **Only 2 calls per refresh**: AMD quote + USD/GBP FX rate
-- `AV_SUPPORTED = new Set(["AMD"])` — do not add more symbols here
-- Previously served 7+ watchlist symbols; reduced after rate-limit exhaustion
-
-### Polygon.io (free tier: unlimited/day, 5/min, ~15-min delay)
-- Serves 6 watchlist peers: `POLYGON_PEERS = new Set(["NVDA","MSFT","TSLA","MU","AMAT","LRCX"])`
-- Uses `/v2/aggs/ticker/{sym}/range/1/day/{from}/{to}?adjusted=true&sort=desc&limit=2`
-  — **NOT** `/v2/snapshot/...` which is paid-only (returns HTTP 403 on free tier)
-- 6 parallel calls via `Promise.allSettled` — per-ticker failures are logged + skipped
-- `results[0].c` = latest close; `results[1].c` = prev close → compute `chgPct`
-- 14-day lookback window covers weekends and public holidays
-
-### Finnhub (free tier: 60 req/min, no daily cap)
-- Market news: `getMarketNews()` — general headlines
-- Company news: `getCompanyNews(ticker)` — per-ticker, last 7 days
-- Earnings calendar: `getEarningsCalendar()` — 45-day lookahead
-- Economic calendar: `getEconomicCalendar()` — FOMC, CPI, NFP events
-- News sentiment: `getNewsSentiment(ticker)` — bullish/bearish %
-- TTL: 30 min for news, 60 min for calendars
-- No-op when FINNHUB_API_KEY not set (graceful degradation to empty arrays)
-
-### FRED (no rate limit for reasonable usage)
-- Rates: DGS10 (10Y nominal), DFII10 (10Y real), T10YIE (breakeven inflation),
-  BAMLH0A0HYM2 (HY spread), T10Y2Y (yield curve)
-- TTL: 60 min (data only updates once daily)
-- Transient 504 errors are common — graceful degradation to stale cache / seed handles them
-
----
+## Trade idea cards (`server/ideas/`, `routes/ideas.js`)
+- On-demand only: `POST /api/ideas/news {headlineId?}`, `POST /api/ideas/research {reportId|type}`;
+  `GET /api/ideas`, `DELETE /api/ideas/:id`. One `callAgent("ideas")` call, **no web search**.
+- The model only sees supplied inputs (headlines N#, market lines M:ID, calendar C#, report +
+  SRC-xxx) and must cite them; citations are resolved server-side so links are never invented.
+  Level consistency + distance-from-price warnings; long text is clipped, not rejected.
+- No direction/universe restrictions (user choice). Saved to `data/idea_cards.json` (gitignored).
 
 ## Cross-asset context layer — read this before touching research prompts
 
@@ -182,14 +197,23 @@ measured data; the client renders it as a separate table. `unverified[]` is what
 not confirm — surfacing that is the point, not a defect.
 
 ## Research batching
-`server/jobs/researchBatchJob.js` pre-generates all six reports daily via the Message
-Batches API at 50% of the synchronous rate (`RESEARCH_BATCH_TIME`, default 06:40).
-Prompts come from `buildResearchSpec()` — the same code the synchronous path uses, so the
-two cannot drift apart. Anything the batch fails to deliver is regenerated synchronously,
-so batching affects cost only, never availability.
+`server/jobs/researchBatchJob.js` runs `routes/research.generateReport(type, "", { batch: true })`
+for each type in `RESEARCH_BATCH_TYPES` (default all seven) at `RESEARCH_BATCH_TIME` (06:40).
+That is the SAME five-agent pipeline the Research tab uses — it used to batch bare drafts
+and cache them, so morning reports skipped every reviewer and never reached the report
+store the idea button reads. In batch mode `claudeTransport` sends each call as a
+one-request Message Batch at 50%; stages still run in order, and any call a batch fails
+to deliver is re-sent synchronously. Batching affects cost only, never availability or QA.
+Receipts mark batched calls, and estimates ignore batched runs (they'd understate a manual refresh).
 
-Interactive paths (explain, thesis, bulletin) stay synchronous — batch latency is measured
-in minutes and would be visible there.
+Interactive paths (refresh, explain, idea cards, interrogation) stay synchronous — batch
+latency is measured in minutes.
+
+**Prompt caching was evaluated and deliberately not added.** A cache entry is readable only
+after the first request begins streaming, so the three reviewers — which run in parallel —
+cannot read each other's prefix; only the chair runs afterwards. The net saving is well
+under a cent per report and parallel writes would pay the 1.25x write premium for nothing.
+Revisit only if the reviewers become sequential.
 
 ## Cache strategy
 All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
@@ -199,21 +223,34 @@ All data flows through `resolveWithFallback(key, fetchFn, ttl, seedData)`:
 4. Seed fallback → last resort, always available
 
 TTLs:
-- FRED data: 60 min (`CACHE_TTL_FRED` env override)
-- Market data (AV + Polygon): 30 min (`CACHE_TTL_MARKET` env override)
+- FRED data (Brief/correlations): 60 min (`CACHE_TTL_FRED` env override)
+- Markets snapshot: persisted; refreshed 07:45 + 14:45 UK weekdays or manually. Chart history cached
+  60 min (daily) / 15 min (hourly) server-side, and per session client-side.
 
 ---
 
-## Budget / API fallback system
-`server/providers/budget.js` tracks Anthropic spend:
-- `ANTHROPIC_DAILY_CAP` / `ANTHROPIC_MONTHLY_CAP` — configurable
-- When billing error (402/529) detected, `setApiFallback(60_000 * 60)` enters 60-min
-  deterministic fallback mode
-- `getApiFallbackInfo()` returns `{ active: bool, retryAfter: ISO string }`
-- `callClaude()` in `anthropic.js` checks this before every API call
-- Route-level catch blocks in `events.js` and `risk.js` also call `setApiFallback()`
-  as a safety net (tests mock `fetchAllAnalysis` directly, bypassing `callClaude`)
-- `LOW_COST_MODE=true` disables AI entirely (separate from fallback)
+## Cost transparency, budget and API fallback
+Every Messages API request goes through `providers/claudeTransport.js`. Do not add a second
+`fetch` to api.anthropic.com — it would be unpriced, unbudgeted and missing from receipts.
+- **Pricing** (`providers/aiCost.js`): USD from the response's own `usage` — input, output,
+  cache write (1.25x) / read (0.1x), `server_tool_use.web_search_requests` ($10/1k), batch 50%.
+  `PRICES` + `PRICES_CHECKED` are Anthropic list prices; update both together. A model not in
+  the table is recorded as UNPRICED (e.g. the OpenAI tier) — counted, never costed at $0.
+- **Ledger**: `data/ai_spend.json` (gitignored), per UTC day/month; survives restarts.
+- **Receipts**: `transport.runWithContext({ receipt, batch, role }, fn)` uses AsyncLocalStorage,
+  so every call inside — including the draft via `anthropic.js` — lands on the receipt under
+  its role. The orchestrator stores it as `report.meta.cost`; the client shows it (`RpCostReceipt`).
+- **Budget** (`providers/budget.js`): `ANTHROPIC_DAILY_CAP` / `_MONTHLY_CAP` are **dollars**
+  checked against the ledger before each call. (It used to count calls, and `parseInt(undefined)
+  ?? 5` made an unset cap NaN = off.) A budget error never escalates to the OpenAI tier.
+  One call can overshoot a cap by its own cost — there is no pre-reservation of a guess.
+- **Refresh estimate**: `GET /api/research/report/estimate` averages recent synchronous
+  receipts for that type, or states `basis: "assumption"`. `POST /report/refresh` returns 409
+  `confirmation_required` unless `confirm: true` or the estimate is under
+  `RESEARCH_CONFIRM_ABOVE_USD` (default 0). The client shows the estimate + spend in a confirm.
+- Billing error (402 / credit wording) → `setApiFallback()` 60-min window; `getApiFallbackInfo()`
+  returns `{ active, expiresAt, retryInMins }`. Route catches in `events.js` / `risk.js` also call it.
+- `LOW_COST_MODE=true` disables AI entirely (separate from fallback).
 
 ---
 
@@ -261,27 +298,23 @@ nothing was ever sourced. There is a regression test for this.
 
 ## Test patterns
 ```bash
-npm test   # runs tests/endpoints.test.js + tests/providers.test.js
+npm test   # all suites in tests/
 ```
 
 Key conventions:
 - `jest.resetModules()` in `beforeEach` — required because providers read `process.env`
   at module load time
 - `global.fetch = mockFetch` — all HTTP mocked via Jest, no real network calls
-- Polygon mock in `endpoints.test.js`:
-  ```js
-  jest.mock("../server/providers/polygon", () => ({
-    getSnapshots: jest.fn(),
-    POLYGON_PEERS: new Set(["NVDA","MSFT","TSLA","MU","AMAT","LRCX"])
-  }))
-  ```
-- `providers.test.js` Polygon suite: one `mockFetch` call per ticker (parallel calls),
-  using `aggsResponse(sym, bars)` helper with `bar(close, epochMs)` shape
+- `tests/markets.test.js` mocks fetch by URL (Yahoo/FRED/Finnhub/Frankfurter/Polymarket);
+  `tests/ideas.test.js` mocks `research/llm.callAgent` and spies `markets.getSnapshot`.
 
-Current status: **260 passing.** `tests/research.test.js` covers the cross-asset layer,
-the policy proxy, provenance, the batch adapter, and the no-fabrication guarantee.
-One pre-existing failure in `tests/phase1.test.js` — a date-dependent event-horizon
-assertion — is unrelated to this work and fails on a clean checkout too.
+- `tests/research.test.js` — cross-asset layer, policy proxy, provenance, batch adapter,
+  no-fabrication guarantee. `tests/researchPipeline.test.js` — five-agent pipeline, QA gate,
+  interrogation, fact check in the pipeline, estimate/confirm, batch job.
+  `tests/costTransparency.test.js` — pricing, USD budget, transport receipts + batch mode,
+  fact-check rules, red-team log.
+
+Current status: **all suites passing** (run `npm test` for the count).
 
 ---
 
@@ -289,106 +322,93 @@ assertion — is unrelated to this work and fails on a clean checkout too.
 `server/middleware/auth.js` guards all mutating (POST/PATCH/DELETE) routes.
 - If `DISPATCH_ADMIN_KEY` env var is **not set**: no-op (dev mode, open access).
 - If set: requires `x-dispatch-key` header matching exactly.
-- Applied per-route (not globally) in: ideas.js, import.js, events.js, risk.js, snapshot.js.
+- Applied per-route (not globally) in: ideas.js, markets.js, import.js, events.js, risk.js, research.js.
 
-## Execution framework (safety defaults)
-All execution is **disabled by default**. To enable paper trading:
-1. `TRADING_ENABLED=true` — master switch
-2. `AUTO_APPROVE_PAPER=true` — auto-approve engine ideas
-3. `ALPACA_AUTO_EXECUTE=true` — enable Alpaca order placement
-4. Configure Alpaca keys
+## Institutional Research — five-agent pipeline + interrogation
 
-Circuit breakers (`server/analytics/executionPolicy.js`):
-- `MAX_TRADES_PER_DAY=3`, `MAX_NOTIONAL_GBP_PER_DAY=250`
-- `MAX_OPEN_POSITIONS=5`, `MAX_SINGLE_TICKER_EXPOSURE_PCT=20`
-- Freshness gate: `TRADING_DATA_MAX_AGE_MIN=20` (skip execution if data > 20 min old)
-- State persisted in `data/execution_state.json` (daily reset)
+### Architecture (`server/research/`)
+```
+orchestrator.js        Pipeline: draft → extract → FRED fact check → parallel(auditor, redTeam, PM) → chair → gate → bounded revision
+llm.js                 Role-based adapter over claudeTransport (budget-gated, per-role models, webSearchTool(model))
+factCheck.js           Deterministic claim check against the verified FRED facts — free, sourced, conservative
+redTeamLog.js          Append-only log of red-team warnings (data/redteam_log.jsonl) for later scoring
+claimLedger.js         Claim normalization, audit merge, hard-fail detection (CLM-xxx ids)
+sourceRegistry.js      Source validation/dedup/tier inference (SRC-xxx ids) — never invents URLs
+qualityGate.js         15-dimension weighted score + deterministic hard fails (prob sums, unsupported claims, dangling sources)
+reportStore.js         Versioned report persistence (data/research_reports/, gitignored; memory-only in tests)
+interrogator.js        Truth-over-agreement chat pinned to a reportId; corrections append with audit trail
+agents/                leadAnalyst (draft reuses fetchResearchReport + extraction + revision), dataAuditor,
+                       redTeam, portfolioTranslator, icChair
+```
 
-Position sizing (`server/engine/positionSizing.js`):
-- `RISK_PER_TRADE_PCT=0.5`, `MAX_POSITION_PCT=8`, `MIN_ORDER_NOTIONAL_GBP=25`
+### Key behaviours
+- **Report types**: macro, fx, rates, thematic, equity, commodities + **sector** (new).
+- **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
+  QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
+- Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
+  All calls pass through the USD budget gate. Models: Sonnet 5, Haiku 4.5 for extraction.
+- **Every agent receives the verified FRED block** (`verifiedBlock`) — reviewers used to judge
+  the draft with no market data of their own.
+- **Fact check before audit**: `factCheck.checkClaims()` settles FACT claims naming exactly one
+  held series with one plausible level (not a change, forecast, other date or earlier year) —
+  VERIFIED or CONFLICTING_DATA, with a real `fred.stlouisfed.org/series/...` source. The auditor
+  only receives unsettled claims; if none remain it is skipped (QA says why). Keep it conservative:
+  a wrong automated verdict is worse than an extra search.
+- Red-team warnings are logged per report (`GET /api/research/redteam-log`); outcomes are appended
+  later as separate `type: "outcome"` records, never edited in.
+- Draft failure → `runPipeline` throws → route returns 503 `available: false`. There is no
+  seeded report. Reviewer failure → verdict `NOT_RUN`, disclosed in QA; never fake a passed review.
+- `RESEARCH_MULTI_AGENT=false` → one draft call per report (`singleCallReport`), still priced,
+  versioned and stored; QA honestly NOT_RUN.
+- Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).
+- Interrogation conversations are pinned to their reportId — a newer report sets `newerReportAvailable: true` but never swaps context.
+- Corrections: `store.addCorrection()` appends `COR-xxx` entries + marks claims `CORRECTED` — history is never silently mutated.
 
-## Approval workflow
-Engine-generated ideas are persisted with `executionStatus: "PENDING_APPROVAL"`.
-- `GET /api/ideas/pending` — list pending ideas
-- `POST /api/ideas/:id/approve` — approve + optionally execute (checks freshness, policy, sizing)
-- `POST /api/ideas/:id/reject` — reject with reason
-- `GET /api/ideas/journal` — playbook/regime performance stats
-- All execution actions logged to `data/execution_log.jsonl`
+### Endpoints
+- `GET  /api/research/report?type=` (cached 24h) · `POST /api/research/report/refresh` (auth; `confirm: true`)
+- `GET  /api/research/report/estimate?type=` · `GET /api/research/spend` · `GET /api/research/redteam-log`
+- `GET  /api/research/report/progress?type=` — live stage labels during generation
+- `GET  /api/research/report/versions?type=`
+- `GET  /api/research/report/:reportId/qa` · `GET /api/research/report/:reportId/sources`
+- `POST /api/research/interrogate` `{reportId, question ≤2000ch, conversationId?}` (auth; 503 + `aiStatus: UNAVAILABLE` when AI off)
 
-## Shariah enforcement
-- `POST /api/ideas` rejects `direction: "SHORT"` with 400 + `shariahRule: "gharar"`
-- Engine (`ideaEngine.js`) also blocks SHORT via `isTransactionPermitted("shortSelling")`
+### Env vars
+`RESEARCH_MULTI_AGENT` (default true), `RESEARCH_MIN_QA_SCORE` (85), `RESEARCH_MAX_VALIDATION_ROUNDS` (2),
+`RESEARCH_MAX_AGENT_CALLS` (8), per-role models: `RESEARCH_{LEAD,EXTRACT,AUDITOR,REDTEAM,PORTFOLIO,CHAIR,CHAT}_MODEL`,
+`RESEARCH_CONFIRM_ABOVE_USD` (0), `RESEARCH_BATCH_TIME` (06:40), `RESEARCH_BATCH_TYPES` (all).
 
----
+### Frontend (client/index.html)
+QA strip (score/status/claims/sources) + cost receipt (`RpCostReceipt`, `.rp-cost-*`) + expandable QA panel
+(agent verdicts, disagreements, claim ledger, corrections log) + verified data / policy proxy / estimates /
+cited sources (`Rp*`) + source registry viewer + interrogation chat (`.interro-*`, `.qa-*`, `.claim-*`, `.src-*` CSS).
+Top bar shows today's AI spend (`.ai-spend-chip`) from `/api/health` budget.
+Progress polling replaces time-guessed phase messages when the orchestrator reports a real stage.
 
-## Phase 3 — Exit engine, backtesting, sync, bracket orders, webhooks
-
-### Exit engine (`server/engine/exitEngine.js`)
-Scans OPEN ideas against current watchlist prices and macro context. Returns exit signals
-(CLOSE or REVIEW recommendations) with reasons.
-
-4 exit playbooks added to `server/engine/playbooks.js` (category `"exit"`):
-- `exit-target-hit` — current price >= target
-- `exit-stop-hit` — current price <= stop
-- `exit-regime-change` — macro regime has shifted materially
-- `exit-time-expiry` — idea open longer than 120% of stated horizon
-
-Exit playbooks are NOT included in `generateIdeas()` runs (only `macro`/`structure`/`portfolio`
-categories are allowed). They are only used by `exitEngine.checkExits()`.
-
-### New endpoints (Phase 3)
-- `GET /api/ideas/exits` — run exit check on all open ideas, returns signals
-- `GET /api/ideas/backtest?categories=macro,structure` — deterministic historical backtest using RATES_HISTORY_SEED
-- `GET /api/ideas/execution-log?days=7` — query execution audit log with summary by decision
-- `POST /api/ideas/sync` — sync Alpaca positions with local ideas (auth-required, closes ideas where position is gone)
-- `GET /api/ideas/universe-scan` — ranked candidates from full Shariah universe
-
-### Bracket orders (`server/providers/alpaca.js`)
-`placeBracketOrder(ticker, side, qty, limitPrice, takeProfitPrice, stopLossPrice)` places
-entry + take-profit + stop-loss as a single atomic order. Opt-in via `USE_BRACKET_ORDERS=true`.
-Default off — market orders are simpler and more reliable for paper trading.
-
-### Webhook notifications (`server/providers/webhook.js`)
-Fire-and-forget POST webhook for idea lifecycle events. Env: `WEBHOOK_URL`, `WEBHOOK_SECRET`.
-Events: `idea.pending`, `idea.executed`, `idea.rejected`, `exit.signal`.
-No-op when `WEBHOOK_URL` is not set.
-
-### Live price at approval time
-`POST /api/ideas/:id/approve` now fetches a fresh price for the idea's ticker before sizing.
-Uses AV for AMD, Polygon for peers, falls back to cached `idea.entry` for LSE ETFs.
-Response includes `priceSource` and `livePrice` fields.
-
-### Historical backtester (`server/engine/backtester.js`)
-Pure computation on seeded data (RATES_HISTORY_SEED + HY_HISTORY_SEED). Tests each playbook
-against each historical monthly context. Returns trigger rates, regime distribution, and
-top setups. No API calls.
-
----
-
-## Scheduled task
-A daily prefetch task (`dispatch-daily-price-prefetch`) runs at 09:37 AM on weekdays and
-calls `POST /api/snapshot/prefetch` to warm the cache before market opens. This uses
-exactly 2 AV calls (AMD + FX) + 6 Polygon calls.
+## Scheduled refresh
+The Markets refresh runs **inside the server** (`jobs/marketsScheduler.js`), weekdays 07:45
+and 14:45 Europe/London with one catch-up after sleep. The old Cowork scheduled task was removed — it ran in
+a cloud sandbox and could never reach `localhost:3001`. Auto-start at login:
+`bash install-autostart.sh` (launchd agent `com.thedispatch.server`).
 
 ---
 
 ## Key decisions already made — do not revisit without good reason
-1. **Polygon free tier** uses `/v2/aggs` not `/v2/snapshot` (403 on free tier)
-1b. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-haiku-4-5`. Sonnet 5 is
-   both cheaper and more capable than the Sonnet 4.5 it replaced. The web_search tool type
-   is model-dependent (`web_search_20260209` for Sonnet 5, `web_search_20250305` for Haiku
-   4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
-2. **AV limited to AMD only** — adding more AV symbols will exhaust the 25 calls/day limit
-3. **`Promise.allSettled`** in `polygon.js` — partial results are better than total failure
-4. **30-min market cache TTL** — short enough for intraday staleness badge, long enough
-   to not hammer APIs
-5. **Cite-tag stripping is server-side** — React renderer cannot parse HTML in string nodes
-6. **Budget fallback is 60 min** — matches AV's rate-limit cooldown window
-7. **All execution disabled by default** — requires TRADING_ENABLED + ALPACA_AUTO_EXECUTE + AUTO_APPROVE_PAPER
-8. **Freshness gate** — auto-execution skipped if snapshot data > 20 min old
-9. **Alpaca allowed hosts** — only `paper-api.alpaca.markets` by default (configurable via ALPACA_ALLOWED_HOSTS)
-10. **SHORT ideas rejected** — Shariah gharar prohibition on manual idea creation
-11. **Scenario uses T212 snapshot** — falls back to seeded positions when no snapshot
-12. **Bracket orders default off** — `USE_BRACKET_ORDERS=true` required (market orders are simpler)
-13. **Webhook is fire-and-forget** — does not block response path; failures logged to console
-14. **Backtester uses seeded data only** — no API calls; pure deterministic computation
+1. **View-only** — no order execution, no rules-based idea engine, no Shariah gating
+   (removed Sep 2026 at the owner's request; git history has them). Ideas may be long or short.
+2. **No fabricated fallbacks** — research failure is a 503 `available: false`, never a seeded report.
+3. **Every Claude call goes through `claudeTransport`** — priced, recorded, on the receipt.
+4. **Budget caps are USD**, measured from real usage and persisted; a budget error never falls
+   through to another paid provider.
+5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-haiku-4-5`. The web_search
+   tool type is model-dependent (`web_search_20260209` for Sonnet 5, `web_search_20250305` for
+   Haiku 4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
+6. **Markets data is free-only** (budget £0). Yahoo is unofficial — keep fallbacks per instrument.
+7. **Freshness is measured, not assumed** — never label a value "live" without its print time.
+8. **Stale values are shown flagged**, never silently reused or replaced by seeds.
+9. **Markets refresh slots 07:45 + 14:45 UK** + manual button; `GET /api/markets` never fetches.
+10. **Idea cards cite only supplied inputs**; server resolves links — the model cannot invent URLs.
+11. **Fed policy path is a labelled proxy** (DGS2 − DFF), never a probability.
+12. **Cite-tag stripping is server-side** — React renderer cannot parse HTML in string nodes.
+13. **Budget fallback is 60 min** after an Anthropic billing error.
+14. **Polygon free tier** uses `/v2/aggs` not `/v2/snapshot` (403 on free tier) — backtester/momentum only.
+15. **Scenario uses T212 snapshot** — falls back to seeded positions when no snapshot.

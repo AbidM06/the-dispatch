@@ -5,7 +5,7 @@
  *
  * Architecture:
  *   PORT 3001               ← Express
- *   /api/snapshot           ← FRED + Alpha Vantage (cached)
+ *   /api/markets            ← free multi-source market prices (daily 14:45 UK + manual refresh)
  *   /api/risk               ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/events             ← seed/deterministic (GET) | AI / deterministic (POST /refresh)
  *   /api/explain/:ticker    ← Anthropic AI (cached per ticker)
@@ -26,11 +26,12 @@ const cors     = require("cors");
 const path     = require("path");
 
 // ── Route handlers ────────────────────────────────────────────────────────────
-const snapshotRouter  = require("./routes/snapshot");
+const marketsRouter   = require("./routes/markets");
+const ideasRouter     = require("./routes/ideas");
 const riskRouter      = require("./routes/risk");
 const eventsRouter    = require("./routes/events");
 const explainRouter   = require("./routes/explain");
-const ideasRouter     = require("./routes/ideas");
+const pitchRouter     = require("./routes/pitch");
 const briefRouter     = require("./routes/brief");
 const newsRouter      = require("./routes/news");
 const glossaryRouter  = require("./routes/glossary");
@@ -39,6 +40,7 @@ const correlationsRouter       = require("./routes/correlations");
 const analyticsNarrativeRouter = require("./routes/analyticsNarrative");
 const correlationsCustomRouter = require("./routes/correlationsCustom");
 const momentumRouter           = require("./routes/momentum");
+const strategyBacktestRouter   = require("./routes/strategyBacktest");
 const researchRouter           = require("./routes/research");
 const bulletinRouter           = require("./routes/bulletin");
 
@@ -57,11 +59,12 @@ app.use((req, _res, next) => {
 });
 
 // ── API routes ────────────────────────────────────────────────────────────────
-app.use("/api/snapshot",  snapshotRouter);
+app.use("/api/markets",   marketsRouter);
+app.use("/api/ideas",     ideasRouter);
 app.use("/api/risk",      riskRouter);
 app.use("/api/events",    eventsRouter);
 app.use("/api/explain",   explainRouter);
-app.use("/api/ideas",     ideasRouter);
+app.use("/api/pitch",     pitchRouter);
 app.use("/api/brief",     briefRouter);
 app.use("/api/news",      newsRouter);
 app.use("/api/glossary",  glossaryRouter);
@@ -70,6 +73,7 @@ app.use("/api/correlations",  correlationsRouter);
 app.use("/api/correlations",  analyticsNarrativeRouter);
 app.use("/api/correlations",  correlationsCustomRouter);
 app.use("/api/analytics",    momentumRouter);
+app.use("/api/analytics",    strategyBacktestRouter);
 app.use("/api/research",      researchRouter);
 app.use("/api/bulletin",      bulletinRouter);
 
@@ -130,52 +134,61 @@ if (require.main === module) {
     }
     console.log(`\nAPI endpoints:`);
     console.log(`  GET  /api/health`);
-    console.log(`  GET  /api/snapshot`);
+    console.log(`  GET  /api/markets`);
+    console.log(`  POST /api/markets/refresh`);
+    console.log(`  GET  /api/markets/history/:id?tf=1d|1h`);
+    console.log(`  POST /api/ideas/news | /api/ideas/research   (on-demand idea cards)`);
+    console.log(`  GET  /api/ideas`);
     console.log(`  GET  /api/risk`);
     console.log(`  POST /api/risk/refresh`);
     console.log(`  GET  /api/events`);
     console.log(`  POST /api/events/refresh`);
     console.log(`  GET  /api/explain/:ticker`);
+    console.log(`  POST /api/pitch/:ticker`);
+    console.log(`  GET  /api/analytics/strategy-backtest`);
+    console.log(`  GET  /api/analytics/strategy-backtest/strategies`);
     console.log(`  GET  /api/brief`);
-    console.log(`  GET  /api/ideas`);
-    console.log(`  POST /api/ideas`);
-    console.log(`  GET  /api/ideas/stats`);
-    console.log(`  POST /api/ideas/generate`);
-    console.log(`  GET  /api/ideas/latest`);
-    console.log(`  GET  /api/ideas/history`);
-    console.log(`  GET  /api/ideas/playbooks`);
-    console.log(`  GET  /api/ideas/performance`);
-    console.log(`  POST /api/ideas/weekly-report`);
-    console.log(`  GET  /api/ideas/alpaca`);
-    console.log(`  GET  /api/ideas/exits`);
-    console.log(`  GET  /api/ideas/backtest`);
-    console.log(`  GET  /api/ideas/execution-log`);
-    console.log(`  POST /api/ideas/sync`);
     console.log(`  GET  /api/news`);
     console.log(`  GET  /api/news/calendar`);
     console.log(`  GET  /api/news/:ticker`);
     console.log(`  GET  /api/glossary`);
     console.log(`  GET  /api/glossary/term-of-the-day`);
-    console.log(`  GET  /api/glossary/:slug\n`);
+    console.log(`  GET  /api/glossary/:slug`);
+    console.log(`  GET  /api/research/report?type=`);
+    console.log(`  POST /api/research/report/refresh`);
+    console.log(`  GET  /api/research/report/progress?type=`);
+    console.log(`  GET  /api/research/report/versions?type=`);
+    console.log(`  GET  /api/research/report/:reportId/qa`);
+    console.log(`  GET  /api/research/report/:reportId/sources`);
+    console.log(`  GET  /api/research/report/estimate?type=      (cost before a refresh)`);
+    console.log(`  GET  /api/research/spend                      (USD spend today / this month)`);
+    console.log(`  GET  /api/research/redteam-log`);
+    console.log(`  POST /api/research/interrogate\n`);
+
+    const budgetNow = require("./providers/budget").getStatus();
+    console.log(`AI spend: $${budgetNow.daily.used.toFixed(2)} today` +
+      (budgetNow.daily.cap ? ` of $${budgetNow.daily.cap.toFixed(2)}` : "") +
+      ` · $${budgetNow.monthly.used.toFixed(2)} this month` +
+      (budgetNow.monthly.cap ? ` of $${budgetNow.monthly.cap.toFixed(2)}` : "") + `\n`);
 
     const missing = [];
-    if (!process.env.ANTHROPIC_API_KEY)    missing.push("ANTHROPIC_API_KEY");
-    if (!process.env.ALPHA_VANTAGE_API_KEY) missing.push("ALPHA_VANTAGE_API_KEY");
-    if (!process.env.FRED_API_KEY)          missing.push("FRED_API_KEY");
+    if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
+    if (!process.env.FRED_API_KEY)      missing.push("FRED_API_KEY");
     if (missing.length && !lowCost) {
       console.warn(`⚠  Missing env vars: ${missing.join(", ")}`);
       console.warn(`   Copy .env.example → .env and add your keys.\n`);
     }
 
-    // ── Start idea engine scheduler ──────────────────────────────────────────
+    // ── Start background jobs ────────────────────────────────────────────────
     if (process.env.NODE_ENV !== "test") {
-      const { start: startScheduler } = require("./jobs/ideaScheduler");
-      startScheduler();
+      const { start: startMarkets } = require("./jobs/marketsScheduler");
+      startMarkets();
       const { start: startAiRefresh } = require("./jobs/aiRefreshJob");
       startAiRefresh();
       const { start: startBulletin } = require("./jobs/bulletinScheduler");
       startBulletin();
-      // Pre-generates all six research reports via the Batch API at 50% cost.
+      // Pre-generates the research reports through the five-agent pipeline,
+      // every call via the Batch API at 50% cost (06:40 weekdays).
       const { start: startResearchBatch } = require("./jobs/researchBatchJob");
       startResearchBatch();
     }

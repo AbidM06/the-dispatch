@@ -16,6 +16,7 @@ data/trade_ideas.json
 data/bulletin_log.jsonl
 data/saved_models.json
 data/saved_ideas.json
+data/research_reports/
 
 # ── Dependencies ───────────────────────────────────────────────────────────────
 node_modules/
@@ -33,3 +34,15 @@ design-preview.html
 
 # ── Reports (generated, not source) ───────────────────────────────────────────
 reports/
+.venv/
+
+# Markets panel snapshot (regenerated daily)
+data/markets_snapshot.json
+data/markets_snapshot.json.tmp
+data/idea_cards.json
+data/ai_spend.json
+data/ai_spend.json.tmp
+data/redteam_log.jsonl
+
+# launchd auto-start logs
+logs/

@@ -18,6 +18,7 @@ const { Router }       = require("express");
 const finnhub          = require("../providers/finnhub");
 const fred             = require("../providers/fred");
 const eia              = require("../providers/eia");
+const yahoo            = require("../providers/yahoo");
 const twitter          = require("../providers/twitter");
 const twitterVerify    = require("../providers/twitterVerify");
 const { callClaude, MODEL_SONNET } = require("../providers/anthropic");
@@ -65,6 +66,37 @@ async function fetchMacroContext() {
     if (rates.t10yie     != null) lines.push(`10Y Breakeven Inflation (T10YIE):  ${rates.t10yie.toFixed(2)}%`);
     if (rates.hy_spread  != null) lines.push(`US HY OAS Spread (BAML):           ${Math.round(rates.hy_spread)}bps`);
     if (rates.t10y2y     != null) lines.push(`Yield Curve 10Y-2Y (T10Y2Y):       ${rates.t10y2y.toFixed(2)}%`);
+    return lines.length ? lines.join("\n") : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Live cross-asset price action (Yahoo Finance) ──────────────────────────────
+// Used to ground the "most market-moving" story selection in what actually moved
+// today, rather than just narrative drama (e.g. an ongoing geopolitical conflict
+// that markets have already priced in).
+const MARKET_MOVERS = [
+  { sym: "^GSPC",    label: "S&P 500" },
+  { sym: "^IXIC",    label: "Nasdaq Composite" },
+  { sym: "^VIX",     label: "VIX" },
+  { sym: "CL=F",     label: "WTI Crude" },
+  { sym: "GC=F",     label: "Gold" },
+  { sym: "DX-Y.NYB", label: "US Dollar Index (DXY)" },
+  { sym: "^TNX",     label: "10Y Treasury Yield (intraday)" },
+];
+
+/** Fetch live same-day % moves across major indices/commodities/FX/rates. Degrades to null. */
+async function fetchMarketMovers() {
+  try {
+    const results = await Promise.allSettled(MARKET_MOVERS.map(m => yahoo.getQuote(m.sym)));
+    const lines = [];
+    results.forEach((r, i) => {
+      if (r.status !== "fulfilled") return;
+      const { price, changePct } = r.value;
+      const sign = changePct >= 0 ? "+" : "";
+      lines.push(`${MARKET_MOVERS[i].label}: ${price.toFixed(2)} (${sign}${changePct.toFixed(2)}%)`);
+    });
     return lines.length ? lines.join("\n") : null;
   } catch {
     return null;
@@ -123,9 +155,17 @@ ACCURACY RULES — NON-NEGOTIABLE:
 - Trade rationales must follow a direct, mechanistic causal chain from the article to the asset. No speculative leaps without a stated transmission mechanism.
 - Every sentence must carry information. No filler phrases, no hedging language that adds no meaning.`;
 
-function buildUserPrompt(articleList, macroContext, xContext) {
+function buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin) {
   const macroBlock = macroContext
     ? `LIVE MACRO DATA (FRED, as of ${todayStr()}):\n${macroContext}\n\n`
+    : "";
+
+  const moversBlock = moversContext
+    ? `TODAY'S CROSS-ASSET PRICE ACTION (Yahoo Finance, live, % = change from prior close):\n${moversContext}\n\n`
+    : "";
+
+  const dedupBlock = (prevBulletin && prevBulletin.article && prevBulletin.article.headline)
+    ? `PREVIOUS BULLETIN (${prevBulletin.date || "last session"}): "${prevBulletin.article.headline}"\nDo not re-select this same underlying story unless there has been a new, material development since then (escalation/de-escalation, ceasefire, data release, policy action). If nothing material has changed, select a different story.\n\n`
     : "";
 
   const xBlock = xContext
@@ -133,11 +173,15 @@ function buildUserPrompt(articleList, macroContext, xContext) {
     : "";
 
   return `Today is ${todayStr()}.
-${macroBlock}${xBlock}ARTICLES (Finnhub real-time feed — select the single most market-moving story):
+${macroBlock}${moversBlock}${dedupBlock}${xBlock}ARTICLES (Finnhub real-time feed — select the single most market-moving story):
 ${articleList}
 
 Your tasks:
 1. SELECT the single most market-moving article for cross-asset implications and buy-side relevance. Avoid opinion pieces or company-specific earnings unless they have clear macro significance.
+   - Cross-reference the cross-asset price action above: the selected story should plausibly explain a meaningful share of TODAY's observed moves in at least one of those assets.
+   - A dramatic-sounding headline (e.g. an ongoing geopolitical conflict) that is NOT producing measurable price action today should be DEPRIORITIZED in favor of a quieter story that better explains today's actual moves (a data release, central bank comment, credit event, etc.).
+   - You may use web_search to sanity-check "what is driving markets today" for additional confirmation of your selection — but every figure in your output must still come from the article or the live data blocks above, never invented from a search result.
+   - Respect the PREVIOUS BULLETIN note above if present.
 2. Generate a complete morning bulletin grounded strictly in the article content and the live macro data above.
 
 Return ONLY a valid JSON object — no markdown, no text outside the JSON:
@@ -253,9 +297,11 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
   }
 
   // ── 3. Generate with Claude ────────────────────────────────────────────────
-  const macroContext = await fetchMacroContext();
-  const xContext     = await fetchTwitterContext(articles[0]?.headline);
-  const userPrompt   = buildUserPrompt(articleList, macroContext, xContext);
+  const macroContext  = await fetchMacroContext();
+  const moversContext = await fetchMarketMovers();
+  const xContext      = await fetchTwitterContext(articles[0]?.headline);
+  const prevBulletin  = getLatest();
+  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin);
 
   try {
     const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);
@@ -381,9 +427,11 @@ module.exports.generateBulletin = async function() {
     return b;
   }
 
-  const macroContext = await fetchMacroContext();
-  const xContext     = await fetchTwitterContext(articles[0]?.headline);
-  const userPrompt   = buildUserPrompt(articleList, macroContext, xContext);
+  const macroContext  = await fetchMacroContext();
+  const moversContext = await fetchMarketMovers();
+  const xContext      = await fetchTwitterContext(articles[0]?.headline);
+  const prevBulletin  = getLatest();
+  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin);
 
   try {
     const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);

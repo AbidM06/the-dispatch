@@ -54,6 +54,8 @@ cat > "$PLIST_PATH" << EOF
   <dict>
     <key>NODE_ENV</key>
     <string>production</string>
+    <key>PATH</key>
+    <string>$(dirname "$NODE_PATH"):/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 
   <!-- Start on login -->
@@ -79,6 +81,13 @@ EOF
 
 # ── Load it now (no need to log out) ─────────────────────────────────────────
 launchctl unload "$PLIST_PATH" 2>/dev/null   # unload if already registered
+# Stop any manually started server (npm run dev / The Dispatch.command) so the
+# agent can bind the port — otherwise KeepAlive would keep retrying.
+PORT_IN_USE="$(lsof -ti:${PORT:-3001} 2>/dev/null)"
+if [ -n "$PORT_IN_USE" ]; then
+  echo "  Stopping existing server on port ${PORT:-3001} (pid $PORT_IN_USE)…"
+  kill $PORT_IN_USE 2>/dev/null; sleep 2
+fi
 launchctl load -w "$PLIST_PATH"
 
 echo ""
