@@ -28,9 +28,11 @@ Working and merged (PR #4, 2026-09-28):
 - **Cost controls** — every Claude call priced from real usage into `data/ai_spend.json`.
   Caps: monthly **$20, warn-only** (banner + confirm warning); daily **hard stop**.
   No AI runs on a schedule (research batch, bulletin, events/risk refresh are opt-in flags).
-- **No fabricated data anywhere** — research, Sales/Macro, events/risk and the calendar
-  return "unavailable" rather than invented content (see DECISIONS.md D-02).
-- Tests: `npm test` → 304 passing (10 suites).
+- **No-fabrication policy (D-02)** — research, Sales/Macro, events/risk and the News
+  calendar return "unavailable" rather than invented content. **Coverage is not yet
+  complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
+  audit tracks where the code does not meet it yet.
+- Tests: `npm test` → 307 passing (11 suites).
 
 ## 2. In progress
 
@@ -75,10 +77,13 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## 4. Open items / known issues
 
-- **Brief still serves seed data** (found by Codex, 2026-09-28): `server/routes/brief.js`
-  falls back to March-2026 `RATES_SEED`, measures "what changed" against hardcoded
-  `PREV_RATES`, and builds "next event" from hand-typed `MACRO_CAL` / `EARNINGS_CAL`.
-  Loaded on every page open. → Codex's data-accuracy audit.
+- **Brief still serves seed data** (found by Codex, 2026-09-28; audit on `main` 14780c6):
+  `server/routes/brief.js` substitutes March-2026 `RATES_SEED` when rates are missing —
+  **including per-series inside a partially cached rates object, while the response still
+  says `source: "cache"`, `stale: false`** — compares "what changed" against fixed March
+  `PREV_RATES`, and builds "next event" from hand-typed `MACRO_CAL` / `EARNINGS_CAL` with
+  the current year guessed. Loaded on every page open. → Codex's data-accuracy audit
+  (read-only first; fixes in small separate PRs).
 - **PR #3** (`claude/relaxed-brown-8q5ynd`, older review branch) — do **not** merge (built on
   the old code). Its four important fixes are in `main`. Smaller items **not yet checked
   against current code**: FRED `limit=1` losing a series on a "." holiday row; Zod schemas
@@ -98,8 +103,16 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Mac path `~/Desktop/the_dispatch`; restart the server with
   `launchctl kickstart -k gui/$(id -u)/com.thedispatch.server` (it reads `.env` only at start).
 - `.env` holds real keys — never print values; show names only (`cut -d= -f1 .env`).
-- Update the Mac after a merge:
-  `git fetch origin && git checkout -B main origin/main && launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`
+- Update the Mac after a merge — safely (never force-move `main`; local commits must survive):
+  ```
+  cd ~/Desktop/the_dispatch
+  git status --short                 # must print NOTHING — if it lists files, stop and ask
+  git switch main
+  git pull --ff-only origin main     # only moves forward; if it says "diverged", stop and ask
+  launchctl kickstart -k gui/$(id -u)/com.thedispatch.server   # restart only after the pull succeeded
+  ```
+  `--ff-only` refuses to rewrite or merge anything: if your `main` has commits GitHub
+  doesn't, it stops with an error instead of discarding them. (Reviewed by Codex on PR #5.)
 
 ## 6. Switching models (e.g. when a usage limit is reached)
 
