@@ -111,7 +111,7 @@ function referenceFrom(card, { backfilled = false } = {}) {
   }
   return {
     status, reason,
-    value: Number(p.value), source: p.source || null, asOf: p.asOf || null, url: p.url || null,
+    value: Number(p.value), source: p.source || null, asOf: p.asOf || null, releasedAt: p.releasedAt || null, url: p.url || null,
     freshness: p.freshness || null, cadence: p.cadence || (isMonthly(p) ? "monthly" : null), marketId: card.marketId || null, snapshotAt: card.marketsSnapshotAt || null,
   };
 }
@@ -128,7 +128,10 @@ function referenceFrom(card, { backfilled = false } = {}) {
 const UNIT_DAYS = { d: 1, w: 7, m: 30.4, q: 91.3, y: 365 };
 // A duration followed by one of these names an instrument's tenor ("10-year
 // yield", "2y swap"), not how long the trade runs, so it is not a horizon.
-const TENOR_NOUN = /^[a-z]*\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur|gilts?|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b/;
+// Multi-leg phrases are followed through ("2-year vs 10-year yields", "2y/10y
+// curve"): every maturity in the chain belongs to the instrument.
+const TENOR_LEG = String.raw`\s*(?:vs\.?|versus|/|&|and|-|–)\s*\d+(?:\.\d+)?\s*-?\s*(?:years?|yrs?|y|months?|mos?|m|weeks?|wks?|w)\b`;
+const TENOR_NOUN = new RegExp(String.raw`^[a-z]*(?:${TENOR_LEG})*\s+(?:(?:us|uk|german|japanese|real|nominal|inflation|treasury|gov(?:ernment|t)?)\s+)?(?:yields?|notes?|bonds?|treasur|gilts?|bunds?|swaps?|breakevens?|rates?|bills?|ust|tips|jgbs?|oats?|btps?|sofr|libor|forwards?|futures?|tenor|paper|spreads?|inflation|curve)\b`);
 function horizonFrom(raw) {
   const text = String(raw || "").toLowerCase();
   // Number, then an optional space or hyphen ("6 months", "6-month"), then a unit;

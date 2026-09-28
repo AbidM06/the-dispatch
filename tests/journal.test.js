@@ -108,6 +108,9 @@ describe("journal store", () => {
     ["6-month", "strategic"], ["1-year", "strategic"], ["2-week", "tactical"], ["3-month view", "swing"],
     ["2-3-month", "swing"], ["10-year yield", "undeclared"], ["2y swap over 1 month", "swing"],
     ["6-month hold on the 2-year note", "strategic"], ["1 month, 10-year real yields", "swing"],
+    // multi-leg rates phrases: every maturity in the chain is the instrument's
+    ["2-year vs 10-year yields, 6-month horizon", "strategic"], ["2y/10y curve steepener over 3 months", "swing"],
+    ["2-year and 5-year notes for 1 month", "swing"], ["3 months vs 6 months", "strategic"],
   ])("horizon %p → %s", (raw, category) => {
     expect(journal._internal.horizonFrom(raw).category).toBe(category);
   });
@@ -214,6 +217,21 @@ describe("journal routes + every generated idea is logged", () => {
     expect(e.ideaId).toBe(gen.body.idea.id);
     expect(e.reference).toMatchObject({ status: "ok", value: 100.5, source: "Yahoo Finance" });
     expect(e.horizon.category).toBe("swing");
+  });
+
+  test("the reference time is the OBSERVATION time, not the provider's publish time", async () => {
+    const app = setup();
+    const markets = require("../server/markets/service");
+    markets.getSnapshot.mockReturnValue({
+      generatedAt: CREATED,
+      items: [{ id: "BRENT", label: "Brent crude", group: "commodities", ok: true, unit: null,
+        quote: { value: 100.5, asOf: "2026-09-25T00:00:00.000Z", releasedAt: "2026-09-28T08:00:00.000Z", cadence: "daily",
+                 source: "FRED", sourceUrl: "https://fred.stlouisfed.org/series/DCOILBRENTEU" },
+        freshness: { label: "Daily close" } }],
+    });
+    const gen = await request(app).post("/api/ideas/news").send({});
+    const e = (await request(app).get("/api/journal/" + gen.body.idea.journalEntryId)).body.entry;
+    expect(e.reference).toMatchObject({ asOf: "2026-09-25T00:00:00.000Z", releasedAt: "2026-09-28T08:00:00.000Z", cadence: "daily" });
   });
 
   test("dismissing the card does not remove the Journal entry", async () => {
