@@ -24,7 +24,9 @@ const router = Router();
 const { ensureBackfilled } = require("../journal/migrate");
 
 function send(res, fn) {
-  try { res.json({ entry: fn() }); }
+  // Mutations return the entry WITH its tracking, like the GETs, so the client
+  // can swap it in without losing the result badge.
+  try { const e = fn(); res.json({ entry: { ...e, tracking: tracker.getState().entries[e.entryId] || null } }); }
   catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 }
 

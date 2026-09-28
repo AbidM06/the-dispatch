@@ -220,7 +220,11 @@ async function updateAll() {
     const markets = require("../markets/service");
     const doc = load();
     const entries = journal.list({ limit: 100000 });
-    const needs = entries.filter(e => !FINAL.has(doc.entries[e.entryId]?.status));
+    // Work left: anything not final, and final results whose Journal outcome
+    // event has not been written yet (a failed append, or a benchmark still
+    // missing) — so neither is lost to a one-off error.
+    const done = (st) => FINAL.has(st?.status) && st.outcomeRecorded;
+    const needs = entries.filter(e => !done(doc.entries[e.entryId]));
     if (!needs.length) return doc;
 
     const histories = {};
@@ -237,7 +241,9 @@ async function updateAll() {
       const p = plan(e.idea, e.horizon);
       const prev = doc.entries[e.entryId] || { status: "waiting", lastBarT: 0 };
       let s;
-      if (p.problem) s = { status: "not_trackable", note: p.problem };
+      if (FINAL.has(prev.status)) {
+        s = prev.fillDate && !prev.spx ? withBenchmark(prev, spx) : prev;      // result is settled; only the benchmark may be missing
+      } else if (p.problem) s = { status: "not_trackable", note: p.problem };
       else if (!e.idea.marketId) s = { status: "not_trackable", note: "No Markets instrument to price this idea against." };
       else {
         const bars = await getBars(e.idea.marketId);
@@ -247,10 +253,18 @@ async function updateAll() {
       }
       s = { ...s, plan: { entry: p.entry, zoneLow: p.zoneLow, zoneHigh: p.zoneHigh, target: p.target, stop: p.stop,
         riskPerR: p.risk, horizonDays: p.horizonDays, horizonAssumed: p.horizonAssumed, expiresOn: p.expiresOn }, updatedAt: new Date().toISOString() };
-      doc.entries[e.entryId] = s;
       if (FINAL.has(s.status)) {
-        try { journal.recordOutcome(e.entryId, s); } catch (err) { console.warn("[journal] outcome write failed:", err.message); }
+        // The Journal's outcome event is written once, so it waits until the
+        // S&P comparison is available for entered ideas; until then (and after
+        // a failed write) the entry stays in the work list and is retried.
+        s.benchmarkPending = Boolean(s.fillDate && !s.spx);
+        s.outcomeRecorded = false;
+        if (!s.benchmarkPending) {
+          try { journal.recordOutcome(e.entryId, s); s.outcomeRecorded = true; }
+          catch (err) { console.warn("[journal] outcome write failed (will retry):", err.message); }
+        }
       }
+      doc.entries[e.entryId] = s;
     }
     doc.updatedAt = new Date().toISOString();
     save(doc);

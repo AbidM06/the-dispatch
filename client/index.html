@@ -1929,7 +1929,8 @@ function App() {
 
   function replaceEntry(entry) {
     setJournalEntries(list => list.some(e => e.entryId === entry.entryId)
-      ? list.map(e => e.entryId === entry.entryId ? entry : e) : [entry].concat(list));
+      ? list.map(e => e.entryId === entry.entryId ? { ...entry, tracking: entry.tracking !== undefined ? entry.tracking : e.tracking } : e)
+      : [entry].concat(list));
   }
 
   async function journalPost(entryId, action, body) {
@@ -6926,6 +6927,7 @@ function App() {
               (tk.spx.vsPct != null ? ' → this idea ' + (tk.spx.vsPct >= 0 ? 'beat it by ' : 'lagged it by ') + Math.abs(tk.spx.vsPct) + ' pts' : '') +
               ' (' + tk.spx.basis + ')'),
             tk.note && React.createElement('div', { className: 'idc-sub' }, tk.note),
+            tk.benchmarkPending && React.createElement('div', { className: 'idc-sub' }, 'S&P comparison pending — the S&P prices were unavailable at the last update; it is retried at the next refresh.'),
             tk.plan && React.createElement('div', { className: 'idc-sub' },
               'Zone ' + f(tk.plan.zoneLow) + '–' + f(tk.plan.zoneHigh) + ' · target ' + f(tk.plan.target) + ' · stop ' + f(tk.plan.stop) +
               ' · 1R = ' + f(tk.plan.riskPerR) + ' · horizon ' + tk.plan.horizonDays + ' days to ' + tk.plan.expiresOn +

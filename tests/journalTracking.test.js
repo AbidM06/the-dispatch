@@ -155,6 +155,46 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     expect(res.body.stats).toMatchObject({ closed: 1, wins: 1, avgR: 2 });
   });
 
+  test("a failed outcome write is retried on the next update, not lost", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    const spy = jest.spyOn(journal, "recordOutcome").mockImplementationOnce(() => { throw new Error("disk full"); });
+    let doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId]).toMatchObject({ status: "target_hit", outcomeRecorded: false });
+    expect(journal.getEntry(e.entryId).outcome).toBeNull();
+    doc = await tracker.updateAll();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(doc.entries[e.entryId].outcomeRecorded).toBe(true);
+    expect(journal.getEntry(e.entryId).outcome).toMatchObject({ status: "target_hit", R: 2 });
+  });
+
+  test("a missing S&P benchmark is retried; the outcome event waits for it", async () => {
+    const { journal, tracker, markets } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    const real = markets.getHistory.getMockImplementation();
+    markets.getHistory.mockImplementation(async (id) => { if (id === "SPX") throw new Error("Yahoo 503"); return real(id); });
+    let doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId]).toMatchObject({ status: "target_hit", benchmarkPending: true, outcomeRecorded: false });
+    expect(journal.getEntry(e.entryId).outcome).toBeNull();
+    markets.getHistory.mockImplementation(real);
+    doc = await tracker.updateAll();
+    expect(doc.entries[e.entryId]).toMatchObject({ status: "target_hit", benchmarkPending: false, outcomeRecorded: true, spx: { returnPct: 2 } });
+    expect(journal.getEntry(e.entryId).outcome.spx).toMatchObject({ returnPct: 2 });
+  });
+
+  test("watch / pitch responses include tracking, so the result badge survives", async () => {
+    const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-04", 104, 111, 103, 110)] } });
+    const e = journal.logIdea({ ...IDEA });
+    await tracker.updateAll();
+    const app = require("../server/index");
+    const w = await request(app).post(`/api/journal/${e.entryId}/watch`).send({ watched: true });
+    expect(w.body.entry.tracking).toMatchObject({ status: "target_hit" });
+    const p = await request(app).post(`/api/journal/${e.entryId}/pitch`).send({ text: "mine", beforeReveal: false });
+    expect(p.body.entry.tracking).toMatchObject({ status: "target_hit" });
+  });
+
   test("no instrument or no history → says so, never invents a result", async () => {
     const { journal, tracker } = setup({});
     const a = journal.logIdea({ ...IDEA, id: "IDEA-nomkt", marketId: null });
