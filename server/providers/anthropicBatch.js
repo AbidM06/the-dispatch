@@ -77,7 +77,10 @@ async function submitBatch(requests) {
   const body = {
     requests: requests.map(r => ({
       custom_id: r.customId,
-      params: {
+      // `params` passes a complete Messages request through untouched (used by
+      // claudeTransport for tool_choice / cached content blocks); the short form
+      // builds one from system + prompt.
+      params: r.params || {
         model:      r.model,
         max_tokens: r.maxTokens,
         system:     r.system,
@@ -131,10 +134,12 @@ async function fetchResults(resultsUrl) {
         .filter(b => b.type === "text")
         .map(b => b.text)
         .join("\n");
-      out[id] = { text, error: null };
+      // `message` keeps usage + tool blocks so the caller can price the call
+      // and recover web_search sources — text alone loses both.
+      out[id] = { text, error: null, message: entry.result.message };
     } else {
       const reason = entry.result?.error?.message || entry.result?.type || "unknown";
-      out[id] = { text: null, error: reason };
+      out[id] = { text: null, error: reason, message: null };
       console.warn(`[batch] request ${id} did not succeed: ${reason}`);
     }
   }

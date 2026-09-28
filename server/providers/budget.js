@@ -1,88 +1,91 @@
 /**
  * server/providers/budget.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Shared Anthropic API budget gate.
+ * Shared Anthropic API budget gate — in US DOLLARS.
  *
- * Tracks daily and monthly call counts in memory.
- * Caps are read from env vars at call time (hot-reloadable via .env changes):
- *   ANTHROPIC_DAILY_CAP    default 5
- *   ANTHROPIC_MONTHLY_CAP  default 50
+ * Spend is measured from each call's real token usage (providers/aiCost.js)
+ * and persisted to data/ai_spend.json, so a restart does not reset it.
+ * Caps are read from env at call time:
+ *   ANTHROPIC_DAILY_CAP         USD per UTC day    (default 5)  — always a hard stop:
+ *                               the guard against a runaway loop or retry storm
+ *   ANTHROPIC_MONTHLY_CAP       USD per UTC month  (default 20)
+ *   ANTHROPIC_MONTHLY_CAP_MODE  "warn" (default) or "block". The owner chose
+ *                               warn: going over is allowed but flagged in the
+ *                               top bar and in every refresh confirmation.
+ * Set a cap to 0 to disable that dimension. DISABLE_AI=true blocks all calls.
  *
- * Set either cap to 0 to disable that dimension of gating.
- * Set DISABLE_AI=true to block all calls regardless.
+ * History: this used to count CALLS while every doc called it a USD cap, and
+ * `parseInt(undefined) ?? 5` produced NaN — so an unset cap was silently off
+ * and a set cap of 5 meant five calls, fewer than one five-agent report needs.
+ *
+ * The gate is checked BEFORE a call against spend so far; the call's own cost
+ * is recorded after it returns. One call can therefore overshoot a cap by its
+ * own cost — the alternative (pre-reserving a guess) would block calls on an
+ * invented number.
  *
  * Usage:
- *   const budget = require('./budget');
- *   budget.checkAndIncrement();   // throws BudgetError if over cap
- *   budget.getStatus();           // { daily, monthly }
+ *   budget.checkAndIncrement();   // throws BUDGET_DAILY (or BUDGET_MONTHLY in block mode)
+ *   budget.getStatus();           // { daily, monthly } in USD
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 "use strict";
 
-let _dayKey     = "";
-let _monthKey   = "";
-let _dayCount   = 0;
-let _monthCount = 0;
+const aiCost = require("./aiCost");
 
 // ── Auto-fallback state ───────────────────────────────────────────────────────
 // When the Anthropic API returns a billing/credit error the server automatically
 // enters "API fallback" mode for a configurable window (default 60 min).
-// During this window all routes return deterministic narrative instead of calling
-// AI, preventing repeated failed API calls.  The window auto-expires so that if
-// the user tops up their credits, AI resumes on the next scheduled refresh.
+// The window auto-expires so that if the user tops up their credits, AI resumes
+// on the next scheduled refresh.
 let _apiFallbackUntil = 0; // epoch ms; 0 = not in fallback
 
-function _dailyCap()   { return parseInt(process.env.ANTHROPIC_DAILY_CAP,   10) ?? 5; }
-function _monthlyCap() { return parseInt(process.env.ANTHROPIC_MONTHLY_CAP, 10) ?? 50; }
-function _today()      { return new Date().toISOString().slice(0, 10); }
-function _thisMonth()  { return new Date().toISOString().slice(0, 7);  }
-
-function _sync() {
-  const d = _today();
-  const m = _thisMonth();
-  if (_dayKey   !== d) { _dayKey   = d; _dayCount   = 0; }
-  if (_monthKey !== m) { _monthKey = m; _monthCount = 0; }
+function _cap(name, dflt) {
+  const v = parseFloat(process.env[name]);
+  return Number.isFinite(v) && v >= 0 ? v : dflt;
 }
+function _dailyCap()   { return _cap("ANTHROPIC_DAILY_CAP", 5); }
+function _monthlyCap() { return _cap("ANTHROPIC_MONTHLY_CAP", 20); }
+function _monthlyMode() { return process.env.ANTHROPIC_MONTHLY_CAP_MODE === "block" ? "block" : "warn"; }
 
 /**
- * Check current caps and increment counters if within budget.
- * Throws an Error with err.code === "BUDGET_DAILY" or "BUDGET_MONTHLY" if exceeded.
+ * Check spend so far against the USD caps. Name kept for its callers; nothing
+ * is incremented here — aiCost.record() adds each call's real cost afterwards.
+ * Throws an Error with err.code === "BUDGET_DAILY", or "BUDGET_MONTHLY" when the
+ * monthly cap is in block mode. In warn mode the monthly cap never throws.
  */
 function checkAndIncrement() {
-  _sync();
+  const s = aiCost.spendSummary();
   const daily   = _dailyCap();
   const monthly = _monthlyCap();
 
-  if (daily > 0 && _dayCount >= daily) {
+  if (daily > 0 && s.today.usd >= daily) {
     const err = new Error(
-      `Anthropic daily budget exhausted (${_dayCount}/${daily} calls today). Resets at midnight UTC.`
+      `Anthropic daily budget reached ($${s.today.usd.toFixed(2)} of $${daily.toFixed(2)} today). Resets at midnight UTC — raise ANTHROPIC_DAILY_CAP to continue.`
     );
     err.code = "BUDGET_DAILY";
     throw err;
   }
-  if (monthly > 0 && _monthCount >= monthly) {
+  if (monthly > 0 && _monthlyMode() === "block" && s.month.usd >= monthly) {
     const err = new Error(
-      `Anthropic monthly budget exhausted (${_monthCount}/${monthly} calls this month).`
+      `Anthropic monthly budget reached ($${s.month.usd.toFixed(2)} of $${monthly.toFixed(2)} this month).`
     );
     err.code = "BUDGET_MONTHLY";
     throw err;
   }
-
-  _dayCount++;
-  _monthCount++;
 }
 
-/**
- * Return current usage vs caps without incrementing.
- */
 function getStatus() {
-  _sync();
+  const s = aiCost.spendSummary();
   const daily   = _dailyCap();
   const monthly = _monthlyCap();
+  const round = (n) => Math.round(n * 100) / 100;
   return {
-    daily:   { used: _dayCount,   cap: daily,   remaining: daily   > 0 ? Math.max(0, daily   - _dayCount)   : Infinity },
-    monthly: { used: _monthCount, cap: monthly, remaining: monthly > 0 ? Math.max(0, monthly - _monthCount) : Infinity },
+    currency: "USD",
+    daily:   { used: round(s.today.usd), cap: daily,   remaining: daily   > 0 ? round(Math.max(0, daily   - s.today.usd)) : null, calls: s.today.calls, webSearches: s.today.webSearches, unpricedCalls: s.today.unpricedCalls },
+    monthly: { used: round(s.month.usd), cap: monthly, remaining: monthly > 0 ? round(Math.max(0, monthly - s.month.usd)) : null, calls: s.month.calls, webSearches: s.month.webSearches, unpricedCalls: s.month.unpricedCalls,
+               mode: _monthlyMode(), overCap: monthly > 0 && s.month.usd >= monthly },
+    pricesChecked: s.pricesChecked,
   };
 }
 
@@ -146,8 +149,7 @@ function getApiFallbackInfo() {
 
 /** Reset all state — for tests only. */
 function _reset() {
-  _dayKey = ""; _monthKey = "";
-  _dayCount = 0; _monthCount = 0;
+  aiCost._reset();
   _apiFallbackUntil = 0;
 }
 

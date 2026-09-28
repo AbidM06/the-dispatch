@@ -22,7 +22,6 @@ const { isApiFallback, clearApiFallback,
         setApiFallback, getApiFallbackInfo }      = require("../providers/budget");
 const { generateNarrative } = require("../analytics/narrativeEngine");
 const { schemas, validate } = require("../schemas");
-const seeds = require("../../seeds/fallback");
 const requireWriteAuth = require("../middleware/auth");
 
 const router = Router();
@@ -63,14 +62,16 @@ function buildResponse(events, econ, source, fetchedAt, stale, analysisMode) {
 
 /**
  * Collect rates/fx/portfolio context for the narrative engine.
- * Reads from cached snapshot/portfolio data if available; falls back to seeds.
+ * Reads real cached snapshot data only — never seed rates (they would be narrated as current).
  */
 function getContext() {
   const snapData      = cache.get("snapshot:data");
   const portfolioData = cache.get("portfolio:data");
   return {
-    rates:     snapData?.rates     || seeds.RATES_SEED,
-    fx:        snapData?.fx        || seeds.FX_SEED,
+    // Real fetched rates only. Seed rates (Mar 2026) must never be narrated as
+    // current; with none, the no-AI narrative simply has fewer cards.
+    rates:     snapData?.rates     || {},
+    fx:        snapData?.fx        || null,
     portfolio: portfolioData       || null,
   };
 }
@@ -95,10 +96,13 @@ router.get("/", (req, res) => {
     return res.json({ ...buildResponse(events, econ, "seeded", now, false, "deterministic"), ...extra });
   }
 
-  // 3. Static seed fallback
-  const response = buildResponse(seeds.EVENTS_SEED, seeds.ECON_SEED, "seeded", seeds.SEED_DATE, true, "seeded");
+  // 3. Nothing cached and AI not yet run — facts-only narrative from real data.
+  //    The old hand-written seed events (a Hormuz closure, GPU orders, tariffs)
+  //    are never served: they read as news and were not.
+  const n = generateNarrative(getContext());
+  const response = buildResponse(n.events, n.econ, "seeded", new Date().toISOString(), false, "deterministic");
   const { ok, data } = validate(schemas.EventsResponse, response);
-  res.json({ ...(ok ? data : response), analysisMode: "seeded" });
+  res.json({ ...(ok ? data : response), analysisMode: "deterministic" });
 });
 
 // ── POST /api/events/refresh ───────────────────────────────────────────────────
@@ -135,8 +139,9 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
         _cooldown: `Refresh cooldown active — ${remaining} min remaining. Pass force:true to override.`,
       });
     }
+    const n = generateNarrative(getContext());
     return res.json({
-      ...buildResponse(seeds.EVENTS_SEED, seeds.ECON_SEED, "seeded", seeds.SEED_DATE, true, "seeded"),
+      ...buildResponse(n.events, n.econ, "seeded", new Date().toISOString(), false, "deterministic"),
       _cooldown: `Refresh cooldown active — ${remaining} min remaining.`,
     });
   }
@@ -189,13 +194,14 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
 
     const em  = cache.getWithMeta(CACHE_KEY_EVENTS);
     const ec  = cache.getWithMeta(CACHE_KEY_ECON);
-    const events   = em ? em.value : seeds.EVENTS_SEED;
-    const econ     = ec ? ec.value : seeds.ECON_SEED;
+    const n        = em ? null : generateNarrative(getContext());
+    const events   = em ? em.value : n.events;
+    const econ     = ec ? ec.value : (n ? n.econ : []);
     const source   = em ? "cache" : "seeded";
-    const fetchedAt = em ? em.fetchedAt : seeds.SEED_DATE;
+    const fetchedAt = em ? em.fetchedAt : new Date().toISOString();
 
     res.status(200).json({
-      ...buildResponse(events, econ, source, fetchedAt, true, em ? "ai" : "seeded"),
+      ...buildResponse(events, econ, source, fetchedAt, Boolean(em), em ? "ai" : "deterministic"),
       _refreshError: err.message,
     });
   }

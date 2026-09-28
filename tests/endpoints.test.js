@@ -52,6 +52,8 @@ jest.mock("../server/providers/anthropic", () => ({
   fetchWatchlistPrices: jest.fn(),
   // Still used by explain route
   fetchTickerExplain:  jest.fn(),
+  // Used by pitch route
+  generatePitch:       jest.fn(),
 }));
 // Finnhub — mocked so news routes don't make real HTTP calls
 jest.mock("../server/providers/finnhub", () => ({
@@ -96,6 +98,17 @@ afterAll(() => {
 });
 
 // ── Shared fixture helpers ────────────────────────────────────────────────────
+
+// Real-shaped, dated rates as the Markets service writes them. The no-AI
+// narrative only ever describes fetched data, so tests that expect cards seed it.
+const LIVE_RATES = {
+  dgs10:     { value: 4.37, date: "2026-09-25", source: "FRED" },
+  dfii10:    { value: 1.91, date: "2026-09-25", source: "FRED" },
+  t10yie:    { value: 2.46, date: "2026-09-25", source: "FRED" },
+  hy_spread: { value: 3.05, date: "2026-09-25", source: "FRED" },
+  t10y2y:    { value: 0.41, date: "2026-09-25", source: "FRED" },
+};
+function seedLiveRates() { cache.set("snapshot:data", { rates: LIVE_RATES }, 3600_000); }
 
 /** Build a complete fetchAllAnalysis mock response and register it. */
 function mockAllAnalysis(overrides = {}) {
@@ -157,147 +170,23 @@ describe("GET /api/health", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /api/snapshot  (AV for AMD + FX, Polygon for peers)
-// ─────────────────────────────────────────────────────────────────────────────
-describe("GET /api/snapshot", () => {
-  test("returns envelope + data shape when live providers succeed", async () => {
-    fredMock.getAllRates.mockResolvedValue({
-      dgs10:     { seriesId: "DGS10",        value: 4.13, date: "2026-03-05", source: "FRED" },
-      dfii10:    { seriesId: "DFII10",       value: 1.82, date: "2026-03-05", source: "FRED" },
-      t10yie:    { seriesId: "T10YIE",       value: 2.35, date: "2026-03-05", source: "FRED" },
-      hy_spread: { seriesId: "BAMLH0A0HYM2", value: 3.00, date: "2026-03-06", source: "FRED" },
-      t10y2y:    { seriesId: "T10Y2Y",       value: 0.59, date: "2026-03-06", source: "FRED" },
-    });
-    fredMock.getRecentHistory.mockResolvedValue({
-      seriesId: "DGS10",
-      observations: [{ date: "2026-03-05", value: 4.13 }],
-      source: "FRED",
-    });
-    // AV now only returns AMD quote
-    avMock.getQuotes.mockResolvedValue([{
-      sym: "AMD", price: 192.43, chgPct: -3.52, volume: 5_000_000,
-      latestTradingDay: "2026-03-06", source: "Alpha Vantage",
-    }]);
-    avMock.getFxRate.mockResolvedValue({
-      rate: 0.7921, fromCurrency: "USD", toCurrency: "GBP",
-      lastRefreshed: "2026-03-07", source: "Alpha Vantage",
-    });
-    // Polygon returns peers in one batch call
-    polyMock.getSnapshots.mockResolvedValue([
-      { sym: "NVDA", price: 175.00, chg: -2.00, chgPct: -1.13, volume: 4_000_000, source: "Polygon.io", date: "2026-03-06" },
-      { sym: "MSFT", price: 405.00, chg:  1.00, chgPct:  0.25, volume: 3_000_000, source: "Polygon.io", date: "2026-03-06" },
-    ]);
-
-    const res = await request(app).get("/api/snapshot");
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({
-      source:    expect.stringMatching(/live|cache|seeded/),
-      fetchedAt: expect.any(String),
-      stale:     expect.any(Boolean),
-      data:      expect.any(Object),
-    });
-    expect(res.body.data.rates).toBeDefined();
-    expect(res.body.data.fx).toBeDefined();
-    expect(res.body.data.watchlist).toBeInstanceOf(Array);
-    // Watchlist should contain AMD (from AV) and peers (from Polygon)
-    const syms = res.body.data.watchlist.map(w => w.sym);
-    expect(syms).toContain("AMD");
-  });
-
-  test("falls back to seeded data when all providers fail", async () => {
-    fredMock.getAllRates.mockRejectedValue(new Error("FRED down"));
-    fredMock.getRecentHistory.mockRejectedValue(new Error("FRED down"));
-    avMock.getQuotes.mockRejectedValue(new Error("AV down"));
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-    polyMock.getSnapshots.mockRejectedValue(new Error("Polygon down"));
-
-    const res = await request(app).get("/api/snapshot");
-    expect(res.status).toBe(200);
-    expect(res.body.data).toBeDefined();
-    expect(res.body.stale).toBe(true);
-  });
-
-  test("watchlist merges AV (AMD) and Polygon (peers) correctly", async () => {
-    fredMock.getAllRates.mockResolvedValue({
-      dgs10: { seriesId: "DGS10", value: 4.13, date: "2026-03-05", source: "FRED" },
-      dfii10: { seriesId: "DFII10", value: 1.82, date: "2026-03-05", source: "FRED" },
-      t10yie: { seriesId: "T10YIE", value: 2.35, date: "2026-03-05", source: "FRED" },
-      hy_spread: { seriesId: "BAMLH0A0HYM2", value: 3.00, date: "2026-03-06", source: "FRED" },
-      t10y2y: { seriesId: "T10Y2Y", value: 0.59, date: "2026-03-06", source: "FRED" },
-    });
-    fredMock.getRecentHistory.mockResolvedValue({
-      seriesId: "DGS10", observations: [{ date: "2026-03-05", value: 4.13 }], source: "FRED",
-    });
-    avMock.getQuotes.mockResolvedValue([{
-      sym: "AMD", price: 192.43, chgPct: -3.52, volume: 5_000_000,
-      latestTradingDay: "2026-03-06", source: "Alpha Vantage",
-    }]);
-    avMock.getFxRate.mockResolvedValue({
-      rate: 0.7921, fromCurrency: "USD", toCurrency: "GBP",
-      lastRefreshed: "2026-03-07", source: "Alpha Vantage",
-    });
-    polyMock.getSnapshots.mockResolvedValue([
-      { sym: "NVDA", price: 175.00, chg: -2.00, chgPct: -1.13, volume: 4_000_000, source: "Polygon.io", date: "2026-03-06" },
-    ]);
-
-    const res = await request(app).get("/api/snapshot");
-    expect(res.status).toBe(200);
-    const wl = res.body.data.watchlist;
-    const amd = wl.find(w => w.sym === "AMD");
-    const nvda = wl.find(w => w.sym === "NVDA");
-    expect(amd).toMatchObject({ sym: "AMD", price: 192.43, source: "Alpha Vantage" });
-    expect(nvda).toMatchObject({ sym: "NVDA", price: 175.00, source: "Polygon.io" });
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/snapshot/prefetch
-// ─────────────────────────────────────────────────────────────────────────────
-describe("POST /api/snapshot/prefetch", () => {
-  test("returns prefetched:true with source info when providers succeed", async () => {
-    avMock.getFxRate.mockResolvedValue({
-      rate: 0.7921, fromCurrency: "USD", toCurrency: "GBP",
-      lastRefreshed: "2026-03-07", source: "Alpha Vantage",
-    });
-    avMock.getQuotes.mockResolvedValue([{
-      sym: "AMD", price: 192.43, chgPct: -3.52, volume: 5_000_000,
-      latestTradingDay: "2026-03-06", source: "Alpha Vantage",
-    }]);
-    polyMock.getSnapshots.mockResolvedValue([
-      { sym: "NVDA", price: 175.00, chg: -2.00, chgPct: -1.13, volume: 4_000_000, source: "Polygon.io", date: "2026-03-06" },
-    ]);
-
-    const res = await request(app).post("/api/snapshot/prefetch");
-    expect(res.status).toBe(200);
-    expect(res.body.prefetched).toBe(true);
-    expect(res.body.fetchedAt).toBeDefined();
-    expect(res.body.fx.source).toMatch(/live|cache|seeded/);
-    expect(res.body.watchlist.source).toMatch(/live|cache|seeded/);
-  });
-
-  test("prefetch still returns 200 when providers fail (falls to seed)", async () => {
-    avMock.getFxRate.mockRejectedValue(new Error("AV down"));
-    avMock.getQuotes.mockRejectedValue(new Error("AV down"));
-    polyMock.getSnapshots.mockRejectedValue(new Error("Polygon down"));
-
-    const res = await request(app).post("/api/snapshot/prefetch");
-    expect(res.status).toBe(200);
-    expect(res.body.prefetched).toBe(true);
-    expect(res.body.watchlist.source).toBe("seeded");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // /api/risk — Phase 2b + Phase 1 (LOW_COST_MODE, budget exhaustion, cooldown)
 // ─────────────────────────────────────────────────────────────────────────────
 describe("/api/risk", () => {
-  test("GET returns seeded risks with stale:true when cache is empty", async () => {
+  test("GET with an empty cache serves rules-based risks from real rates, dated by observation", async () => {
+    seedLiveRates();
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe("seeded");
-    expect(res.body.stale).toBe(true);
-    expect(res.body.data.risks).toBeInstanceOf(Array);
-    expect(res.body.data.risks.length).toBe(7);
+    expect(res.body.analysisMode).toBe("deterministic");
+    expect(res.body.data.risks.length).toBeGreaterThan(0);
+    for (const r of res.body.data.risks) expect(r.date).toBe("2026-09-25");
+    expect(JSON.stringify(res.body.data.risks)).not.toMatch(/Iran|Hormuz|tariff|ASIC|MI450/i);
+  });
+
+  test("GET with no fetched rates serves NO risks — never the old seed list", async () => {
+    const res = await request(app).get("/api/risk");
+    expect(res.status).toBe(200);
+    expect(res.body.data.risks).toEqual([]);
   });
 
   test("POST /refresh calls fetchAllAnalysis once (merged call)", async () => {
@@ -368,6 +257,7 @@ describe("/api/risk", () => {
 
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
+    seedLiveRates();
 
     const res = await request(app).get("/api/risk");
     expect(res.status).toBe(200);
@@ -403,6 +293,7 @@ describe("/api/risk", () => {
     const budgetErr = new Error("Daily budget exhausted (5/5 calls today).");
     budgetErr.code  = "BUDGET_DAILY";
     anthropicMock.fetchAllAnalysis.mockRejectedValue(budgetErr);
+    seedLiveRates();
 
     const res = await request(app).post("/api/risk/refresh").send({ force: true });
     expect(res.status).toBe(200);
@@ -497,6 +388,7 @@ describe("/api/events", () => {
 
   test("GET returns deterministic narrative when LOW_COST_MODE=true", async () => {
     process.env.LOW_COST_MODE = "true";
+    seedLiveRates();
 
     const res = await request(app).get("/api/events");
     expect(res.status).toBe(200);
@@ -615,6 +507,120 @@ describe("GET /api/explain/:ticker", () => {
     await request(app).get("/api/explain/HIES");
 
     expect(anthropicMock.fetchTickerExplain).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/pitch/:ticker
+// ─────────────────────────────────────────────────────────────────────────────
+describe("POST /api/pitch/:ticker", () => {
+  const samplePitch = (ticker = "AMD") => ({
+    ticker,
+    companyName:  "Advanced Micro Devices, Inc.",
+    direction:    "OVERWEIGHT",
+    priceTarget:  220,
+    currentPrice: 192,
+    timeframe:    "Dec-27",
+    upsidePct:    14.6,
+    conclusion:   `We are pitching ${ticker} as overweight with a Dec-27 price target of $220 at 14.6% upside.`,
+    scene:        "AMD designs CPUs and GPUs across client, datacenter, and gaming segments…",
+    thesis:       "We see upside to consensus EPS through above-street datacenter GPU growth…",
+    catalyst:     "AMD reports Q1 earnings on Apr 22; guidance above $9.8B would validate the thesis.",
+    risks: [
+      { risk: "NVDA maintains share lead in AI accelerators.", mitigation: "Size position modestly." },
+      { risk: "Macro slowdown hits PC/datacenter capex.", mitigation: "Pair with a defensive hedge." },
+    ],
+    hedge:      "Hedge with a small SOXS position or NVDA pairs trade.",
+    confidence: 72,
+  });
+
+  test("returns AI pitch for valid ticker", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("live");
+    expect(res.body.data.ticker).toBe("AMD");
+    expect(res.body.data.direction).toBe("OVERWEIGHT");
+    expect(res.body.data.risks.length).toBe(2);
+    expect(anthropicMock.generatePitch).toHaveBeenCalledWith("AMD", "");
+  });
+
+  test("returns graceful error payload when AI fails — no 500", async () => {
+    anthropicMock.generatePitch.mockRejectedValue(new Error("AI unavailable"));
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body.data.ticker).toBe("AMD");
+    expect(res.body.data.confidence).toBe(0);
+    expect(res.body._error).toBeDefined();
+  });
+
+  test("second request for same ticker is served from cache (AI called only once)", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("NVDA"));
+
+    await request(app).post("/api/pitch/NVDA").send({});
+    const res2 = await request(app).post("/api/pitch/NVDA").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(1);
+    expect(res2.body.source).toBe("cache");
+  });
+
+  test("ticker is uppercased regardless of URL casing", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    const res = await request(app).post("/api/pitch/amd").send({});
+    expect(res.status).toBe(200);
+    expect(anthropicMock.generatePitch).toHaveBeenCalledWith("AMD", "");
+  });
+
+  test("different tickers are cached independently", async () => {
+    anthropicMock.generatePitch.mockImplementation((ticker) => Promise.resolve(samplePitch(ticker)));
+
+    await request(app).post("/api/pitch/AMD").send({});
+    await request(app).post("/api/pitch/NVDA").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+  });
+
+  test("context-bearing requests always go live, bypassing cache", async () => {
+    anthropicMock.generatePitch.mockImplementation((ticker, ctx) => Promise.resolve(samplePitch(ticker)));
+
+    await request(app).post("/api/pitch/AMD").send({});                                  // populates cache
+    await request(app).post("/api/pitch/AMD").send({ context: "focus on datacenter GPUs" }); // bypasses cache
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+    expect(anthropicMock.generatePitch).toHaveBeenLastCalledWith("AMD", "focus on datacenter GPUs");
+  });
+
+  test("force=true bypasses cache for a fresh call", async () => {
+    anthropicMock.generatePitch.mockResolvedValue(samplePitch("AMD"));
+
+    await request(app).post("/api/pitch/AMD").send({});
+    await request(app).post("/api/pitch/AMD?force=true").send({});
+
+    expect(anthropicMock.generatePitch).toHaveBeenCalledTimes(2);
+  });
+
+  test("LOW_COST_MODE=true returns source: error without calling AI", async () => {
+    process.env.LOW_COST_MODE = "true";
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body._note).toMatch(/LOW_COST_MODE/);
+    expect(anthropicMock.generatePitch).not.toHaveBeenCalled();
+  });
+
+  test("active API fallback returns source: error without calling AI", async () => {
+    budget.setApiFallback(60_000 * 60);
+
+    const res = await request(app).post("/api/pitch/AMD").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe("error");
+    expect(res.body._note).toMatch(/fallback/i);
+    expect(anthropicMock.generatePitch).not.toHaveBeenCalled();
   });
 });
 
@@ -799,5 +805,28 @@ describe("Glossary endpoints", () => {
     const res = await request(app).get("/api/glossary?category=islamic");
     expect(res.status).toBe(200);
     expect(res.body.data.terms.every(t => t.category === "islamic")).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Nothing spends money on a schedule unless opted in.
+// ══════════════════════════════════════════════════════════════════════════════
+describe("AI schedulers are opt-in", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(require.resolve("../server/index.js"), "utf8");
+
+  test.each([
+    ["AI_REFRESH_SCHEDULE", "./jobs/aiRefreshJob"],
+    ["BULLETIN_SCHEDULE",   "./jobs/bulletinScheduler"],
+    ["RESEARCH_BATCH",      "./jobs/researchBatchJob"],
+  ])("%s gates %s", (flag, mod) => {
+    expect(src).toMatch(new RegExp(`\\["${flag}",\\s*"[^"]+",\\s*"${mod.replace(/[./]/g, "\\$&")}"\\]`));
+  });
+
+  test("no AI job is started unconditionally", () => {
+    for (const mod of ["aiRefreshJob", "bulletinScheduler", "researchBatchJob"]) {
+      expect(src).not.toMatch(new RegExp(`require\\("\\./jobs/${mod}"\\)`));
+    }
+    expect(src).toMatch(/process\.env\[name\] === "on"/);
   });
 });

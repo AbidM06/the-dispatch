@@ -21,7 +21,6 @@ const { isApiFallback, clearApiFallback,
         setApiFallback, getApiFallbackInfo }      = require("../providers/budget");
 const { generateNarrative } = require("../analytics/narrativeEngine");
 const { schemas, validate } = require("../schemas");
-const seeds = require("../../seeds/fallback");
 const requireWriteAuth = require("../middleware/auth");
 
 const router = Router();
@@ -52,8 +51,10 @@ function getContext() {
   const snapData      = cache.get("snapshot:data");
   const portfolioData = cache.get("portfolio:data");
   return {
-    rates:     snapData?.rates     || seeds.RATES_SEED,
-    fx:        snapData?.fx        || seeds.FX_SEED,
+    // Real fetched rates only. Seed rates (Mar 2026) must never be narrated as
+    // current; with none, the no-AI narrative simply has fewer cards.
+    rates:     snapData?.rates     || {},
+    fx:        snapData?.fx        || null,
     portfolio: portfolioData       || null,
   };
 }
@@ -77,8 +78,9 @@ router.get("/", (req, res) => {
     return res.json({ ...riskResponse(risks, "seeded", now, false, "deterministic"), ...extra });
   }
 
-  // 3. Static seed
-  const response = riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded");
+  // 3. Nothing cached and AI not yet run — rules-based risks from real data only.
+  //    The old seed list (a "US/Israel-Iran war", enacted tariffs…) is never served.
+  const response = riskResponse(generateNarrative(getContext()).risks, "seeded", new Date().toISOString(), false, "deterministic");
   const { ok, data } = validate(schemas.RiskResponse, response);
   res.json(ok ? data : response);
 });
@@ -116,7 +118,7 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
       });
     }
     return res.json({
-      ...riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded"),
+      ...riskResponse(generateNarrative(getContext()).risks, "seeded", new Date().toISOString(), false, "deterministic"),
       _cooldown: `Cooldown active — ${remaining} min remaining.`,
     });
   }
@@ -171,7 +173,7 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
       });
     }
     res.status(200).json({
-      ...riskResponse(seeds.RISKS_SEED, "seeded", seeds.SEED_DATE, true, "seeded"),
+      ...riskResponse(generateNarrative(getContext()).risks, "seeded", new Date().toISOString(), false, "deterministic"),
       _refreshError: err.message,
     });
   }

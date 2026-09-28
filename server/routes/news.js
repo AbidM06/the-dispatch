@@ -13,52 +13,14 @@ const finnhub    = require("../providers/finnhub");
 const router = Router();
 
 /**
- * Seeded macro calendar — used when Finnhub /calendar/economic returns 403
- * (premium endpoint, not available on free tier).
- * Dates sourced from Fed Reserve, BLS, and BEA release schedules.
+ * No hand-typed calendar. The old seed listed FOMC/CPI/NFP/PCE dates and
+ * "previous" prints typed in once (the FOMC dates followed the 2025 pattern)
+ * and served them as the live calendar whenever Finnhub's premium economic
+ * endpoint refused — unverifiable dates presented as fact. When the live
+ * calendar is unavailable the response says so (`economicSource`).
  */
-const MACRO_CALENDAR_SEED = [
-  // ── FOMC meetings (Fed decision days) ──────────────────────────────────────
-  { event: "FOMC Rate Decision",    country: "US", date: "2026-03-19", impact: "high",   estimate: "4.25–4.50%", previous: "4.25–4.50%" },
-  { event: "FOMC Rate Decision",    country: "US", date: "2026-05-07", impact: "high",   estimate: null,         previous: "4.25–4.50%" },
-  { event: "FOMC Rate Decision",    country: "US", date: "2026-06-18", impact: "high",   estimate: null,         previous: null },
-  { event: "FOMC Rate Decision",    country: "US", date: "2026-07-30", impact: "high",   estimate: null,         previous: null },
-  { event: "FOMC Rate Decision",    country: "US", date: "2026-09-17", impact: "high",   estimate: null,         previous: null },
-  // ── CPI (BLS, 8:30 ET) ─────────────────────────────────────────────────────
-  { event: "US CPI (YoY)",          country: "US", date: "2026-04-10", impact: "high",   estimate: null,         previous: "2.8%" },
-  { event: "US CPI (YoY)",          country: "US", date: "2026-05-13", impact: "high",   estimate: null,         previous: null },
-  { event: "US CPI (YoY)",          country: "US", date: "2026-06-11", impact: "high",   estimate: null,         previous: null },
-  { event: "US CPI (YoY)",          country: "US", date: "2026-07-10", impact: "high",   estimate: null,         previous: null },
-  // ── NFP / Non-Farm Payrolls (BLS, 8:30 ET, first Fri of month) ────────────
-  { event: "Non-Farm Payrolls",     country: "US", date: "2026-04-04", impact: "high",   estimate: null,         previous: "151k" },
-  { event: "Non-Farm Payrolls",     country: "US", date: "2026-05-02", impact: "high",   estimate: null,         previous: null },
-  { event: "Non-Farm Payrolls",     country: "US", date: "2026-06-05", impact: "high",   estimate: null,         previous: null },
-  { event: "Non-Farm Payrolls",     country: "US", date: "2026-07-03", impact: "high",   estimate: null,         previous: null },
-  // ── PCE Price Index (BEA, 8:30 ET) ────────────────────────────────────────
-  { event: "PCE Price Index (YoY)", country: "US", date: "2026-03-28", impact: "high",   estimate: null,         previous: "2.5%" },
-  { event: "PCE Price Index (YoY)", country: "US", date: "2026-04-30", impact: "high",   estimate: null,         previous: null },
-  { event: "PCE Price Index (YoY)", country: "US", date: "2026-05-29", impact: "high",   estimate: null,         previous: null },
-  { event: "PCE Price Index (YoY)", country: "US", date: "2026-06-26", impact: "high",   estimate: null,         previous: null },
-  // ── GDP (BEA, advance estimate) ────────────────────────────────────────────
-  { event: "US GDP (QoQ, adv.)",    country: "US", date: "2026-04-29", impact: "medium", estimate: null,         previous: "2.3%" },
-  { event: "US GDP (QoQ, adv.)",    country: "US", date: "2026-07-29", impact: "medium", estimate: null,         previous: null },
-  // ── UK events ──────────────────────────────────────────────────────────────
-  { event: "BoE Rate Decision",     country: "GB", date: "2026-05-08", impact: "high",   estimate: null,         previous: "4.50%" },
-  { event: "UK CPI (YoY)",          country: "GB", date: "2026-04-16", impact: "medium", estimate: null,         previous: "2.8%" },
-].map(e => ({ ...e, seeded: true }));
-
-/**
- * Filter seeded calendar to upcoming events within daysAhead window.
- */
-function upcomingSeededEvents(daysAhead = 30) {
-  const now    = new Date();
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() + daysAhead);
-  return MACRO_CALENDAR_SEED.filter(e => {
-    const d = new Date(e.date);
-    return !isNaN(d) && d >= now && d <= cutoff;
-  });
-}
+const CALENDAR_UNAVAILABLE_NOTE =
+  "Economic calendar unavailable — Finnhub's economic calendar requires a paid plan and returned no data.";
 
 function now() { return new Date().toISOString(); }
 
@@ -96,16 +58,14 @@ router.get("/", async (req, res) => {
     []
   );
 
-  // Finnhub economic calendar is a premium feature — fall back to seeded dates
-  const economic = (economicRaw && economicRaw.length > 0)
-    ? economicRaw
-    : upcomingSeededEvents(30);
-  const econFallback = econSource === "seeded" || economic[0]?.seeded;
+  // Finnhub economic calendar is a premium feature — no hand-typed substitute
+  const haveEcon = Array.isArray(economicRaw) && economicRaw.length > 0;
 
   res.json(envelope({
     headlines,
-    economicCalendar: economic,
-    econCalendarSource: econFallback ? "seeded" : "live",
+    economicCalendar: haveEcon ? economicRaw : [],
+    econCalendarSource: haveEcon ? (econSource === "seeded" ? "stale" : "live") : "unavailable",
+    ...(haveEcon ? {} : { econCalendarNote: CALENDAR_UNAVAILABLE_NOTE }),
     configured: finnhub.isConfigured(),
   }, source, stale));
 });
@@ -131,10 +91,15 @@ router.get("/calendar", async (req, res) => {
 
   const earnings  = earningsResult.status === "fulfilled" ? earningsResult.value.data : [];
   const econRaw   = economicResult.status === "fulfilled" ? economicResult.value.data : [];
-  // Fall back to seeded calendar when Finnhub premium endpoint unavailable
-  const economic  = (econRaw && econRaw.length > 0) ? econRaw : upcomingSeededEvents(daysAhead);
+  const haveEcon  = Array.isArray(econRaw) && econRaw.length > 0;
 
-  res.json(envelope({ earnings, economic, daysAhead }));
+  res.json(envelope({
+    earnings,
+    economic: haveEcon ? econRaw : [],
+    economicSource: haveEcon ? "live" : "unavailable",
+    ...(haveEcon ? {} : { economicNote: CALENDAR_UNAVAILABLE_NOTE }),
+    daysAhead,
+  }));
 });
 
 // GET /api/news/:ticker

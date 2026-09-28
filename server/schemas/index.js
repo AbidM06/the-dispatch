@@ -15,87 +15,6 @@ const Envelope = z.object({
   stale:     z.boolean(),
 });
 
-// ── Rate observation ──────────────────────────────────────────────────────────
-const RateObs = z.object({
-  value:    z.number(),
-  seriesId: z.string(),
-  date:     z.string(),
-  source:   z.string(),
-});
-
-// ── Watchlist item ────────────────────────────────────────────────────────────
-const WatchlistItem = z.object({
-  sym:    z.string(),
-  price:  z.number(),
-  chg:    z.number(),
-  note:   z.string(),
-  source: z.string(),
-  date:   z.string(),
-});
-
-// ── International watchlist item ──────────────────────────────────────────────
-const IntlItem = z.object({
-  sym:    z.string(),
-  name:   z.string(),
-  price:  z.string(),
-  chg:    z.string(),
-  note:   z.string(),
-  source: z.string(),
-  date:   z.string(),
-});
-
-// ── FX rate ───────────────────────────────────────────────────────────────────
-const FxRate = z.object({
-  value:  z.number(),
-  pair:   z.string(),
-  date:   z.string(),
-  source: z.string(),
-});
-
-// ── Chart history points ──────────────────────────────────────────────────────
-// real/bei are nullable: DFII10 and T10YIE sometimes lag DGS10 by a day.
-// snapshot.js now filters to only fully-populated rows, but nullable here
-// ensures a schema warning never blocks the response if one slips through.
-const RatesHistoryPoint = z.object({
-  m:    z.string(),
-  y10:  z.number(),
-  real: z.number().nullable(),
-  bei:  z.number().nullable(),
-});
-
-const HyHistoryPoint = z.object({
-  m:   z.string(),
-  oas: z.number(),
-});
-
-const RsiHistoryPoint = z.object({
-  d:   z.string(),
-  rsi: z.number(),
-});
-
-// ── /api/snapshot ─────────────────────────────────────────────────────────────
-const SnapshotPayload = z.object({
-  rates: z.object({
-    dgs10:     RateObs.nullable(),
-    dfii10:    RateObs.nullable(),
-    t10yie:    RateObs.nullable(),
-    hy_spread: RateObs.nullable(),
-    t10y2y:    RateObs.nullable(),
-  }),
-  fx: z.object({
-    usdgbp: FxRate,
-  }),
-  watchlist:    z.array(WatchlistItem),
-  intl:         z.array(IntlItem),
-  ratesHistory: z.array(RatesHistoryPoint),
-  hyHistory:    z.array(HyHistoryPoint),
-  rsiHistory:   z.array(RsiHistoryPoint),
-});
-
-const SnapshotResponse = Envelope.extend({
-  data: SnapshotPayload,
-});
-
 // ── /api/portfolio ────────────────────────────────────────────────────────────
 const PositionRow = z.object({
   ticker:   z.string(),
@@ -200,52 +119,31 @@ const ExplainResponse = Envelope.extend({
   data: ExplainPayload,
 });
 
-// ── /api/ideas ────────────────────────────────────────────────────────────────
-const RiskCheckItem = z.object({
-  name:   z.string(),
-  status: z.enum(["OK", "WARN", "BLOCK"]),
-  detail: z.string(),
+// ── /api/pitch/:ticker ────────────────────────────────────────────────────────
+const PitchRiskItem = z.object({
+  risk:       z.string(),
+  mitigation: z.string(),
 });
 
-const RiskCheckResult = z.object({
-  pass:   z.boolean(),
-  level:  z.enum(["OK", "WARN", "BLOCK"]),
-  checks: z.array(RiskCheckItem),
-});
-
-const IdeaItem = z.object({
-  id:           z.string(),
+const PitchPayload = z.object({
   ticker:       z.string(),
-  direction:    z.enum(["LONG", "SHORT"]),
+  companyName:  z.string(),
+  direction:    z.enum(["OVERWEIGHT", "UNDERWEIGHT"]),
+  priceTarget:  z.number().nullable(),
+  currentPrice: z.number().nullable(),
+  timeframe:    z.string(),
+  upsidePct:    z.number().nullable(),
+  conclusion:   z.string(),
+  scene:        z.string(),
   thesis:       z.string(),
   catalyst:     z.string(),
-  entry:        z.number(),
-  stop:         z.number(),
-  target:       z.number(),
-  invalidation: z.string(),
-  horizon:      z.string(),
-  confidence:   z.number().int().min(0).max(100),
-  sizePct:      z.number().positive(),
-  status:       z.enum(["OPEN", "CLOSED", "CANCELLED"]),
-  outcome:      z.enum(["HIT", "STOPPED", "CANCELLED"]).nullable(),
-  openedAt:     z.string(),
-  closedAt:     z.string().nullable(),
-  actualPnLPct: z.number().nullable(),
-  notes:        z.string(),
-  riskCheck:    RiskCheckResult.optional(),
+  risks:        z.array(PitchRiskItem),
+  hedge:        z.string(),
+  confidence:   z.number().min(0).max(100),
 });
 
-const IdeaStats = z.object({
-  total:             z.number(),
-  open:              z.number(),
-  closed:            z.number(),
-  cancelled:         z.number(),
-  hitRate:           z.number().nullable(),
-  stopRate:          z.number().nullable(),
-  avgConfidenceWin:  z.number().nullable(),
-  avgConfidenceLoss: z.number().nullable(),
-  avgRMultiple:      z.number().nullable(),
-  avgHoldDays:       z.number().nullable(),
+const PitchResponse = Envelope.extend({
+  data: PitchPayload,
 });
 
 // ── /api/brief ────────────────────────────────────────────────────────────────
@@ -271,7 +169,6 @@ const BriefPayload = z.object({
   whatChanged:     z.array(WhatChangedItem),
   whyItMatters:    z.string(),
   actionableSetup: z.array(ActionableSetupItem),
-  openIdeas:       z.number(),
   nextEvent: z.object({
     date:       z.string(),
     event:      z.string(),
@@ -281,74 +178,6 @@ const BriefPayload = z.object({
 });
 
 const BriefResponse = Envelope.extend({ data: BriefPayload });
-
-// ── /api/ideas engine tickets ─────────────────────────────────────────────────
-const LearningContent = z.object({
-  traderInterpretation:    z.string(),
-  economicsInterpretation: z.string(),
-  keyTerms:  z.array(z.object({ term: z.string(), definition: z.string() })),
-  falsification: z.array(z.string()),
-});
-
-const EngineTicket = z.object({
-  id:                    z.string(),
-  generatedAt:           z.string(),
-  regime:                z.string(),
-  playbook:              z.string(),
-  strategyType:          z.string(),
-  ticker:                z.string(),
-  direction:             z.enum(["LONG", "SHORT"]),
-  horizon:               z.string(),
-  entryLogic:            z.string(),
-  stopLogic:             z.string(),
-  targetLogic:           z.string(),
-  sizingRule:            z.string(),
-  invalidation:          z.string(),
-  rationale:             z.string(),
-  confidence:            z.number().int().min(0).max(100),
-  riskFlags:             z.array(z.any()),
-  engineDecision:        z.enum(["allowed", "blocked", "caution"]),
-  engineReasons:         z.array(z.string()),
-  expectedDrivers:       z.array(z.string()),
-  requiredDataFreshness: z.string(),
-  sourceMode:            z.enum(["deterministic", "ai-enriched"]),
-  learning:              LearningContent.nullable(),
-});
-
-// ── PaperMetrics ──────────────────────────────────────────────────────────────
-const TickerStat = z.object({
-  count:   z.number(),
-  hitRate: z.number().nullable(),
-  avgPnL:  z.number().nullable(),
-});
-
-const DirectionStat = z.object({
-  count:   z.number(),
-  hitRate: z.number().nullable(),
-  avgPnL:  z.number().nullable(),
-});
-
-const PaperMetrics = z.object({
-  total:        z.number(),
-  open:         z.number(),
-  closed:       z.number(),
-  cancelled:    z.number(),
-  hitRate:      z.number().nullable(),
-  stopRate:     z.number().nullable(),
-  avgPnLPct:    z.number().nullable(),
-  avgWinPct:    z.number().nullable(),
-  avgLossPct:   z.number().nullable(),
-  expectancy:   z.number().nullable(),
-  avgRMultiple: z.number().nullable(),
-  avgHoldDays:  z.number().nullable(),
-  mfe:          z.number().nullable(),
-  mae:          z.number().nullable(),
-  byTicker:     z.record(z.string(), TickerStat),
-  byDirection:  z.object({
-    LONG:  DirectionStat,
-    SHORT: DirectionStat,
-  }),
-});
 
 // ── Validation helper ─────────────────────────────────────────────────────────
 function validate(schema, payload) {
@@ -360,16 +189,12 @@ function validate(schema, payload) {
 
 module.exports = {
   schemas: {
-    SnapshotResponse,
     PortfolioResponse,
     RiskResponse,
     EventsResponse,
     ExplainResponse,
+    PitchResponse,
     BriefResponse,
-    IdeaItem,
-    IdeaStats,
-    EngineTicket,
-    PaperMetrics,
   },
   validate,
 };

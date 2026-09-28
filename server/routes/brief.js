@@ -14,7 +14,6 @@
 const { Router } = require("express");
 const cache      = require("../cache");
 const seeds      = require("../../seeds/fallback");
-const { loadIdeas } = require("../importers/ideas");
 
 const router = Router();
 
@@ -200,9 +199,6 @@ router.get("/", (req, res) => {
     { series: "T10Y2Y", label: "Yield Curve (10-2Y)", current: rates.t10y2y,    prev: PREV_RATES.t10y2y,   deltaBps: bpsDelta(rates.t10y2y,   PREV_RATES.t10y2y),   signal: rateSignal("t10y2y",   bpsDelta(rates.t10y2y,   PREV_RATES.t10y2y)) },
   ];
 
-  // Open ideas count
-  const store     = loadIdeas();
-  const openIdeas = store.ideas.filter(i => i.status === "OPEN").length;
 
   // Next upcoming event
   const allEvents = [...seeds.MACRO_CAL, ...seeds.EARNINGS_CAL];
@@ -234,7 +230,6 @@ router.get("/", (req, res) => {
       whatChanged,
       whyItMatters:    buildWhyItMatters(rates, portfolioData),
       actionableSetup: buildActionableSetup(rates),
-      openIdeas,
       nextEvent,
     },
   });
