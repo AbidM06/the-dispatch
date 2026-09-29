@@ -64,3 +64,25 @@ describe("no silent Haiku stand-in for Sonnet", () => {
     expect(src).not.toMatch(/Tier 3: Claude Haiku/);
   });
 });
+
+describe("reviewer steps (llm.callAgent) fail with a plain reason too", () => {
+  test("a 529 on the red team names the step and never falls back", async () => {
+    jest.resetModules();
+    const calls = [];
+    jest.doMock("../server/providers/claudeTransport", () => ({
+      send: jest.fn(async (body) => { calls.push(body.model); const e = new Error("Overloaded"); e.status = 529; throw e; }),
+      currentContext: () => ({}), runWithContext: (_c, fn) => fn(),
+    }));
+    jest.doMock("../server/providers/budget", () => ({ checkAndIncrement: jest.fn(), isApiFallback: () => false, getStatus: () => ({}) }));
+    const llm = require("../server/research/llm");
+    await expect(llm.callAgent("redteam", "s", "u")).rejects.toMatchObject({
+      code: "SONNET_UNAVAILABLE", message: expect.stringMatching(/overloaded .*The red team step could not run, and no lower-quality model was used/) });
+    expect(calls).toEqual([llm.MODEL_SONNET]);
+  });
+
+  test("the QA reason names each reviewer that failed and why", () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../server/research/orchestrator.js"), "utf8");
+    expect(src).toMatch(/Reviewers could not run — QA NOT RUN\. /);
+    expect(src).not.toMatch(/budget or API failure/);
+  });
+});

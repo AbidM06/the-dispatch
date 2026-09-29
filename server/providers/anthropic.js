@@ -122,7 +122,7 @@ async function callClaudeSourced(systemPrompt, userPrompt, maxTokens = 1500, mod
  * The result carries code SONNET_UNAVAILABLE so routes and the client can say
  * "no lower-quality model was substituted" instead of a generic failure.
  */
-function sonnetFailure(err, model) {
+function sonnetFailure(err, model, { step = null } = {}) {
   if (!err || err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "SONNET_UNAVAILABLE") return err;
   const s = err.status;
   const what =
@@ -136,7 +136,8 @@ function sonnetFailure(err, model) {
     `failed (${err.message})`;
   const at = new Date().toISOString().slice(11, 16) + " UTC";
   const out = new Error(`Claude Sonnet (${model}) ${what} at ${at}, after the automatic retries. ` +
-    "No report was produced, and no lower-quality model was used instead. Try again in a few minutes.");
+    (step ? `The ${step} step could not run, and no lower-quality model was used instead.`
+          : "No report was produced, and no lower-quality model was used instead. Try again in a few minutes."));
   out.code = "SONNET_UNAVAILABLE";
   out.status = s;
   out.cause = err;
@@ -1536,6 +1537,7 @@ module.exports = {
   REPORT_VALIDATORS,
   callClaudeSourced,
   callWithFallbackSourced,
+  sonnetFailure,
   attachProvenance,
   parseCiteTags,
   webSearchTool,

@@ -334,7 +334,9 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
     claimSummary:           ledger.summarizeClaims(claims),
   } : notRunQA(
     !extraction ? "Claim extraction unavailable — five-agent QA could not run"
-    : !reviewersRan ? "Reviewer agents unavailable (budget or API failure) — QA NOT RUN"
+    : !reviewersRan ? "Reviewers could not run — QA NOT RUN. " +
+        [["Data auditor", auditRes], ["Red team", redRes], ["Cross-asset PM", pmRes]]
+          .filter(([, r]) => r && r.ok === false).map(([n, r]) => `${n}: ${r.error}`).join(" · ")
     : "IC Chair unavailable — QA NOT RUN"
   );
 
