@@ -86,3 +86,35 @@ describe("reviewer steps (llm.callAgent) fail with a plain reason too", () => {
     expect(src).not.toMatch(/budget or API failure/);
   });
 });
+
+describe("reviewers retry once on a temporary failure (owner, D-19)", () => {
+  const load = () => { jest.resetModules(); return require("../server/research/orchestrator")._internal; };
+  const err = (status, msg = "x") => Object.assign(new Error(msg), { status });
+
+  test("a 529 is retried once and can then succeed", async () => {
+    const { safeReview } = load();
+    let n = 0;
+    const r = await safeReview("red-team", async () => { if (++n === 1) throw err(529); return "ok"; });
+    expect(r).toMatchObject({ ok: true, out: "ok", retried: true });
+    expect(n).toBe(2);
+  });
+
+  test("two failures → NOT_RUN with the reason, and no third attempt", async () => {
+    const { safeReview } = load();
+    let n = 0;
+    const r = await safeReview("red-team", async () => { n++; throw err(529, "Claude Sonnet … overloaded"); });
+    expect(n).toBe(2);
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/^failed twice \(retried once\) — Claude Sonnet … overloaded/) });
+  });
+
+  test("budget, billing and bad-request errors are not retried", async () => {
+    const { safeReview, isTransient } = load();
+    let n = 0;
+    await safeReview("auditor", async () => { n++; throw Object.assign(new Error("cap"), { code: "BUDGET_DAILY" }); });
+    expect(n).toBe(1);
+    expect(isTransient(err(400))).toBe(false);
+    expect(isTransient(err(402))).toBe(false);
+    expect(isTransient(err(503))).toBe(true);
+    expect(isTransient(new Error("request timed out"))).toBe(true);
+  });
+});

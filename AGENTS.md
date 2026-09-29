@@ -478,7 +478,8 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - Red-team warnings are logged per report (`GET /api/research/redteam-log`); outcomes are appended
   later as separate `type: "outcome"` records, never edited in.
 - Draft failure → `runPipeline` throws → route returns 503 `available: false`. There is no
-  seeded report. Reviewer failure → verdict `NOT_RUN`, disclosed in QA; never fake a passed review.
+  seeded report. Reviewer failure → retried ONCE after ~60 s if temporary (429/529/5xx/timeout; never budget/billing/400);
+  if it fails again → verdict `NOT_RUN`, the QA line names each failed reviewer and the plain reason; never fake a passed review.
 - `RESEARCH_MULTI_AGENT=false` → one draft call per report (`singleCallReport`), still priced,
   versioned and stored; QA honestly NOT_RUN.
 - Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).

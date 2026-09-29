@@ -91,13 +91,32 @@ function researchSummary(research) {
 }
 
 /** Run a reviewer, capturing failure as a NOT_RUN verdict instead of throwing. */
+// D-19 (owner): a review step that fails on a temporary problem (overloaded,
+// rate-limited, server error, timeout) is retried ONCE after a pause. If it
+// fails again the report is still shown, marked unreviewed with the reason.
+// Budget, billing and key errors are never retried.
+const REVIEW_RETRY_MS = () => Number(process.env.RESEARCH_REVIEW_RETRY_MS ?? (process.env.NODE_ENV === "test" ? 0 : 60_000));
+function isTransient(err) {
+  const s = err?.status;
+  if (err?.code === "BUDGET_DAILY" || err?.code === "BUDGET_MONTHLY" || err?.code === "API_CREDITS_EXHAUSTED") return false;
+  return s === 429 || s === 529 || (s >= 500 && s < 600) || /timed out|timeout|ECONNRESET|socket hang up/i.test(err?.message || "");
+}
+
 async function safeReview(name, fn) {
-  try {
-    const out = await fn();
-    return { ok: true, out };
-  } catch (err) {
-    console.warn(`[research-orchestrator] ${name} failed: ${err.message}`);
-    return { ok: false, error: err.message, budget: err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "API_CREDITS_EXHAUSTED" };
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const out = await fn();
+      return { ok: true, out, retried: attempt > 1 };
+    } catch (err) {
+      if (attempt === 1 && isTransient(err)) {
+        console.warn(`[research-orchestrator] ${name} failed (${err.message}) — retrying once in ${Math.round(REVIEW_RETRY_MS() / 1000)}s`);
+        await new Promise(r => setTimeout(r, REVIEW_RETRY_MS()));
+        continue;
+      }
+      console.warn(`[research-orchestrator] ${name} failed: ${err.message}`);
+      return { ok: false, error: (attempt > 1 ? "failed twice (retried once) — " : "") + err.message,
+               budget: err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "API_CREDITS_EXHAUSTED" };
+    }
   }
 }
 
@@ -384,4 +403,5 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   return report;
 }
 
-module.exports = { runPipeline, multiAgentEnabled, getProgress, setStage, maxRounds, maxCalls, notRunQA };
+module.exports = { runPipeline, multiAgentEnabled, getProgress, setStage, maxRounds, maxCalls, notRunQA,
+  _internal: { safeReview, isTransient } };
