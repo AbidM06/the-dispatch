@@ -4037,10 +4037,11 @@ function App() {
       React.createElement('div', { className:'rp-verified-grid' },
         rows.map((row, i) =>
           React.createElement('div', { key:i, className:'rp-verified-cell' },
-            React.createElement('div', { className:'rp-verified-lbl' }, row.label),
+            React.createElement('div', { className:'rp-verified-lbl' }, row.label,
+              row.stale && React.createElement('span', { className:'jr-badge stale', title:'Older than 2 trading days — the last known value, not today\'s' }, 'stale')),
             React.createElement('div', { className:'rp-verified-val' }, row.value),
-            React.createElement('div', { className:'rp-verified-src' },
-              [row.source, row.detail, row.asOf].filter(Boolean).join(' · ')
+            React.createElement('div', { className:'rp-verified-src', title: row.replaced ? ('Newer than ' + row.replaced.source + ' ' + row.replaced.seriesId + ' (' + row.replaced.value + ' as of ' + row.replaced.asOf + ')') : '' },
+              [row.source, row.detail, row.asOf && (row.asOf.length > 10 ? new Date(row.asOf).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : row.asOf)].filter(Boolean).join(' · ')
             )
           )
         )

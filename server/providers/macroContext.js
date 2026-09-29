@@ -63,8 +63,73 @@ function buildFact(spec, obs) {
     formatted: spec.fmt(obs.value),
     source:    "FRED",
     seriesId:  spec.id,
+    url:       `https://fred.stlouisfed.org/series/${spec.id}`,
     asOf:      obs.date,
   };
+}
+
+// ── Freshness (D-20) ─────────────────────────────────────────────────────────
+// FRED's daily oil series is published weekly, so its latest value can be a
+// week old — a report once anchored on $114.89 Brent while the market traded
+// ~$99. Two fixes: (1) where the Markets tab holds a NEWER live price for the
+// same thing, use it (labelled with its own source and time); (2) any figure
+// still more than STALE_AFTER_TRADING_DAYS old is flagged stale, and the model
+// is told it is the last known value, not today's.
+const STALE_AFTER_TRADING_DAYS = 2;
+const MARKETS_EQUIVALENT = {          // fact key → Markets instrument id
+  brent:  "BRENT",
+  wti:    "WTI",
+  dgs10:  "US10Y",
+  eurusd: "EURUSD",
+};
+// Sanity bound per key: a Markets value further than this from FRED is a unit
+// or symbol mismatch, not news — keep FRED rather than trust it.
+const MAX_JUMP = { brent: 0.35, wti: 0.35, eurusd: 0.10 };   // relative
+const MAX_JUMP_ABS = { dgs10: 1.5 };                         // percentage points
+
+/** Weekdays strictly after `asOf` up to and including `now` (UTC). */
+function tradingDaysSince(asOf, now = Date.now()) {
+  const start = Date.parse(String(asOf).length === 10 ? asOf + "T00:00:00Z" : asOf);
+  if (!Number.isFinite(start)) return null;
+  let n = 0;
+  const d = new Date(start); d.setUTCHours(0, 0, 0, 0);
+  const end = new Date(now); end.setUTCHours(0, 0, 0, 0);
+  while (d < end) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) n++; }
+  return n;
+}
+
+/**
+ * withMarkets — overlay newer Markets prices and mark stale facts.
+ * Pure: returns a new ctx; the cached FRED ctx is never mutated.
+ */
+function withMarkets(ctx, snapshot, now = Date.now()) {
+  if (!ctx || !ctx.facts) return ctx;
+  const items = new Map((snapshot?.items || []).filter(i => i.ok && !i.stale && i.quote).map(i => [i.id, i]));
+  const facts = {};
+  const overlaid = [];
+  for (const [key, f] of Object.entries(ctx.facts)) {
+    let fact = { ...f };
+    const it = items.get(MARKETS_EQUIVALENT[key]);
+    const q = it?.quote;
+    if (q && Number.isFinite(q.value) && Date.parse(q.asOf) > Date.parse(f.asOf + (String(f.asOf).length === 10 ? "T23:59:59Z" : ""))) {
+      const jump = MAX_JUMP_ABS[key] != null ? Math.abs(q.value - f.value) > MAX_JUMP_ABS[key]
+                                             : Math.abs(q.value - f.value) / Math.abs(f.value) > (MAX_JUMP[key] ?? 0.35);
+      if (!jump) {
+        const spec = SERIES.find(x => x.key === key);
+        fact = { ...fact, value: q.value, formatted: spec.fmt(q.value), source: q.source || "Markets",
+                 seriesId: (q.sourceDetail || it.label || it.id), url: q.sourceUrl || null, asOf: q.asOf,
+                 replaced: { source: f.source, seriesId: f.seriesId, value: f.value, asOf: f.asOf } };
+        overlaid.push(key);
+      }
+    }
+    const age = tradingDaysSince(fact.asOf, now);
+    fact.stale = age != null && age > STALE_AFTER_TRADING_DAYS;
+    if (fact.stale) fact.ageTradingDays = age;
+    facts[key] = fact;
+  }
+  return { ...ctx, facts, overlaid, stale: Object.values(facts).filter(f => f.stale).map(f => f.key),
+           marketsSnapshotAt: snapshot?.generatedAt || null,
+           sources: overlaid.length ? [...new Set([...(ctx.sources || ["FRED"]), ...overlaid.map(k => facts[k].source)])] : ctx.sources };
 }
 
 /**
@@ -122,6 +187,13 @@ function derivePolicyPath(facts) {
  * @returns {{ facts, policyPath, missing, fetchedAt, sources }}
  */
 async function getMacroContext({ force = false } = {}) {
+  const fred = await getFredContext({ force });
+  let snapshot = null;
+  try { snapshot = require("../markets/service").getSnapshot(); } catch { /* no Markets snapshot */ }
+  return withMarkets(fred, snapshot);
+}
+
+async function getFredContext({ force = false } = {}) {
   if (!force) {
     const hit = cache.getWithMeta(CACHE_KEY);
     if (hit && !hit.stale) return hit.value;
@@ -176,12 +248,14 @@ function toPromptBlock(ctx) {
   for (const group of order) {
     const inGroup = Object.values(ctx.facts).filter(f => f.group === group);
     if (!inGroup.length) continue;
-    lines.push(inGroup.map(f => `  ${f.label}: ${f.formatted} [${f.source} ${f.seriesId}, as of ${f.asOf}]`).join("\n"));
+    lines.push(inGroup.map(f => `  ${f.label}: ${f.formatted} [${f.source} ${f.seriesId}, as of ${f.asOf}]` +
+      (f.stale ? ` — STALE (${f.ageTradingDays} trading days old): this is the last KNOWN value, not today's. web_search for the current level and state both, with dates.` : "")).join("\n"));
   }
 
   let block =
-    "VERIFIED MARKET DATA — fetched server-side from FRED. These are the authoritative current levels.\n" +
-    "Use these exact figures. Do NOT web_search for them and do NOT substitute values you remember.\n\n" +
+    `VERIFIED MARKET DATA — fetched server-side (FRED, plus live Markets prices where newer), today is ${new Date().toISOString().slice(0, 10)}.\n` +
+    "Each figure carries its own source and as-of time. Use these exact figures for anything not marked STALE; do NOT web_search for those and do NOT substitute values you remember.\n" +
+    "A figure marked STALE is old: never present it as the current level.\n\n" +
     lines.join("\n");
 
   if (ctx.policyPath) {
@@ -216,7 +290,11 @@ function toMarketDataRows(ctx) {
       source: f.source,
       detail: f.seriesId,
       asOf:   f.asOf,
+      url:    f.url || null,
+      stale:  Boolean(f.stale),
+      replaced: f.replaced || null,
     }));
 }
 
-module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, derivePolicyPath, SERIES };
+module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, derivePolicyPath, SERIES,
+  withMarkets, tradingDaysSince, STALE_AFTER_TRADING_DAYS, MARKETS_EQUIVALENT };
