@@ -20,7 +20,7 @@ const { callOpenAI } = require("./openai");
 // Requests are sent by ./claudeTransport.js (pricing, receipts, batch mode).
 // Model IDs are complete as written — never append a date suffix.
 const models       = require("./models");
-const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, explains, fx, rates
+const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, explains (never a stand-in for Sonnet, D-19)
 const MODEL_SONNET = models.sonnetModel();  // SONNET_MODEL (default Sonnet 5) — macro, commodities, equity, thematic
 
 // Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
@@ -109,14 +109,38 @@ async function callClaudeSourced(systemPrompt, userPrompt, maxTokens = 1500, mod
   try {
     return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model);
   } catch (err) {
-    // If Sonnet is overloaded (529) after all retries, fall back to Haiku rather than
-    // returning deterministic seed data — a Haiku report is far better than nothing.
-    if (model !== MODEL && err.status === 529) {
-      console.warn(`[anthropic] ${model} overloaded — falling back to Haiku for this call`);
-      return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL);
-    }
+    // Owner's rule (D-19): quality over availability. A Sonnet job that fails is
+    // NEVER quietly redone on Haiku — it fails, and says exactly why.
+    if (model !== MODEL) throw sonnetFailure(err, model);
     throw err;
   }
+}
+
+/**
+ * sonnetFailure — turn an API error into a plain-English, on-screen reason.
+ * Budget errors pass through unchanged (they have their own message).
+ * The result carries code SONNET_UNAVAILABLE so routes and the client can say
+ * "no lower-quality model was substituted" instead of a generic failure.
+ */
+function sonnetFailure(err, model) {
+  if (!err || err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "SONNET_UNAVAILABLE") return err;
+  const s = err.status;
+  const what =
+    s === 529 ? "was overloaded (Anthropic error 529 — too much demand right now)" :
+    s === 429 ? "hit Anthropic's rate limit (error 429)" :
+    s === 402 ? "was refused for billing reasons (error 402 — check your Anthropic credit)" :
+    s === 401 || s === 403 ? `rejected the API key (error ${s})` :
+    s === 400 ? `rejected the request (error 400: ${err.message})` :
+    s >= 500 ? `had a server error (Anthropic error ${s})` :
+    /timeout|timed out|abort/i.test(err.message || "") ? "did not answer in time (the request timed out)" :
+    `failed (${err.message})`;
+  const at = new Date().toISOString().slice(11, 16) + " UTC";
+  const out = new Error(`Claude Sonnet (${model}) ${what} at ${at}, after the automatic retries. ` +
+    "No report was produced, and no lower-quality model was used instead. Try again in a few minutes.");
+  out.code = "SONNET_UNAVAILABLE";
+  out.status = s;
+  out.cause = err;
+  return out;
 }
 
 async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MODEL) {
@@ -125,11 +149,12 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1500, model = MO
 }
 
 /**
- * callWithFallback — three-tier AI fallback for research reports.
- * Order: Claude Sonnet → OpenAI GPT → Claude Haiku → throw
+ * callWithFallback — research-report drafts.
+ * Order: Claude Sonnet → (OpenAI GPT, ONLY if OPENAI_API_KEY is set) → throw.
  *
- * Bypasses callClaude's automatic Sonnet→Haiku cascade so OpenAI gets a
- * chance before Haiku. Budget check is run independently for each Claude tier.
+ * There is deliberately no Haiku tier (D-19, owner: quality over availability):
+ * if Sonnet fails, the report is unavailable and the reason is shown. The
+ * OpenAI tier is kept in code but runs only when its key is configured.
  */
 async function callWithFallbackSourced(systemPrompt, userPrompt, maxTokens) {
   if (process.env.DISABLE_AI === "true") throw new Error("AI disabled via DISABLE_AI=true");
@@ -140,9 +165,10 @@ async function callWithFallbackSourced(systemPrompt, userPrompt, maxTokens) {
     budget.checkAndIncrement();
     return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL_SONNET);
   } catch (err) {
-    sonnetErr = err;
     // Over budget means over budget — don't spend on another paid provider.
     if (err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY") throw err;
+    sonnetErr = sonnetFailure(err, MODEL_SONNET);
+    if (!process.env.OPENAI_API_KEY) throw sonnetErr;
     console.warn(`[anthropic] Sonnet failed (${err.message}) — trying OpenAI ${process.env.OPENAI_FALLBACK_MODEL || "gpt-4o"}`);
   }
 
@@ -159,16 +185,8 @@ async function callWithFallbackSourced(systemPrompt, userPrompt, maxTokens) {
     aiCost.addToReceipt(transport.currentContext().receipt, transport.currentContext().role || "other", "openai", unpriced);
     return { text, sources: [], grounded: false, tier: "openai" };
   } catch (openaiErr) {
-    console.warn(`[anthropic] OpenAI failed (${openaiErr.message}) — trying Haiku`);
-  }
-
-  // Tier 3: Claude Haiku
-  try {
-    budget.checkAndIncrement();
-    return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL);
-  } catch (haikusErr) {
-    console.warn(`[anthropic] Haiku also failed: ${haikusErr.message}`);
-    throw sonnetErr; // surface the original Sonnet error to the route's catch
+    console.warn(`[anthropic] OpenAI failed too (${openaiErr.message})`);
+    throw sonnetErr;   // the Sonnet reason is what the owner needs to see
   }
 }
 
@@ -994,7 +1012,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "fx", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
+    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000, MODEL_SONNET);   // D-19: every report is drafted by Sonnet
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.pairViews)) {
       throw new Error("fetchResearchReport[fx]: could not parse JSON response");
@@ -1045,7 +1063,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 MS language: "We believe". Never fabricate client conversations, proprietary surveys, or channel checks. Return pure JSON only.`;
 
     if (specOnly) return { reportType: "rates", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000);
+    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000, MODEL_SONNET);   // D-19: every report is drafted by Sonnet
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.thePuzzle) {
       throw new Error("fetchResearchReport[rates]: could not parse JSON response");

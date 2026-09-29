@@ -205,7 +205,7 @@ describe("web search tool variant is matched to the model", () => {
 
   test("model ids carry no date suffix", () => {
     expect(anthropic.MODEL).toBe("claude-haiku-4-5");
-    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
+    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
   });
 });
 

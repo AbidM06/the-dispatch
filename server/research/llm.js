@@ -19,7 +19,7 @@
  * it through the Batch API when the pipeline runs in batch mode.
  *
  * Note: the Lead Analyst *draft* call reuses anthropic.fetchResearchReport
- * (existing per-type prompts + Sonnet→OpenAI→Haiku fallback chain), so the
+ * (existing per-type prompts; Sonnet, or unavailable — never Haiku, D-19), so the
  * lead role env var governs extraction and revision calls, not the draft.
  * ─────────────────────────────────────────────────────────────────────────────
  */

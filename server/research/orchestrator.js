@@ -365,7 +365,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       callsUsed,
       usage,
       models: {
-        lead: "per-type (" + require("../providers/models").sonnetModel() + " / Haiku + fallback chain)", extract: modelForRole("extract"),
+        lead: require("../providers/models").sonnetModel(), extract: modelForRole("extract"),
         auditor: modelForRole("auditor"), redteam: modelForRole("redteam"),
         portfolio: modelForRole("portfolio"), chair: modelForRole("chair"),
       },

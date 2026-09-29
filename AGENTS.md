@@ -65,11 +65,11 @@ npm run test:coverage
 | `FINNHUB_API_KEY` | News, earnings/economic calendar, sentiment; US-stock price fallback |
 | `EIA_API_KEY` | Commodities report price-history chart |
 | `POLYGON_API_KEY` | Strategy backtester / momentum history, vol surface (not used by Markets) |
-| `OPENAI_API_KEY` | Optional research fallback tier (no web search → `grounded: false`; UNPRICED on receipts) |
+| `OPENAI_API_KEY` | Optional research fallback tier — **runs only if set**; the owner leaves it unset (D-19). No web search → `grounded: false`; UNPRICED and outside the USD caps |
 | `ALPHA_VANTAGE_API_KEY` | No longer used by any route (provider kept, tested) |
 | `MARKETS_REFRESH_TIMES` / `MARKETS_TZ` / `MARKETS_SCHEDULE` | Markets refresh slots (default `07:45,14:45` Europe/London, weekdays; `off` disables) |
 | `POLYMARKET_TAGS` / `POLYMARKET_COUNT` | Prediction markets shown (default economy,geopolitics / 4) |
-| `SONNET_MODEL` | The Sonnet every Sonnet job uses — research pipeline, chat, idea cards (default `claude-sonnet-5`; `claude-sonnet-5-5` under evaluation, D-17) |
+| `SONNET_MODEL` | The Sonnet every Sonnet job uses — research pipeline, chat, idea cards (default `claude-sonnet-5-5` since 2026-09-29, D-17; set `claude-sonnet-5` to switch back) |
 | `IDEAS_MODEL` | Model for idea cards (default: `SONNET_MODEL`) |
 | `PORT` | Default 3001 |
 | `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
@@ -467,7 +467,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
   QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
 - Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
-  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5; `server/providers/models.js`), Haiku 4.5 for extraction.
+  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5.5; `server/providers/models.js`) for every draft (all seven types) and reviewer, Haiku 4.5 for claim extraction only. **No Haiku stand-in (D-19):** a failed Sonnet call throws `SONNET_UNAVAILABLE` with a plain-English reason and the report is unavailable.
 - **Every agent receives the verified FRED block** (`verifiedBlock`) — reviewers used to judge
   the draft with no market data of their own.
 - **Fact check before audit**: `factCheck.checkClaims()` settles FACT claims naming exactly one
