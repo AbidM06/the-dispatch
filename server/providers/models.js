@@ -11,7 +11,7 @@
  */
 "use strict";
 
-const DEFAULT_SONNET = "claude-sonnet-5";
+const DEFAULT_SONNET = "claude-sonnet-5-5";   // owner switched 2026-09-29 (D-17)
 const HAIKU          = "claude-haiku-4-5";
 
 function sonnetModel() {

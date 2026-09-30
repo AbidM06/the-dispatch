@@ -194,7 +194,7 @@ function finalizeReceipt(receipt) {
 
 // ── Estimates ─────────────────────────────────────────────────────────────────
 // Used only until real receipts exist for a report type: a five-agent run is
-// ~6 calls on Sonnet 5 with ~10-15 web searches. Stated as an assumption so the
+// ~6 Sonnet calls with ~10-15 web searches. Stated as an assumption so the
 // UI can say so, and replaced by the measured average after the first run.
 const DEFAULT_ESTIMATE_USD = 0.70;
 
@@ -215,7 +215,8 @@ function estimateReport(type, recentRecords = []) {
       estimateUSD: DEFAULT_ESTIMATE_USD,
       lowUSD: 0.40, highUSD: 1.20,
       basis: "assumption",
-      basisDetail: "No measured runs of this report type yet — typical five-agent run on Sonnet 5 with web search. Replaced by real receipts after the first run.",
+      // Name the model this run will actually use (SONNET_MODEL), not a fixed one.
+      basisDetail: `No measured runs of this report type yet — typical five-agent run on ${require("./models").sonnetModel()} with web search. Replaced by real receipts after the first run.`,
     };
   }
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length;

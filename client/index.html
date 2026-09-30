@@ -2319,7 +2319,9 @@ function App() {
       if (payload && payload.available === false) {
         setResearch(null);
         setResearchUnavailable(payload);
-        showToast('Report unavailable — ' + (payload.reason || 'generation failed'), 'error');
+        showToast(payload.reason === 'SONNET_UNAVAILABLE'
+          ? 'Report unavailable — Claude Sonnet failed; the panel says why'
+          : 'Report unavailable — ' + (payload.reason || 'generation failed'), 'error');
       } else {
         showToast('Research error: ' + err.message, 'error');
       }
@@ -4203,6 +4205,7 @@ function App() {
       BUDGET_DAILY:    'The daily Anthropic spend cap has been reached.',
       BUDGET_MONTHLY:  'The monthly Anthropic spend cap has been reached.',
       AI_UNAVAILABLE:  'Report generation failed.',
+      SONNET_UNAVAILABLE: 'Claude Sonnet could not complete this report, so none was produced — no lower-quality model was substituted.',
     }[payload.reason] || 'Report generation failed.';
 
     return React.createElement('div', { className:'rp-unavailable' },
@@ -4936,6 +4939,7 @@ function App() {
       React.createElement('span', { className:'qa-strip-stat' }, 'Sources ', React.createElement('b', null, r.sourcesCount || 0)),
       redteamChallenges > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--red)'} }, redteamChallenges + ' material challenge' + (redteamChallenges > 1 ? 's' : '')),
       qa.revisionRounds > 0 && React.createElement('span', { className:'qa-strip-stat' }, 'Revised ×' + qa.revisionRounds),
+      Array.isArray(qa.unreviewed) && qa.unreviewed.length > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--gold)'} }, 'Partly unreviewed — ' + qa.unreviewed.join(' · ')),
       React.createElement('span', { style:{flex:1} }),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleQaPanel }, qaPanelOpen ? 'HIDE QA' : 'VIEW QA'),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleSrcPanel }, srcPanelOpen ? 'HIDE SOURCES' : 'VIEW SOURCES')
