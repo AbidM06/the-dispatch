@@ -195,3 +195,16 @@ describe("Codex review on #11 (round 2)", () => {
     expect(rates.facts.dgs10.stale).toBe(false);
   });
 });
+
+test("Codex review on #11: a Yahoo overlay is not registered as tier 1; FRED still is", () => {
+  const { checkClaims } = require("../server/research/factCheck");
+  const registry = require("../server/research/sourceRegistry");
+  const m = mc();
+  const claim = () => ({ claimId: "CLM-001", classification: "FACT", statement: "Brent crude trades at $98.85 per barrel.", agentsAgreeing: [], agentsDisagreeing: [] });
+  const fresh = m.withMarkets(fredCtx(), snap([{ id: "BRENT", ok: true, quote: quote(98.85, "2026-09-29T09:14:00Z") }]), NOW);
+  const [yahoo] = registry.registerSources(checkClaims([claim()], fresh).sources, "fact_check", []);
+  expect(yahoo).toMatchObject({ publisher: "Yahoo Finance", sourceTier: 2, sourceType: "SECONDARY" });
+  const fredOnly = fredCtx(); fredOnly.facts.brent.value = 98.85;
+  const [fred] = registry.registerSources(checkClaims([claim()], fredOnly).sources, "fact_check", []);
+  expect(fred).toMatchObject({ sourceTier: 1, sourceType: "PRIMARY" });
+});

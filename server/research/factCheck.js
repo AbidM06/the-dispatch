@@ -125,8 +125,9 @@ function checkClaims(claims, macroCtx) {
       title:       `${fact.label} (${fact.seriesId})`,
       publisher:   fact.source && fact.source !== "FRED" ? fact.source : "Federal Reserve Bank of St. Louis (FRED)",
       url:         fact.url || fredUrl(fact.seriesId),
-      sourceType:  "PRIMARY",
-      sourceTier:  1,
+      // FRED is primary (tier 1). A Markets overlay (e.g. Yahoo, unofficial) is
+      // left for the registry to classify from its publisher — never passed off as tier 1.
+      ...(fact.source && fact.source !== "FRED" ? {} : { sourceType: "PRIMARY", sourceTier: 1 }),
       dataAsOf:    fact.asOf,
       supportsClaims: [],
     };
