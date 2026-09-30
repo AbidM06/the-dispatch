@@ -169,6 +169,9 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
     ? draftFn()
     : leadAnalyst.draft({ type, topic, ratesContext }));
   callsUsed += 1;   // draft goes through anthropic.js, not llm.js — count it
+  // Who drafted it is fixed now: a later Sonnet revision must not erase the
+  // OpenAI tier's grounded:false (no web search) marker or its attribution.
+  const draftUngrounded = research?.grounded === false;
   usage.calls += 1;
 
   // ── 2. Claim/source extraction ─────────────────────────────────────────────
@@ -263,6 +266,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   // ── 4. IC Chair ────────────────────────────────────────────────────────────
   setStage(type, "chair");
   let chairOut = null;
+  let chairError = `call cap ${callCap} reached before the chair could run`;
   if (callsUsed < callCap) {
     callsUsed += 1;
     const chairRes = await safeReview("ic-chair", () => icChair.adjudicate({
@@ -274,6 +278,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       type, usage, verifiedBlock,
     }), retryBudget(0));
     if (chairRes.ok) chairOut = chairRes.out;
+    else chairError = chairRes.error;
   }
 
   // ── 5. Deterministic gate + bounded revision loop ──────────────────────────
@@ -304,7 +309,8 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
         usage, verifiedBlock,
       }), retryBudget(1));
       if (!revRes.ok) break;
-      research = { ...revRes.out, reportType: research.reportType || type, generatedAt: research.generatedAt };
+      research = { ...revRes.out, reportType: research.reportType || type, generatedAt: research.generatedAt,
+                   ...(draftUngrounded ? { grounded: false } : {}) };
 
       // Reconcile ledger with the revised text: claims that hard-failed are
       // marked as addressed-by-revision (audit trail kept in notes).
@@ -371,7 +377,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   } : notRunQA(
     !extraction ? "Claim extraction unavailable — five-agent QA could not run"
     : !reviewersRan ? "Reviewers could not run — QA NOT RUN. " + failedReviewers.join(" · ")
-    : "IC Chair unavailable — QA NOT RUN"
+    : "IC Chair could not run — QA NOT RUN. " + chairError
   );
 
   const version  = store.nextVersion(type);
@@ -403,7 +409,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       models: {
         // The OpenAI tier (runs only if its key is set) is the only drafter that
         // returns grounded: false — record it, never attribute its draft to Sonnet.
-        lead: research.grounded === false ? `openai:${process.env.OPENAI_FALLBACK_MODEL || "gpt-4o"}` : require("../providers/models").sonnetModel(), extract: modelForRole("extract"),
+        lead: draftUngrounded ? `openai:${process.env.OPENAI_FALLBACK_MODEL || "gpt-4o"}` : require("../providers/models").sonnetModel(), extract: modelForRole("extract"),
         auditor: modelForRole("auditor"), redteam: modelForRole("redteam"),
         portfolio: modelForRole("portfolio"), chair: modelForRole("chair"),
       },

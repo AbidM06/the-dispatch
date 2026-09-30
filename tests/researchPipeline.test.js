@@ -362,6 +362,23 @@ describe("orchestrator", () => {
     expect(report.meta.models.lead).toMatch(/^openai:/);
   });
 
+  test("an OpenAI draft stays ungrounded and attributed to OpenAI after a Sonnet revision", async () => {
+    anthropicMock.fetchResearchReport.mockResolvedValue({ ...DRAFT, grounded: false });
+    mockAgents({ audit: { ...AUDIT_OK, verdicts: [{ claimId: "CLM-001", verificationStatus: "UNSUPPORTED", notes: "cannot verify" }] } });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.institutionalQA.revisionRounds).toBe(1);
+    expect(report.research.title).toBe("Revised Report");
+    expect(report.research.grounded).toBe(false);
+    expect(report.meta.models.lead).toMatch(/^openai:/);
+  });
+
+  test("a failed IC chair's reason is shown in the NOT_RUN reason", async () => {
+    mockAgents({ chair: Object.assign(new Error("Claude Sonnet overloaded (Anthropic error 529)"), { status: 529 }) });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.institutionalQA.status).toBe("NOT_RUN");
+    expect(report.institutionalQA.reason).toMatch(/^IC Chair could not run — QA NOT RUN\. failed twice \(retried once\) — Claude Sonnet overloaded/);
+  });
+
   test("revision loop triggers on hard fail then re-scores", async () => {
     // First chair call approves but a material claim is UNSUPPORTED -> hard fail -> revision
     const audit = {
