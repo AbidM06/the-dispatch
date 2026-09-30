@@ -4063,6 +4063,7 @@ function App() {
         React.createElement('span', { className:'rp-pp-dir' }, pp.direction),
         React.createElement('span', { className:'rp-pp-gap' }, (pp.gapBp >= 0 ? '+' : '') + pp.gapBp + 'bp')
       ),
+      pp.stale && React.createElement('div', { className:'rp-pp-caveat' }, '⚠ ' + pp.staleNote),
       React.createElement('div', { className:'rp-pp-reading' }, pp.reading),
       React.createElement('div', { className:'rp-pp-method' }, 'Method: ' + pp.method),
       React.createElement('div', { className:'rp-pp-caveat' }, '⚠ ' + pp.caveat)

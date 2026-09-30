@@ -107,27 +107,49 @@ function withMarkets(ctx, snapshot, now = Date.now()) {
   const items = new Map((snapshot?.items || []).filter(i => i.ok && !i.stale && i.quote).map(i => [i.id, i]));
   const facts = {};
   const overlaid = [];
-  for (const [key, f] of Object.entries(ctx.facts)) {
-    let fact = { ...f };
+  let missing = [...(ctx.missing || [])];
+  // Markets-only facts too: a FRED series that failed this run can still be
+  // supplied by a fresh Markets quote (and leaves the UNAVAILABLE list).
+  const keys = [...new Set([...Object.keys(ctx.facts), ...Object.keys(MARKETS_EQUIVALENT)])];
+  for (const key of keys) {
+    const f = ctx.facts[key];
+    const spec = SERIES.find(x => x.key === key);
     const it = items.get(MARKETS_EQUIVALENT[key]);
     const q = it?.quote;
-    if (q && Number.isFinite(q.value) && Date.parse(q.asOf) > Date.parse(f.asOf + (String(f.asOf).length === 10 ? "T23:59:59Z" : ""))) {
-      const jump = MAX_JUMP_ABS[key] != null ? Math.abs(q.value - f.value) > MAX_JUMP_ABS[key]
-                                             : Math.abs(q.value - f.value) / Math.abs(f.value) > (MAX_JUMP[key] ?? 0.35);
-      if (!jump) {
-        const spec = SERIES.find(x => x.key === key);
-        fact = { ...fact, value: q.value, formatted: spec.fmt(q.value), source: q.source || "Markets",
-                 seriesId: (q.sourceDetail || it.label || it.id), url: q.sourceUrl || null, asOf: q.asOf,
-                 replaced: { source: f.source, seriesId: f.seriesId, value: f.value, asOf: f.asOf } };
-        overlaid.push(key);
-      }
+    const usable = q && Number.isFinite(q.value) && Number.isFinite(Date.parse(q.asOf));
+    let fact = f ? { ...f } : null;
+    // With a FRED value: overlay only when newer and within the sanity bound.
+    // Without one (FRED failed): nothing to compare against, so the fresh quote
+    // is used as is — it is the same figure the Markets tab shows.
+    const newer = usable && (!f || Date.parse(q.asOf) > Date.parse(f.asOf + (String(f.asOf).length === 10 ? "T23:59:59Z" : "")));
+    const jump = newer && f && (MAX_JUMP_ABS[key] != null ? Math.abs(q.value - f.value) > MAX_JUMP_ABS[key]
+                                                          : Math.abs(q.value - f.value) / Math.abs(f.value) > (MAX_JUMP[key] ?? 0.35));
+    if (newer && !jump) {
+      fact = { ...(f || { key, label: spec.label, group: spec.group, unit: spec.unit }),
+               value: q.value, formatted: spec.fmt(q.value), source: q.source || "Markets",
+               // seriesId stays unique per instrument (Brent and WTI can share a
+               // venue label); the venue detail is kept separately for display.
+               seriesId: it.id, sourceDetail: q.sourceDetail || it.label || null,
+               url: q.sourceUrl || null, asOf: q.asOf,
+               replaced: f ? { source: f.source, seriesId: f.seriesId, value: f.value, asOf: f.asOf } : null };
+      if (!f) missing = missing.filter(id => id !== spec.id);
+      overlaid.push(key);
     }
+    if (!fact) continue;
     const age = tradingDaysSince(fact.asOf, now);
     fact.stale = age != null && age > STALE_AFTER_TRADING_DAYS;
     if (fact.stale) fact.ageTradingDays = age;
     facts[key] = fact;
   }
-  return { ...ctx, facts, overlaid, stale: Object.values(facts).filter(f => f.stale).map(f => f.key),
+  // The policy proxy is derived from DGS2 and DFF. If either is stale, the
+  // derived direction is as old as its inputs — say so, never present it as today's.
+  let policyPath = ctx.policyPath || derivePolicyPath(facts);
+  const ppStale = ["dgs2", "dff"].filter(k => facts[k]?.stale);
+  if (policyPath && ppStale.length) {
+    policyPath = { ...policyPath, stale: true,
+      staleNote: `STALE: built from ${ppStale.map(k => facts[k].seriesId).join(" and ")}, more than ${STALE_AFTER_TRADING_DAYS} trading days old — this is the last known reading, not today's.` };
+  }
+  return { ...ctx, facts, missing, policyPath, overlaid, stale: Object.values(facts).filter(f => f.stale).map(f => f.key),
            marketsSnapshotAt: snapshot?.generatedAt || null,
            sources: overlaid.length ? [...new Set([...(ctx.sources || ["FRED"]), ...overlaid.map(k => facts[k].source)])] : ctx.sources };
 }
@@ -262,6 +284,7 @@ function toPromptBlock(ctx) {
     block +=
       `\n\nPOLICY PATH (DERIVED PROXY — NOT market-implied probability):\n` +
       `  Direction: ${ctx.policyPath.direction} (${ctx.policyPath.gapBp >= 0 ? "+" : ""}${ctx.policyPath.gapBp}bp)\n` +
+      (ctx.policyPath.stale ? `  ${ctx.policyPath.staleNote} Do not present this direction as current.\n` : "") +
       `  Method: ${ctx.policyPath.method}\n` +
       `  ${ctx.policyPath.reading}\n` +
       `  CAVEAT: ${ctx.policyPath.caveat}\n` +
@@ -288,7 +311,7 @@ function toMarketDataRows(ctx) {
       label:  f.label,
       value:  f.formatted,
       source: f.source,
-      detail: f.seriesId,
+      detail: f.sourceDetail || f.seriesId,
       asOf:   f.asOf,
       url:    f.url || null,
       stale:  Boolean(f.stale),

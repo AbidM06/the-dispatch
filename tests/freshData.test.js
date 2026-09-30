@@ -103,3 +103,54 @@ test("every report refreshes Markets first (through the shared helper)", async (
     expect(out).toMatchObject({ ok: false, reason: "SONNET_UNAVAILABLE" });
   } finally { delete process.env.RESEARCH_REFRESH_MARKETS; }
 });
+
+describe("Codex review on #11", () => {
+  test("Brent and WTI from the same venue keep separate ids and links in the fact check", () => {
+    const { checkClaims } = require("../server/research/factCheck");
+    const base = fredCtx();
+    base.facts.wti = { key: "wti", label: "WTI Crude", group: "commodity", value: 110, formatted: "$110.00/bbl", source: "FRED", seriesId: "DCOILWTICO", asOf: "2026-09-22" };
+    const venue = { sourceDetail: "NY Mercantile via Yahoo Finance" };
+    const ctx = mc().withMarkets(base, snap([
+      { id: "BRENT", ok: true, quote: quote(98.85, "2026-09-29T09:14:00Z", { ...venue, sourceUrl: "https://finance.yahoo.com/quote/BZ%3DF" }) },
+      { id: "WTI",   ok: true, quote: quote(95.10, "2026-09-29T09:14:00Z", { ...venue, sourceUrl: "https://finance.yahoo.com/quote/CL%3DF" }) },
+    ]), NOW);
+    expect(ctx.facts.brent.seriesId).toBe("BRENT");
+    expect(ctx.facts.wti.seriesId).toBe("WTI");
+    expect(mc().toMarketDataRows(ctx).find(r => r.label === "WTI Crude").detail).toBe("NY Mercantile via Yahoo Finance");
+    const claims = [
+      { claimId: "CLM-001", classification: "FACT", statement: "Brent crude trades at $98.85 per barrel.", agentsAgreeing: [], agentsDisagreeing: [] },
+      { claimId: "CLM-002", classification: "FACT", statement: "WTI crude trades at $95.10 per barrel.", agentsAgreeing: [], agentsDisagreeing: [] },
+    ];
+    const r = checkClaims(claims, ctx);
+    expect(r.settledIds).toEqual(["CLM-001", "CLM-002"]);
+    expect(r.sources.map(s => s.url).sort()).toEqual(["https://finance.yahoo.com/quote/BZ%3DF", "https://finance.yahoo.com/quote/CL%3DF"]);
+  });
+
+  test("a FRED series that failed is supplied by a fresh Markets quote and leaves UNAVAILABLE", () => {
+    const base = fredCtx();
+    delete base.facts.brent;
+    base.missing = ["DCOILBRENTEU", "VIXCLS"];
+    const ctx = mc().withMarkets(base, snap([{ id: "BRENT", ok: true, quote: quote(98.85, "2026-09-29T09:14:00Z") }]), NOW);
+    expect(ctx.facts.brent).toMatchObject({ value: 98.85, label: "Brent Crude", group: "commodity", source: "Yahoo Finance", replaced: null, stale: false });
+    expect(ctx.missing).toEqual(["VIXCLS"]);
+    expect(mc().toPromptBlock(ctx)).toMatch(/UNAVAILABLE THIS RUN: VIXCLS\./);
+    // No quote → still missing, never invented.
+    const none = mc().withMarkets(base, snap([]), NOW);
+    expect(none.facts.brent).toBeUndefined();
+    expect(none.missing).toEqual(["DCOILBRENTEU", "VIXCLS"]);
+  });
+
+  test("the policy proxy is marked stale when DGS2 or DFF is stale", () => {
+    const m = mc();
+    const base = fredCtx();
+    base.facts.dgs2 = { key: "dgs2", label: "2Y UST", group: "rates", value: 4.0, formatted: "4.00%", source: "FRED", seriesId: "DGS2", asOf: "2026-09-21" };
+    base.facts.dff  = { key: "dff", label: "Effective Fed Funds", group: "rates", value: 4.5, formatted: "4.50%", source: "FRED", seriesId: "DFF", asOf: "2026-09-25" };
+    base.policyPath = m.derivePolicyPath(base.facts);
+    const ctx = m.withMarkets(base, snap([]), NOW);
+    expect(ctx.policyPath).toMatchObject({ direction: "EASING BIAS", stale: true, staleNote: expect.stringMatching(/^STALE: built from DGS2, more than 2 trading days old/) });
+    expect(m.toPromptBlock(ctx)).toMatch(/STALE: built from DGS2.*Do not present this direction as current\./);
+    // Fresh inputs → no stale mark.
+    base.facts.dgs2.asOf = "2026-09-25";
+    expect(m.withMarkets(base, snap([]), NOW).policyPath.stale).toBeUndefined();
+  });
+});
