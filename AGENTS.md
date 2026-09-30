@@ -239,8 +239,16 @@ VIX, EUR/USD — and returns each as a **Fact** carrying its own `source`, `seri
 read Friday). Per-series failures are tolerated and named in `missing`, so "not fetched"
 stays distinguishable from "fetched as zero".
 
-Note FRED's daily oil series (`DCOILBRENTEU`, `DCOILWTICO`) is fresher than the EIA weekly
-feed used for the commodities charts, which lags ~1 week.
+**Freshness (D-20).** FRED's daily oil series is *published weekly*, so its latest value can be
+a week old — a macro report once anchored on $114.89 Brent while the market traded ~$99.
+So: every report first refreshes Markets (`jobs/refreshMarkets.js`, free); `getMacroContext()`
+overlays a NEWER, non-stale Markets price for the same thing (Brent, WTI, 10Y, EUR/USD — see
+`MARKETS_EQUIVALENT`, with a sanity bound against unit mismatches), labelled with its own
+source/time and the FRED value it `replaced`; and any figure older than 2 trading days (weekends and US holidays excluded — the
+Fed's calendar for rates/credit/FX, NYSE's for oil/VIX) is
+`stale` — the prompt says it is the last known value and asks for a search, the box shows a
+STALE badge, and the fact check never judges a claim against it. The FRED ctx is cached; the
+overlay is applied at read time and never mutates the cache.
 
 `toPromptBlock()` renders those facts as a VERIFIED MARKET DATA block and tells the model
 not to search for figures it has already been handed. That is both an accuracy win (no

@@ -231,6 +231,14 @@ async function generateReport(type, topic = "", { batch = false } = {}) {
     return { ok: false, reason: "LOW_COST_MODE", detail: "AI generation is disabled by LOW_COST_MODE=true. Unset it to generate reports." };
   }
 
+  // D-20: start every report from prices fetched seconds ago (free data). A
+  // failed refresh is not fatal — the report uses the last snapshot, and every
+  // figure still carries its own as-of time and STALE flag.
+  if (process.env.NODE_ENV !== "test" || process.env.RESEARCH_REFRESH_MARKETS === "on") {
+    orchestrator.setStage(type, "refreshing market data", "Fetching current prices before writing");
+    await require("../jobs/refreshMarkets").refreshMarkets("research")
+      .catch(err => console.warn(`[research:${type}] markets refresh failed — using last snapshot:`, err.message));
+  }
   const ctx = await buildContext(type);
 
   let record;

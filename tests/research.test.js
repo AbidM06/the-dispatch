@@ -81,7 +81,7 @@ describe("macroContext — cross-asset fact layer", () => {
     const block = macroContext.toPromptBlock(ctx);
     expect(block).toContain("$97.73/bbl");
     expect(block).toContain("DCOILBRENTEU");
-    expect(block).toMatch(/Do NOT web_search for them/);
+    expect(block).toMatch(/do NOT web_search for those/);   // except figures marked STALE (D-20)
   });
 });
 

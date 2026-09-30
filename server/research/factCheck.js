@@ -93,6 +93,9 @@ function checkClaims(claims, macroCtx) {
     const [key, rule] = hits[0];
     const fact = facts[key];
 
+    // A stale figure is the last KNOWN value, not today's — judging a claim
+    // against it could wrongly mark a current figure as conflicting.
+    if (fact.stale) continue;
     if (aboutAnotherTime(text, claim.asOf, fact.asOf)) continue;
 
     const nums = (text.replace(ISO_DATE, " ").replace(YEAR, " ").replace(TENOR, " ").match(NUMBER) || []).map(Number).filter(n => n >= rule.min && n <= rule.max);
@@ -106,12 +109,12 @@ function checkClaims(claims, macroCtx) {
     if (matches) {
       claim.verificationStatus = "VERIFIED";
       claim.confidence = Math.max(claim.confidence || 0, 0.95);
-      claim.notes = `${claim.notes ? claim.notes + " | " : ""}Fact check (code): matches FRED ${fact.seriesId} = ${fact.formatted} as of ${fact.asOf}.`;
+      claim.notes = `${claim.notes ? claim.notes + " | " : ""}Fact check (code): matches ${fact.source || "FRED"} ${fact.seriesId} = ${fact.formatted} as of ${fact.asOf}.`;
       if (!claim.agentsAgreeing.includes("fact_check")) claim.agentsAgreeing.push("fact_check");
     } else {
       claim.verificationStatus = "CONFLICTING_DATA";
       claim.confidence = Math.min(claim.confidence ?? 1, 0.3);
-      claim.notes = `${claim.notes ? claim.notes + " | " : ""}Fact check (code): report states ${stated}; FRED ${fact.seriesId} shows ${fact.formatted} as of ${fact.asOf}.`;
+      claim.notes = `${claim.notes ? claim.notes + " | " : ""}Fact check (code): report states ${stated}; ${fact.source || "FRED"} ${fact.seriesId} shows ${fact.formatted} as of ${fact.asOf}.`;
       if (!claim.agentsDisagreeing.includes("fact_check")) claim.agentsDisagreeing.push("fact_check");
     }
 
@@ -120,10 +123,11 @@ function checkClaims(claims, macroCtx) {
 
     const src = sourcesBySeries.get(fact.seriesId) || {
       title:       `${fact.label} (${fact.seriesId})`,
-      publisher:   "Federal Reserve Bank of St. Louis (FRED)",
-      url:         fredUrl(fact.seriesId),
-      sourceType:  "PRIMARY",
-      sourceTier:  1,
+      publisher:   fact.source && fact.source !== "FRED" ? fact.source : "Federal Reserve Bank of St. Louis (FRED)",
+      url:         fact.url || fredUrl(fact.seriesId),
+      // FRED is primary (tier 1). A Markets overlay (e.g. Yahoo, unofficial) is
+      // left for the registry to classify from its publisher — never passed off as tier 1.
+      ...(fact.source && fact.source !== "FRED" ? {} : { sourceType: "PRIMARY", sourceTier: 1 }),
       dataAsOf:    fact.asOf,
       supportsClaims: [],
     };

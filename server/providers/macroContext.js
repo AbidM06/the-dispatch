@@ -63,8 +63,160 @@ function buildFact(spec, obs) {
     formatted: spec.fmt(obs.value),
     source:    "FRED",
     seriesId:  spec.id,
+    url:       `https://fred.stlouisfed.org/series/${spec.id}`,
     asOf:      obs.date,
   };
+}
+
+// ── Freshness (D-20) ─────────────────────────────────────────────────────────
+// FRED's daily oil series is published weekly, so its latest value can be a
+// week old — a report once anchored on $114.89 Brent while the market traded
+// ~$99. Two fixes: (1) where the Markets tab holds a NEWER live price for the
+// same thing, use it (labelled with its own source and time); (2) any figure
+// still more than STALE_AFTER_TRADING_DAYS old is flagged stale, and the model
+// is told it is the last known value, not today's.
+const STALE_AFTER_TRADING_DAYS = 2;
+const MARKETS_EQUIVALENT = {          // fact key → Markets instrument id
+  brent:  "BRENT",
+  wti:    "WTI",
+  dgs10:  "US10Y",
+  eurusd: "EURUSD",
+};
+// Sanity bound per key: a Markets value further than this from FRED is a unit
+// or symbol mismatch, not news — keep FRED rather than trust it.
+const MAX_JUMP = { brent: 0.35, wti: 0.35, eurusd: 0.10 };   // relative
+const MAX_JUMP_ABS = { dgs10: 1.5 };                         // percentage points
+
+// ── US market holidays (computed, no API) ─────────────────────────────────────
+// A holiday is not a trading day, so it does not age a figure. Two calendars:
+//   federal — Fed H.15 rates / H.10 FX / credit: the US federal holidays
+//             (includes Columbus and Veterans Day; Good Friday is a working day)
+//   nyse    — oil and VIX: NYSE holidays (Good Friday closed; Columbus/Veterans open)
+const CALENDAR_BY_GROUP = { rates: "federal", credit: "federal", fx: "federal", commodity: "nyse", risk: "nyse" };
+const ymd = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+function nthWeekday(y, m, wd, n) {          // n-th weekday `wd` of month m (0-based month)
+  const first = new Date(Date.UTC(y, m, 1)).getUTCDay();
+  return ymd(y, m, 1 + ((wd - first + 7) % 7) + (n - 1) * 7);
+}
+function lastWeekday(y, m, wd) {
+  const last = new Date(Date.UTC(y, m + 1, 0));
+  return ymd(y, m, last.getUTCDate() - ((last.getUTCDay() - wd + 7) % 7));
+}
+function easterSunday(y) {                  // Anonymous Gregorian algorithm
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return new Date(Date.UTC(y, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1));
+}
+function observed(y, m, d, { saturdayToFriday = true } = {}) {   // weekend holiday → the weekday it is kept
+  const w = new Date(Date.UTC(y, m, d)).getUTCDay();
+  if (w === 6) return saturdayToFriday ? ymd(y, m, d - 1) : null;
+  if (w === 0) return ymd(y, m, d + 1);
+  return ymd(y, m, d);
+}
+const _holidayCache = new Map();
+function usHolidays(year, calendar) {
+  const ck = `${calendar}:${year}`;
+  if (_holidayCache.has(ck)) return _holidayCache.get(ck);
+  const nyse = calendar === "nyse";
+  const days = [
+    // NYSE does not close on Friday 31 Dec when New Year's Day is a Saturday.
+    observed(year, 0, 1, { saturdayToFriday: !nyse }),
+    nthWeekday(year, 0, 1, 3),              // Martin Luther King Jr. Day
+    nthWeekday(year, 1, 1, 3),              // Presidents' Day
+    lastWeekday(year, 4, 1),                // Memorial Day
+    year >= (nyse ? 2022 : 2021) ? observed(year, 5, 19) : null,   // Juneteenth
+    observed(year, 6, 4),
+    nthWeekday(year, 8, 1, 1),              // Labor Day
+    nthWeekday(year, 10, 4, 4),             // Thanksgiving
+    observed(year, 11, 25),
+    ...(nyse
+      ? [(() => { const e = easterSunday(year); e.setUTCDate(e.getUTCDate() - 2); return e.toISOString().slice(0, 10); })()]
+      : [nthWeekday(year, 9, 1, 2), observed(year, 10, 11)]),   // Columbus Day, Veterans Day
+  ].filter(Boolean);
+  const set = new Set(days);
+  _holidayCache.set(ck, set);
+  return set;
+}
+function isUsHoliday(dateStr, calendar = "nyse") {
+  const y = Number(dateStr.slice(0, 4));
+  // A Saturday New Year's Day is kept on 31 Dec of the year before.
+  return usHolidays(y, calendar).has(dateStr) || usHolidays(y + 1, calendar).has(dateStr);
+}
+
+/** Trading days strictly after `asOf` up to and including `now` (UTC): weekdays that are not holidays on `calendar`. */
+function tradingDaysSince(asOf, now = Date.now(), calendar = "nyse") {
+  const start = Date.parse(String(asOf).length === 10 ? asOf + "T00:00:00Z" : asOf);
+  if (!Number.isFinite(start)) return null;
+  let n = 0;
+  const d = new Date(start); d.setUTCHours(0, 0, 0, 0);
+  const end = new Date(now); end.setUTCHours(0, 0, 0, 0);
+  while (d < end) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const w = d.getUTCDay();
+    if (w !== 0 && w !== 6 && !isUsHoliday(d.toISOString().slice(0, 10), calendar)) n++;
+  }
+  return n;
+}
+
+/**
+ * withMarkets — overlay newer Markets prices and mark stale facts.
+ * Pure: returns a new ctx; the cached FRED ctx is never mutated.
+ */
+function withMarkets(ctx, snapshot, now = Date.now()) {
+  if (!ctx || !ctx.facts) return ctx;
+  const items = new Map((snapshot?.items || []).filter(i => i.ok && !i.stale && i.quote).map(i => [i.id, i]));
+  const facts = {};
+  const overlaid = [];
+  let missing = [...(ctx.missing || [])];
+  // Markets-only facts too: a FRED series that failed this run can still be
+  // supplied by a fresh Markets quote (and leaves the UNAVAILABLE list).
+  const keys = [...new Set([...Object.keys(ctx.facts), ...Object.keys(MARKETS_EQUIVALENT)])];
+  for (const key of keys) {
+    const f = ctx.facts[key];
+    const spec = SERIES.find(x => x.key === key);
+    const it = items.get(MARKETS_EQUIVALENT[key]);
+    const q = it?.quote;
+    const usable = q && Number.isFinite(q.value) && Number.isFinite(Date.parse(q.asOf));
+    let fact = f ? { ...f } : null;
+    // With a FRED value: overlay only when newer and within the sanity bound.
+    // Without one (FRED failed): nothing to compare against, so the fresh quote
+    // is used as is — it is the same figure the Markets tab shows.
+    // A date-only FRED observation has no print time, so it is not given one: a
+    // timestamped quote from the same calendar day or later counts as newer.
+    const fDateOnly = f && String(f.asOf).length === 10;
+    const newer = usable && (!f || (fDateOnly ? String(q.asOf).slice(0, 10) >= f.asOf
+                                              : Date.parse(q.asOf) > Date.parse(f.asOf)));
+    const jump = newer && f && (MAX_JUMP_ABS[key] != null ? Math.abs(q.value - f.value) > MAX_JUMP_ABS[key]
+                                                          : Math.abs(q.value - f.value) / Math.abs(f.value) > (MAX_JUMP[key] ?? 0.35));
+    if (newer && !jump) {
+      fact = { ...(f || { key, label: spec.label, group: spec.group, unit: spec.unit }),
+               value: q.value, formatted: spec.fmt(q.value), source: q.source || "Markets",
+               // seriesId stays unique per instrument (Brent and WTI can share a
+               // venue label); the venue detail is kept separately for display.
+               seriesId: it.id, sourceDetail: q.sourceDetail || it.label || null,
+               url: q.sourceUrl || null, asOf: q.asOf,
+               replaced: f ? { source: f.source, seriesId: f.seriesId, value: f.value, asOf: f.asOf } : null };
+      if (!f) missing = missing.filter(id => id !== spec.id);
+      overlaid.push(key);
+    }
+    if (!fact) continue;
+    const age = tradingDaysSince(fact.asOf, now, CALENDAR_BY_GROUP[fact.group] || "nyse");
+    fact.stale = age != null && age > STALE_AFTER_TRADING_DAYS;
+    if (fact.stale) fact.ageTradingDays = age;
+    facts[key] = fact;
+  }
+  // The policy proxy is derived from DGS2 and DFF. If either is stale, the
+  // derived direction is as old as its inputs — say so, never present it as today's.
+  let policyPath = ctx.policyPath || derivePolicyPath(facts);
+  const ppStale = ["dgs2", "dff"].filter(k => facts[k]?.stale);
+  if (policyPath && ppStale.length) {
+    policyPath = { ...policyPath, stale: true,
+      staleNote: `STALE: built from ${ppStale.map(k => facts[k].seriesId).join(" and ")}, more than ${STALE_AFTER_TRADING_DAYS} trading days old — this is the last known reading, not today's.` };
+  }
+  return { ...ctx, facts, missing, policyPath, overlaid, stale: Object.values(facts).filter(f => f.stale).map(f => f.key),
+           marketsSnapshotAt: snapshot?.generatedAt || null,
+           sources: overlaid.length ? [...new Set([...(ctx.sources || ["FRED"]), ...overlaid.map(k => facts[k].source)])] : ctx.sources };
 }
 
 /**
@@ -122,6 +274,13 @@ function derivePolicyPath(facts) {
  * @returns {{ facts, policyPath, missing, fetchedAt, sources }}
  */
 async function getMacroContext({ force = false } = {}) {
+  const fred = await getFredContext({ force });
+  let snapshot = null;
+  try { snapshot = require("../markets/service").getSnapshot(); } catch { /* no Markets snapshot */ }
+  return withMarkets(fred, snapshot);
+}
+
+async function getFredContext({ force = false } = {}) {
   if (!force) {
     const hit = cache.getWithMeta(CACHE_KEY);
     if (hit && !hit.stale) return hit.value;
@@ -176,18 +335,21 @@ function toPromptBlock(ctx) {
   for (const group of order) {
     const inGroup = Object.values(ctx.facts).filter(f => f.group === group);
     if (!inGroup.length) continue;
-    lines.push(inGroup.map(f => `  ${f.label}: ${f.formatted} [${f.source} ${f.seriesId}, as of ${f.asOf}]`).join("\n"));
+    lines.push(inGroup.map(f => `  ${f.label}: ${f.formatted} [${f.source} ${f.seriesId}, as of ${f.asOf}]` +
+      (f.stale ? ` — STALE (${f.ageTradingDays} trading days old): this is the last KNOWN value, not today's. web_search for the current level and state both, with dates.` : "")).join("\n"));
   }
 
   let block =
-    "VERIFIED MARKET DATA — fetched server-side from FRED. These are the authoritative current levels.\n" +
-    "Use these exact figures. Do NOT web_search for them and do NOT substitute values you remember.\n\n" +
+    `VERIFIED MARKET DATA — fetched server-side (FRED, plus live Markets prices where newer), today is ${new Date().toISOString().slice(0, 10)}.\n` +
+    "Each figure carries its own source and as-of time. Use these exact figures for anything not marked STALE; do NOT web_search for those and do NOT substitute values you remember.\n" +
+    "A figure marked STALE is old: never present it as the current level.\n\n" +
     lines.join("\n");
 
   if (ctx.policyPath) {
     block +=
       `\n\nPOLICY PATH (DERIVED PROXY — NOT market-implied probability):\n` +
       `  Direction: ${ctx.policyPath.direction} (${ctx.policyPath.gapBp >= 0 ? "+" : ""}${ctx.policyPath.gapBp}bp)\n` +
+      (ctx.policyPath.stale ? `  ${ctx.policyPath.staleNote} Do not present this direction as current.\n` : "") +
       `  Method: ${ctx.policyPath.method}\n` +
       `  ${ctx.policyPath.reading}\n` +
       `  CAVEAT: ${ctx.policyPath.caveat}\n` +
@@ -214,9 +376,13 @@ function toMarketDataRows(ctx) {
       label:  f.label,
       value:  f.formatted,
       source: f.source,
-      detail: f.seriesId,
+      detail: f.sourceDetail || f.seriesId,
       asOf:   f.asOf,
+      url:    f.url || null,
+      stale:  Boolean(f.stale),
+      replaced: f.replaced || null,
     }));
 }
 
-module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, derivePolicyPath, SERIES };
+module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, derivePolicyPath, SERIES,
+  withMarkets, tradingDaysSince, isUsHoliday, STALE_AFTER_TRADING_DAYS, MARKETS_EQUIVALENT };
