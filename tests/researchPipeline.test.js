@@ -400,6 +400,31 @@ describe("orchestrator", () => {
     expect(report.institutionalQA.reason).toMatch(/unavailable|NOT RUN/i);
   });
 
+  describe("Codex review on #10: retries count against the call cap", () => {
+    const overloaded = () => Object.assign(new Error("Claude Sonnet overloaded"), { status: 529 });
+    const actualCalls = () => 1 + llmMock.callAgent.mock.calls.length;   // draft + agent calls
+
+    test("a retry is charged to callsUsed", async () => {
+      mockAgents({ red: overloaded() });
+      const report = await orch.runPipeline({ type: "macro" });
+      expect(llmMock.callAgent.mock.calls.filter(c => c[0] === "redteam")).toHaveLength(2);
+      expect(report.meta.callsUsed).toBe(actualCalls());
+      expect(report.meta.callsUsed).toBeLessThanOrEqual(8);
+    });
+
+    test("no retry when it would take the chair's slot; the reason says so", async () => {
+      process.env.RESEARCH_MAX_AGENT_CALLS = "6";   // draft, extract, 3 reviewers, chair
+      mockAgents({ red: overloaded() });
+      const report = await orch.runPipeline({ type: "macro" });
+      const roles = llmMock.callAgent.mock.calls.map(c => c[0]);
+      expect(roles.filter(r => r === "redteam")).toHaveLength(1);
+      expect(roles).toContain("chair");
+      expect(report.meta.callsUsed).toBe(6);
+      expect(actualCalls()).toBe(6);
+      expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Red team: .*not retried: the call cap was reached/)]);
+    });
+  });
+
   test("budget exhaustion mid-run degrades gracefully", async () => {
     llmMock.callAgent.mockImplementation(async (role) => {
       if (role === "extract") return JSON.stringify(EXTRACTION);

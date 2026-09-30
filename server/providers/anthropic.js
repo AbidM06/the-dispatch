@@ -1015,7 +1015,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "fx", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000, MODEL_SONNET);   // D-19: every report is drafted by Sonnet
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 4000);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.pairViews)) {
       throw new Error("fetchResearchReport[fx]: could not parse JSON response");
@@ -1066,7 +1066,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 MS language: "We believe". Never fabricate client conversations, proprietary surveys, or channel checks. Return pure JSON only.`;
 
     if (specOnly) return { reportType: "rates", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callClaudeSourced(system, prompt, 4000, MODEL_SONNET);   // D-19: every report is drafted by Sonnet
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 4000);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.thePuzzle) {
       throw new Error("fetchResearchReport[rates]: could not parse JSON response");

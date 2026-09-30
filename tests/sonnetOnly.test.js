@@ -58,9 +58,11 @@ describe("no silent Haiku stand-in for Sonnet", () => {
     expect(calls).toEqual(["claude-haiku-4-5"]);
   });
 
-  test("FX and Rates drafts are written by Sonnet", () => {
+  test("FX and Rates drafts use the same Sonnet → (OpenAI if keyed) path as every other report", () => {
     const src = require("fs").readFileSync(require("path").join(__dirname, "../server/providers/anthropic.js"), "utf8");
-    expect(src.match(/callClaudeSourced\(system, prompt, 4000, MODEL_SONNET\)/g)).toHaveLength(2);
+    // Codex review on #10: they used to call Sonnet directly, skipping the keyed OpenAI tier.
+    expect(src.match(/callWithFallbackSourced\(system, prompt, 4000\)/g)).toHaveLength(2);
+    expect(src).not.toMatch(/await callClaudeSourced\(system, prompt/);
     expect(src).not.toMatch(/Tier 3: Claude Haiku/);
   });
 });
@@ -128,6 +130,14 @@ describe("reviewers retry once on a temporary failure (owner, D-19)", () => {
     const r = await safeReview("red-team", async () => { n++; throw err(529, "Claude Sonnet … overloaded"); });
     expect(n).toBe(2);
     expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/^failed twice \(retried once\) — Claude Sonnet … overloaded/) });
+  });
+
+  test("no retry when the call cap has no room (the caller's budget says no)", async () => {
+    const { safeReview } = load();
+    let n = 0;
+    const r = await safeReview("red-team", async () => { n++; throw err(529, "overloaded"); }, () => false);
+    expect(n).toBe(1);
+    expect(r).toMatchObject({ ok: false, error: "overloaded (not retried: the call cap was reached)" });
   });
 
   test("budget, billing and bad-request errors are not retried", async () => {

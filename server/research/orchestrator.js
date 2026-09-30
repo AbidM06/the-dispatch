@@ -102,19 +102,23 @@ function isTransient(err) {
   return s === 429 || s === 529 || (s >= 500 && s < 600) || /timed out|timeout|ECONNRESET|socket hang up/i.test(err?.message || "");
 }
 
-async function safeReview(name, fn) {
+// `chargeRetry` charges the retry to the pipeline's call cap and returns false
+// when there is no room — a retry is a real API call and must be counted.
+async function safeReview(name, fn, chargeRetry = () => true) {
+  let capNote = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const out = await fn();
       return { ok: true, out, retried: attempt > 1 };
     } catch (err) {
-      if (attempt === 1 && isTransient(err)) {
+      if (attempt === 1 && isTransient(err) && !chargeRetry()) capNote = " (not retried: the call cap was reached)";
+      else if (attempt === 1 && isTransient(err)) {
         console.warn(`[research-orchestrator] ${name} failed (${err.message}) — retrying once in ${Math.round(REVIEW_RETRY_MS() / 1000)}s`);
         await new Promise(r => setTimeout(r, REVIEW_RETRY_MS()));
         continue;
       }
       console.warn(`[research-orchestrator] ${name} failed: ${err.message}`);
-      return { ok: false, error: (attempt > 1 ? "failed twice (retried once) — " : "") + err.message,
+      return { ok: false, error: (attempt > 1 ? "failed twice (retried once) — " : "") + err.message + capNote,
                budget: err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "API_CREDITS_EXHAUSTED" };
     }
   }
@@ -151,6 +155,12 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   const verifiedBlock = macroCtx ? macroContext.toPromptBlock(macroCtx) : "";
   const callCap = maxCalls();
   let callsUsed = 0; // authoritative call accounting for the cap (usage tracks tokens)
+  // A retry costs a call. `reserve` keeps room for calls still planned (the chair).
+  const retryBudget = (reserve = 0) => () => {
+    if (callsUsed + 1 + reserve > callCap) return false;
+    callsUsed += 1;
+    return true;
+  };
   const t0 = Date.now();
 
   // ── 1. Lead draft ───────────────────────────────────────────────────────────
@@ -167,7 +177,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   let claims = [];
   let sources = [];
   callsUsed += 1;
-  const extractRes = await safeReview("extraction", () => leadAnalyst.extract({ research, usage }));
+  const extractRes = await safeReview("extraction", () => leadAnalyst.extract({ research, usage }), retryBudget(1));
   let fc = { settledIds: [], sources: [], results: [] };
   if (extractRes.ok) {
     extraction = extractRes.out;
@@ -208,13 +218,13 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
     callsUsed += reviewerCost;
     [auditRes, redRes, pmRes] = await Promise.all([
       needAudit
-        ? safeReview("data-auditor", () => dataAuditor.audit({ claims: auditClaims, researchSummary: researchSummary(research), usage, verifiedBlock }))
+        ? safeReview("data-auditor", () => dataAuditor.audit({ claims: auditClaims, researchSummary: researchSummary(research), usage, verifiedBlock }), retryBudget(1))
         : Promise.resolve(!extraction
             ? { ok: false, error: "claim extraction unavailable — no ledger to audit" }
             // Not a failure: nothing was left for the auditor to check.
             : { ok: false, skipped: true, error: "every extracted claim was settled against FRED in code — no search needed" }),
-      safeReview("red-team",     () => redTeam.review({ research, usage, verifiedBlock })),
-      safeReview("portfolio-pm", () => portfolioPM.translate({ research, usage, verifiedBlock })),
+      safeReview("red-team",     () => redTeam.review({ research, usage, verifiedBlock }), retryBudget(1)),
+      safeReview("portfolio-pm", () => portfolioPM.translate({ research, usage, verifiedBlock }), retryBudget(1)),
     ]);
   } else {
     const reason = `call cap ${callCap} would be exceeded`;
@@ -262,7 +272,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       portfolioOutput: pmRes.ok ? pmRes.out : null,
       factCheck: fc.results,
       type, usage, verifiedBlock,
-    }));
+    }), retryBudget(0));
     if (chairRes.ok) chairOut = chairRes.out;
   }
 
@@ -292,7 +302,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
         failures: verdict.hardFailures.length ? verdict.hardFailures : [{ rule: "SCORE_BELOW_THRESHOLD", detail: chairOut.revisionInstructions || chairOut.statusRationale }],
         chairNotes: chairOut.revisionInstructions || chairOut.statusRationale,
         usage, verifiedBlock,
-      }));
+      }), retryBudget(1));
       if (!revRes.ok) break;
       research = { ...revRes.out, reportType: research.reportType || type, generatedAt: research.generatedAt };
 
@@ -317,7 +327,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
         portfolioOutput: pmRes.ok ? pmRes.out : null,
         factCheck: fc.results,
         type, usage, verifiedBlock,
-      }));
+      }), retryBudget(0));
       if (!rechairRes.ok) break;
       chairOut = rechairRes.out;
       verdict = gate.adjudicate({ research, claims, sources, chairOutput: chairOut });
