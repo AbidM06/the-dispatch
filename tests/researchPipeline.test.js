@@ -329,7 +329,8 @@ describe("orchestrator", () => {
     const roles = llmMock.callAgent.mock.calls.map(c => c[0]);
     expect(roles).not.toContain("auditor");
     expect(roles).toEqual(expect.arrayContaining(["redteam", "portfolio", "chair"]));
-    expect(report.institutionalQA.status).toBe("APPROVED");            // QA still ran
+    expect(report.institutionalQA.status).toBe("APPROVED_WITH_CAVEATS"); // QA still ran, but claims went unaudited
+    expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Data auditor: claim extraction unavailable/)]);
     expect(report.institutionalQA.agentVerdicts.dataAuditor.verdict).toBe("NOT_RUN");
     expect(report.institutionalQA.agentVerdicts.dataAuditor.reason).toMatch(/extraction unavailable/i);
     expect(report.claims).toHaveLength(0);
@@ -340,8 +341,25 @@ describe("orchestrator", () => {
     const report = await orch.runPipeline({ type: "macro" });
     expect(report.institutionalQA.agentVerdicts.redTeam.verdict).toBe("NOT_RUN");
     expect(report.institutionalQA.agentVerdicts.dataAuditor.verdict).toBe("SOUND");
-    // QA still ran (chair + other reviewers ok)
+    // QA still ran (chair + other reviewers ok), but a partly unreviewed report
+    // never reads as a clean APPROVED — it names who did not run and why.
+    expect(report.institutionalQA.status).toBe("APPROVED_WITH_CAVEATS");
+    expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Red team: .*redteam exploded/)]);
+  });
+
+  test("all reviewers ran → clean APPROVED, nothing listed as unreviewed", async () => {
+    mockAgents();
+    const report = await orch.runPipeline({ type: "macro" });
     expect(report.institutionalQA.status).toBe("APPROVED");
+    expect(report.institutionalQA.unreviewed).toEqual([]);
+    expect(report.meta.models.lead).toMatch(/^claude-sonnet/);
+  });
+
+  test("a draft from the OpenAI tier (grounded: false) is attributed to OpenAI, not Sonnet", async () => {
+    anthropicMock.fetchResearchReport.mockResolvedValue({ ...DRAFT, grounded: false });
+    mockAgents();
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.meta.models.lead).toMatch(/^openai:/);
   });
 
   test("revision loop triggers on hard fail then re-scores", async () => {

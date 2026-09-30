@@ -209,9 +209,10 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
     [auditRes, redRes, pmRes] = await Promise.all([
       needAudit
         ? safeReview("data-auditor", () => dataAuditor.audit({ claims: auditClaims, researchSummary: researchSummary(research), usage, verifiedBlock }))
-        : Promise.resolve({ ok: false, error: !extraction
-            ? "claim extraction unavailable — no ledger to audit"
-            : "every extracted claim was settled against FRED in code — no search needed" }),
+        : Promise.resolve(!extraction
+            ? { ok: false, error: "claim extraction unavailable — no ledger to audit" }
+            // Not a failure: nothing was left for the auditor to check.
+            : { ok: false, skipped: true, error: "every extracted claim was settled against FRED in code — no search needed" }),
       safeReview("red-team",     () => redTeam.review({ research, usage, verifiedBlock })),
       safeReview("portfolio-pm", () => portfolioPM.translate({ research, usage, verifiedBlock })),
     ]);
@@ -328,9 +329,15 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   setStage(type, "publish");
   const reviewersRan = auditRes.ok || redRes.ok || pmRes.ok;
   const qaRan = Boolean(chairOut && reviewersRan);
+  // D-19: a reviewer that failed (even after its retry) leaves the report
+  // partly unreviewed. It can never read as a clean APPROVED — the strip names
+  // who did not run and why.
+  const failedReviewers = [["Data auditor", auditRes], ["Red team", redRes], ["Cross-asset PM", pmRes]]
+    .filter(([, r]) => r && r.ok === false && !r.skipped).map(([n, r]) => `${n}: ${r.error}`);
 
   const institutionalQA = qaRan ? {
-    status:        verdict.status,
+    status:        failedReviewers.length && verdict.status === "APPROVED" ? "APPROVED_WITH_CAVEATS" : verdict.status,
+    unreviewed:    failedReviewers,
     score:         verdict.score,
     minScore:      verdict.minScore,
     hardFailures:  verdict.hardFailures,
@@ -353,9 +360,7 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
     claimSummary:           ledger.summarizeClaims(claims),
   } : notRunQA(
     !extraction ? "Claim extraction unavailable — five-agent QA could not run"
-    : !reviewersRan ? "Reviewers could not run — QA NOT RUN. " +
-        [["Data auditor", auditRes], ["Red team", redRes], ["Cross-asset PM", pmRes]]
-          .filter(([, r]) => r && r.ok === false).map(([n, r]) => `${n}: ${r.error}`).join(" · ")
+    : !reviewersRan ? "Reviewers could not run — QA NOT RUN. " + failedReviewers.join(" · ")
     : "IC Chair unavailable — QA NOT RUN"
   );
 
@@ -386,7 +391,9 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       callsUsed,
       usage,
       models: {
-        lead: require("../providers/models").sonnetModel(), extract: modelForRole("extract"),
+        // The OpenAI tier (runs only if its key is set) is the only drafter that
+        // returns grounded: false — record it, never attribute its draft to Sonnet.
+        lead: research.grounded === false ? `openai:${process.env.OPENAI_FALLBACK_MODEL || "gpt-4o"}` : require("../providers/models").sonnetModel(), extract: modelForRole("extract"),
         auditor: modelForRole("auditor"), redteam: modelForRole("redteam"),
         portfolio: modelForRole("portfolio"), chair: modelForRole("chair"),
       },

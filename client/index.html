@@ -4937,6 +4937,7 @@ function App() {
       React.createElement('span', { className:'qa-strip-stat' }, 'Sources ', React.createElement('b', null, r.sourcesCount || 0)),
       redteamChallenges > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--red)'} }, redteamChallenges + ' material challenge' + (redteamChallenges > 1 ? 's' : '')),
       qa.revisionRounds > 0 && React.createElement('span', { className:'qa-strip-stat' }, 'Revised ×' + qa.revisionRounds),
+      Array.isArray(qa.unreviewed) && qa.unreviewed.length > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--gold)'} }, 'Partly unreviewed — ' + qa.unreviewed.join(' · ')),
       React.createElement('span', { style:{flex:1} }),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleQaPanel }, qaPanelOpen ? 'HIDE QA' : 'VIEW QA'),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleSrcPanel }, srcPanelOpen ? 'HIDE SOURCES' : 'VIEW SOURCES')

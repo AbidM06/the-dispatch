@@ -479,7 +479,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
   later as separate `type: "outcome"` records, never edited in.
 - Draft failure → `runPipeline` throws → route returns 503 `available: false`. There is no
   seeded report. Reviewer failure → retried ONCE after ~60 s if temporary (429/529/5xx/timeout; never budget/billing/400);
-  if it fails again → verdict `NOT_RUN`, the QA line names each failed reviewer and the plain reason; never fake a passed review.
+  if it fails again → verdict `NOT_RUN`, the QA line names each failed reviewer and the plain reason; never fake a passed review. If some reviewers ran and one did not, the report is never a clean APPROVED: it shows APPROVED WITH CAVEATS and "Partly unreviewed — <who>: <why>" (`institutionalQA.unreviewed`).
 - `RESEARCH_MULTI_AGENT=false` → one draft call per report (`singleCallReport`), still priced,
   versioned and stored; QA honestly NOT_RUN.
 - Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).

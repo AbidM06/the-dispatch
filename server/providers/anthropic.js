@@ -123,7 +123,9 @@ async function callClaudeSourced(systemPrompt, userPrompt, maxTokens = 1500, mod
  * "no lower-quality model was substituted" instead of a generic failure.
  */
 function sonnetFailure(err, model, { step = null } = {}) {
-  if (!err || err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "SONNET_UNAVAILABLE") return err;
+  // Budget and billing-window errors keep their own code: routes recognise them
+  // (e.g. interrogation answers API_CREDITS_EXHAUSTED with a 503, not a 500).
+  if (!err || ["BUDGET_DAILY", "BUDGET_MONTHLY", "API_CREDITS_EXHAUSTED", "SONNET_UNAVAILABLE"].includes(err.code)) return err;
   const s = err.status;
   const what =
     s === 529 ? "was overloaded (Anthropic error 529 — too much demand right now)" :
@@ -167,7 +169,7 @@ async function callWithFallbackSourced(systemPrompt, userPrompt, maxTokens) {
     return await _callClaudeOnce(systemPrompt, userPrompt, maxTokens, MODEL_SONNET);
   } catch (err) {
     // Over budget means over budget — don't spend on another paid provider.
-    if (err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY") throw err;
+    if (err.code === "BUDGET_DAILY" || err.code === "BUDGET_MONTHLY" || err.code === "API_CREDITS_EXHAUSTED") throw err;
     sonnetErr = sonnetFailure(err, MODEL_SONNET);
     if (!process.env.OPENAI_API_KEY) throw sonnetErr;
     console.warn(`[anthropic] Sonnet failed (${err.message}) — trying OpenAI ${process.env.OPENAI_FALLBACK_MODEL || "gpt-4o"}`);

@@ -65,6 +65,29 @@ describe("no silent Haiku stand-in for Sonnet", () => {
   });
 });
 
+describe("billing-window errors keep their own code", () => {
+  test("API_CREDITS_EXHAUSTED passes through sonnetFailure unchanged", () => {
+    const { anthropic } = setup({});
+    const e = Object.assign(new Error("credit balance too low"), { status: 400, code: "API_CREDITS_EXHAUSTED" });
+    expect(anthropic.sonnetFailure(e, "claude-sonnet-5-5")).toBe(e);
+  });
+
+  test("a research draft hitting a credit error is not retried on OpenAI and keeps its code", async () => {
+    jest.resetModules();
+    process.env.OPENAI_API_KEY = "sk-test";
+    jest.doMock("../server/providers/claudeTransport", () => ({
+      send: jest.fn(async () => { throw Object.assign(new Error("credit"), { status: 400, code: "API_CREDITS_EXHAUSTED" }); }),
+      currentContext: () => ({}), runWithContext: (_c, fn) => fn(),
+    }));
+    jest.doMock("../server/providers/budget", () => ({ checkAndIncrement: jest.fn(), getStatus: () => ({}) }));
+    const openai = { callOpenAI: jest.fn() };
+    jest.doMock("../server/providers/openai", () => openai);
+    const anthropic = require("../server/providers/anthropic");
+    await expect(anthropic.callWithFallbackSourced("s", "u", 100)).rejects.toMatchObject({ code: "API_CREDITS_EXHAUSTED" });
+    expect(openai.callOpenAI).not.toHaveBeenCalled();
+  });
+});
+
 describe("reviewer steps (llm.callAgent) fail with a plain reason too", () => {
   test("a 529 on the red team names the step and never falls back", async () => {
     jest.resetModules();
