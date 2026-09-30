@@ -334,7 +334,12 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
         factCheck: fc.results,
         type, usage, verifiedBlock,
       }), retryBudget(0));
-      if (!rechairRes.ok) break;
+      if (!rechairRes.ok) {
+        // The revised text was never scored. Don't publish the old verdict on it.
+        chairOut = null; verdict = null;
+        chairError = `re-score after revision round ${rounds} failed — ${rechairRes.error}`;
+        break;
+      }
       chairOut = rechairRes.out;
       verdict = gate.adjudicate({ research, claims, sources, chairOutput: chairOut });
       console.log(`[research-orchestrator] revision round ${rounds}: IC score=${verdict.score} status=${verdict.status}`);

@@ -372,6 +372,18 @@ describe("orchestrator", () => {
     expect(report.meta.models.lead).toMatch(/^openai:/);
   });
 
+  test("a failed re-score after a revision marks the revised report NOT_RUN, never the old verdict", async () => {
+    let chairCalls = 0;
+    mockAgents({
+      audit: { ...AUDIT_OK, verdicts: [{ claimId: "CLM-001", verificationStatus: "UNSUPPORTED", notes: "cannot verify" }] },
+      chair: () => { if (++chairCalls > 1) throw Object.assign(new Error("Claude Sonnet overloaded"), { status: 529 }); return chairOutput(); },
+    });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.research.title).toBe("Revised Report");
+    expect(report.institutionalQA.status).toBe("NOT_RUN");
+    expect(report.institutionalQA.reason).toMatch(/re-score after revision round 1 failed — .*Claude Sonnet overloaded/);
+  });
+
   test("a failed IC chair's reason is shown in the NOT_RUN reason", async () => {
     mockAgents({ chair: Object.assign(new Error("Claude Sonnet overloaded (Anthropic error 529)"), { status: 529 }) });
     const report = await orch.runPipeline({ type: "macro" });
