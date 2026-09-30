@@ -26,6 +26,18 @@ future agent. Keep it current; do not fork a model-specific copy.
   again after pushing fixes for review findings, post a PR comment `@codex review` (Claude's
   PRs) so Codex reviews the current head. Codex, on its PRs, asks the owner to relay a
   review request to Claude, or tags it in the PR description.
+- **Review etiquette (D-21) — keep reviews short and high-impact.**
+  - **Raise only high-impact findings:** a wrong number, date or label shown to the owner;
+    hidden or unexpected AI spend; a security hole; a crash in normal use; or breaking a
+    decision in `docs/DECISIONS.md`. Anything else (rare edge cases, style, "consider
+    also…") goes in one short optional list at the end of the review, or is left out.
+  - **If the code works, approve it.** Review what the PR changes, not the whole codebase.
+  - **Two rounds.** After two review rounds with CI green, the reviewer approves unless it
+    finds something high-impact.
+  - **Either model may object.** The author does not have to accept a finding. If it
+    disagrees, it replies on the PR with its counter-argument and marks the thread
+    **"owner to decide"**; Claude also flags it in its chat summary to the owner. The owner
+    decides; neither model pushes a change the other has objected to until then.
 - **Claim work.** Put the task, your agent name and branch under "In progress" in
   `docs/HANDOFF.md` so two models never edit the same thing at once.
 - **Before you stop — including when you are near a usage limit:** tests green, commit and
