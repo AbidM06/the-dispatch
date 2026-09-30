@@ -154,3 +154,44 @@ describe("Codex review on #11", () => {
     expect(m.withMarkets(base, snap([]), NOW).policyPath.stale).toBeUndefined();
   });
 });
+
+describe("Codex review on #11 (round 2)", () => {
+  test("a same-day timestamped quote replaces a date-only FRED value (no invented end-of-day time)", () => {
+    const base = fredCtx();
+    base.facts.dgs10.asOf = "2026-09-29";
+    const ctx = mc().withMarkets(base, snap([{ id: "US10Y", ok: true, quote: quote(5.12, "2026-09-29T09:30:00Z") }]), NOW);
+    expect(ctx.facts.dgs10).toMatchObject({ value: 5.12, asOf: "2026-09-29T09:30:00Z", replaced: { seriesId: "DGS10", asOf: "2026-09-29" } });
+    // A quote from the day before is still older.
+    const older = mc().withMarkets(base, snap([{ id: "US10Y", ok: true, quote: quote(5.12, "2026-09-28T20:00:00Z") }]), NOW);
+    expect(older.facts.dgs10.source).toBe("FRED");
+  });
+
+  test("US market holidays are not trading days (NYSE for oil/VIX, federal for rates/FX)", () => {
+    const m = mc();
+    // Good Friday 2026-04-03: NYSE closed, the Fed open.
+    expect(m.isUsHoliday("2026-04-03", "nyse")).toBe(true);
+    expect(m.isUsHoliday("2026-04-03", "federal")).toBe(false);
+    // Columbus Day 2026-10-12: the Fed closed, NYSE open.
+    expect(m.isUsHoliday("2026-10-12", "federal")).toBe(true);
+    expect(m.isUsHoliday("2026-10-12", "nyse")).toBe(false);
+    expect(m.isUsHoliday("2026-11-26", "nyse")).toBe(true);                 // Thanksgiving
+    expect(m.isUsHoliday("2026-07-03", "federal")).toBe(true);              // 4 July on a Saturday
+    expect(m.isUsHoliday("2027-12-31", "federal")).toBe(true);              // New Year 2028 is a Saturday
+    expect(m.isUsHoliday("2027-12-31", "nyse")).toBe(false);                // …but NYSE stays open
+    // Thursday 2 Apr → Tuesday 7 Apr 2026: Good Friday doesn't count for oil.
+    const tue = Date.parse("2026-04-07T10:00:00Z");
+    expect(m.tradingDaysSince("2026-04-02", tue, "nyse")).toBe(2);
+    expect(m.tradingDaysSince("2026-04-02", tue, "federal")).toBe(3);
+  });
+
+  test("a figure is not flagged stale across a holiday", () => {
+    const m = mc();
+    const base = fredCtx();
+    base.facts.brent.asOf = "2026-04-02";               // Thursday before Good Friday
+    base.facts.dgs10.asOf = "2026-10-09";               // Friday before Columbus Day
+    const brent = m.withMarkets(base, snap([]), Date.parse("2026-04-07T10:00:00Z"));
+    expect(brent.facts.brent.stale).toBe(false);
+    const rates = m.withMarkets(base, snap([]), Date.parse("2026-10-14T10:00:00Z"));   // Tue 13, Wed 14
+    expect(rates.facts.dgs10.stale).toBe(false);
+  });
+});
