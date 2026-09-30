@@ -331,29 +331,29 @@ describe("factCheck — dates", () => {
 describe("SONNET_MODEL — one setting for every Sonnet job", () => {
   afterEach(() => { delete process.env.SONNET_MODEL; delete process.env.IDEAS_MODEL; });
 
-  test("defaults to Sonnet 5 until the owner switches", () => {
+  test("defaults to Sonnet 5.5 (owner switched, D-17)", () => {
     jest.resetModules();
     const llm = require("../server/research/llm");
     const anthropic = require("../server/providers/anthropic");
-    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
+    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
     for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat", "ideas"]) {
-      expect(llm.modelForRole(role)).toBe("claude-sonnet-5");
+      expect(llm.modelForRole(role)).toBe("claude-sonnet-5-5");
     }
     expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
   });
 
   test("SONNET_MODEL moves every Sonnet job; Haiku jobs and per-role overrides are unchanged", () => {
-    process.env.SONNET_MODEL = "claude-sonnet-5-5";
-    process.env.IDEAS_MODEL = "claude-sonnet-5";
+    process.env.SONNET_MODEL = "claude-sonnet-5";   // switching back still works
+    process.env.IDEAS_MODEL = "claude-sonnet-5-5";
     jest.resetModules();
     const llm = require("../server/research/llm");
     const anthropic = require("../server/providers/anthropic");
-    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
+    expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
     expect(anthropic.MODEL).toBe("claude-haiku-4-5");
     for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat"]) {
-      expect(llm.modelForRole(role)).toBe("claude-sonnet-5-5");
+      expect(llm.modelForRole(role)).toBe("claude-sonnet-5");
     }
-    expect(llm.modelForRole("ideas")).toBe("claude-sonnet-5");        // per-role override wins
+    expect(llm.modelForRole("ideas")).toBe("claude-sonnet-5-5");        // per-role override wins
     expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
   });
 
@@ -375,4 +375,14 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     expect(out.durationMs).toBeGreaterThanOrEqual(0);
     expect(out).not.toHaveProperty("startedAt");
   });
+});
+
+test("the no-receipts estimate names the model the run will use (SONNET_MODEL)", () => {
+  process.env.SONNET_MODEL = "claude-sonnet-5-5";
+  try {
+    jest.resetModules();
+    expect(require("../server/providers/aiCost").estimateReport("macro", []).basisDetail).toMatch(/claude-sonnet-5-5/);
+  } finally { delete process.env.SONNET_MODEL; }
+  jest.resetModules();
+  expect(require("../server/providers/aiCost").estimateReport("macro", []).basisDetail).toMatch(/claude-sonnet-5-5 with/);
 });

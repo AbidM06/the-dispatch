@@ -329,7 +329,8 @@ describe("orchestrator", () => {
     const roles = llmMock.callAgent.mock.calls.map(c => c[0]);
     expect(roles).not.toContain("auditor");
     expect(roles).toEqual(expect.arrayContaining(["redteam", "portfolio", "chair"]));
-    expect(report.institutionalQA.status).toBe("APPROVED");            // QA still ran
+    expect(report.institutionalQA.status).toBe("APPROVED_WITH_CAVEATS"); // QA still ran, but claims went unaudited
+    expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Data auditor: claim extraction unavailable/)]);
     expect(report.institutionalQA.agentVerdicts.dataAuditor.verdict).toBe("NOT_RUN");
     expect(report.institutionalQA.agentVerdicts.dataAuditor.reason).toMatch(/extraction unavailable/i);
     expect(report.claims).toHaveLength(0);
@@ -340,8 +341,54 @@ describe("orchestrator", () => {
     const report = await orch.runPipeline({ type: "macro" });
     expect(report.institutionalQA.agentVerdicts.redTeam.verdict).toBe("NOT_RUN");
     expect(report.institutionalQA.agentVerdicts.dataAuditor.verdict).toBe("SOUND");
-    // QA still ran (chair + other reviewers ok)
+    // QA still ran (chair + other reviewers ok), but a partly unreviewed report
+    // never reads as a clean APPROVED — it names who did not run and why.
+    expect(report.institutionalQA.status).toBe("APPROVED_WITH_CAVEATS");
+    expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Red team: .*redteam exploded/)]);
+  });
+
+  test("all reviewers ran → clean APPROVED, nothing listed as unreviewed", async () => {
+    mockAgents();
+    const report = await orch.runPipeline({ type: "macro" });
     expect(report.institutionalQA.status).toBe("APPROVED");
+    expect(report.institutionalQA.unreviewed).toEqual([]);
+    expect(report.meta.models.lead).toMatch(/^claude-sonnet/);
+  });
+
+  test("a draft from the OpenAI tier (grounded: false) is attributed to OpenAI, not Sonnet", async () => {
+    anthropicMock.fetchResearchReport.mockResolvedValue({ ...DRAFT, grounded: false });
+    mockAgents();
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.meta.models.lead).toMatch(/^openai:/);
+  });
+
+  test("an OpenAI draft stays ungrounded and attributed to OpenAI after a Sonnet revision", async () => {
+    anthropicMock.fetchResearchReport.mockResolvedValue({ ...DRAFT, grounded: false });
+    mockAgents({ audit: { ...AUDIT_OK, verdicts: [{ claimId: "CLM-001", verificationStatus: "UNSUPPORTED", notes: "cannot verify" }] } });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.institutionalQA.revisionRounds).toBe(1);
+    expect(report.research.title).toBe("Revised Report");
+    expect(report.research.grounded).toBe(false);
+    expect(report.meta.models.lead).toMatch(/^openai:/);
+  });
+
+  test("a failed re-score after a revision marks the revised report NOT_RUN, never the old verdict", async () => {
+    let chairCalls = 0;
+    mockAgents({
+      audit: { ...AUDIT_OK, verdicts: [{ claimId: "CLM-001", verificationStatus: "UNSUPPORTED", notes: "cannot verify" }] },
+      chair: () => { if (++chairCalls > 1) throw Object.assign(new Error("Claude Sonnet overloaded"), { status: 529 }); return chairOutput(); },
+    });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.research.title).toBe("Revised Report");
+    expect(report.institutionalQA.status).toBe("NOT_RUN");
+    expect(report.institutionalQA.reason).toMatch(/re-score after revision round 1 failed — .*Claude Sonnet overloaded/);
+  });
+
+  test("a failed IC chair's reason is shown in the NOT_RUN reason", async () => {
+    mockAgents({ chair: Object.assign(new Error("Claude Sonnet overloaded (Anthropic error 529)"), { status: 529 }) });
+    const report = await orch.runPipeline({ type: "macro" });
+    expect(report.institutionalQA.status).toBe("NOT_RUN");
+    expect(report.institutionalQA.reason).toMatch(/^IC Chair could not run — QA NOT RUN\. failed twice \(retried once\) — Claude Sonnet overloaded/);
   });
 
   test("revision loop triggers on hard fail then re-scores", async () => {
@@ -380,6 +427,31 @@ describe("orchestrator", () => {
     expect(roles).toEqual(["extract"]); // no reviewers, no chair (cap hit)
     expect(report.institutionalQA.status).toBe("NOT_RUN");
     expect(report.institutionalQA.reason).toMatch(/unavailable|NOT RUN/i);
+  });
+
+  describe("Codex review on #10: retries count against the call cap", () => {
+    const overloaded = () => Object.assign(new Error("Claude Sonnet overloaded"), { status: 529 });
+    const actualCalls = () => 1 + llmMock.callAgent.mock.calls.length;   // draft + agent calls
+
+    test("a retry is charged to callsUsed", async () => {
+      mockAgents({ red: overloaded() });
+      const report = await orch.runPipeline({ type: "macro" });
+      expect(llmMock.callAgent.mock.calls.filter(c => c[0] === "redteam")).toHaveLength(2);
+      expect(report.meta.callsUsed).toBe(actualCalls());
+      expect(report.meta.callsUsed).toBeLessThanOrEqual(8);
+    });
+
+    test("no retry when it would take the chair's slot; the reason says so", async () => {
+      process.env.RESEARCH_MAX_AGENT_CALLS = "6";   // draft, extract, 3 reviewers, chair
+      mockAgents({ red: overloaded() });
+      const report = await orch.runPipeline({ type: "macro" });
+      const roles = llmMock.callAgent.mock.calls.map(c => c[0]);
+      expect(roles.filter(r => r === "redteam")).toHaveLength(1);
+      expect(roles).toContain("chair");
+      expect(report.meta.callsUsed).toBe(6);
+      expect(actualCalls()).toBe(6);
+      expect(report.institutionalQA.unreviewed).toEqual([expect.stringMatching(/^Red team: .*not retried: the call cap was reached/)]);
+    });
   });
 
   test("budget exhaustion mid-run degrades gracefully", async () => {

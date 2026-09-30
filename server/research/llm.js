@@ -19,7 +19,7 @@
  * it through the Batch API when the pipeline runs in batch mode.
  *
  * Note: the Lead Analyst *draft* call reuses anthropic.fetchResearchReport
- * (existing per-type prompts + Sonnet→OpenAI→Haiku fallback chain), so the
+ * (existing per-type prompts; Sonnet, or unavailable — never Haiku, D-19), so the
  * lead role env var governs extraction and revision calls, not the draft.
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -133,7 +133,14 @@ async function callAgent(role, system, user, opts = {}) {
     if (search === "force") body.tool_choice = { type: "any" };
   }
 
-  const json = await transport.send(body, { role, label: `Anthropic[${role}]` });
+  let json;
+  try {
+    json = await transport.send(body, { role, label: `Anthropic[${role}]` });
+  } catch (err) {
+    // D-19: a failed Sonnet step says exactly why, in plain English.
+    if (model !== MODEL_HAIKU) throw anthropic.sonnetFailure(err, model, { step: ROLE_LABEL[role] || role });
+    throw err;
+  }
   recordUsage(usage, role, json);
 
   return (json.content || [])
@@ -141,5 +148,8 @@ async function callAgent(role, system, user, opts = {}) {
     .map(b => b.text)
     .join("\n");
 }
+
+const ROLE_LABEL = { lead: "lead analyst", auditor: "data auditor", redteam: "red team", portfolio: "cross-asset PM",
+  chair: "IC chair", chat: "interrogation", ideas: "trade idea", extract: "claim extraction" };
 
 module.exports = { callAgent, modelForRole, newUsageTracker, buildUserContent, MODEL_HAIKU, MODEL_SONNET };
