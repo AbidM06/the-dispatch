@@ -534,6 +534,9 @@ a cloud sandbox and could never reach `localhost:3001`. Auto-start at login:
    hardcode a Sonnet id: use `models.sonnetModel()`. The web_search
    tool type is model-dependent (`web_search_20260209` for Sonnet 5 / 5.5, `web_search_20250305` for
    Haiku 4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
+   **Forced tool use** (`tool_choice` `any`/`tool`) is also a 400 on Sonnet 5.5 — never set it
+   directly; use `models.searchRequest(model, system, tool)`, which forces only where allowed
+   (Haiku 4.5, Sonnet 5) and otherwise sends `auto` + a "search first" instruction.
 6. **Markets data is free-only** (budget £0). Yahoo is unofficial — keep fallbacks per instrument.
 7. **Freshness is measured, not assumed** — never label a value "live" without its print time.
 8. **Stale values are shown flagged**, never silently reused or replaced by seeds.

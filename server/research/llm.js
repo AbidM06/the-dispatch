@@ -128,9 +128,10 @@ async function callAgent(role, system, user, opts = {}) {
     system,
     messages: [{ role: "user", content: buildUserContent(user, sharedPrefix) }],
   };
-  if (search) {
+  if (search === "force") {
+    Object.assign(body, models.searchRequest(model, system, anthropic.webSearchTool(model)));
+  } else if (search) {
     body.tools = [anthropic.webSearchTool(model)];
-    if (search === "force") body.tool_choice = { type: "any" };
   }
 
   let json;

@@ -48,9 +48,7 @@ async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
   const body = {
     model,
     max_tokens: maxTokens,
-    system:     systemPrompt,
-    tools:      [webSearchTool(model)],
-    tool_choice: { type: "any" },
+    ...models.searchRequest(model, systemPrompt, webSearchTool(model)),
     messages:   [{ role: "user", content: userPrompt }],
   };
 
