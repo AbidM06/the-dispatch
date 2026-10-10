@@ -1,0 +1,25 @@
+# Runs the test suite on every push and pull request, whichever agent (or person)
+# pushed it. A red ✗ on a PR means: do not merge until it is fixed.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        env:
+          # Tests mock every network call; these keep any stray code path offline.
+          NODE_ENV: test
+          LOW_COST_MODE: "false"

@@ -1,0 +1,54 @@
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Runtime AI cache (regenerated on demand, must not be committed) ────────────
+server/.ai-cache.json
+
+# ── Runtime data (personal/financial — never commit) ──────────────────────────
+data/portfolio_snapshot.json
+data/execution_log.jsonl
+data/execution_state.json
+data/ideas_log.jsonl
+data/signals_log.jsonl
+data/trade_ideas.json
+data/bulletin_log.jsonl
+data/saved_models.json
+data/saved_ideas.json
+data/research_reports/
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+node_modules/
+
+# ── macOS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Claude Code local state ────────────────────────────────────────────────────
+.claude/
+.mcp.json
+
+# ── Local design previews (not source) ────────────────────────────────────────
+.aidesigner/
+design-preview.html
+
+# ── Reports (generated, not source) ───────────────────────────────────────────
+reports/
+.venv/
+
+# Markets panel snapshot (regenerated daily)
+data/markets_snapshot.json
+data/markets_snapshot.json.tmp
+data/idea_cards.json
+data/ai_spend.json
+data/ai_spend.json.tmp
+data/redteam_log.jsonl
+data/journal.jsonl
+data/journal_tracking.json
+data/journal_tracking.json.tmp
+
+# launchd auto-start logs
+logs/
+
+# Generated for chat-only AI models (npm run context-pack)
+context-pack.md
