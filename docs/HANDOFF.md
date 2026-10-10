@@ -44,6 +44,7 @@ Working and merged (PR #4, 2026-09-28):
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
+| Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom`; PR to follow the fresh-repo move (D-22) | Claude | `claude/umushroom-journal` | Built and tested locally on top of the clean base; not pushed until the owner has created the new empty public `the-dispatch` repo |
 
 ## 3. Next up (agreed with the owner, not started)
 

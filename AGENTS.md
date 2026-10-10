@@ -90,6 +90,7 @@ npm run test:coverage
 | `POLYMARKET_TAGS` / `POLYMARKET_COUNT` | Prediction markets shown (default economy,geopolitics / 4) |
 | `SONNET_MODEL` | The Sonnet every Sonnet job uses — research pipeline, chat, idea cards (default `claude-sonnet-5-5` since 2026-09-29, D-17; set `claude-sonnet-5` to switch back) |
 | `IDEAS_MODEL` | Model for idea cards (default: `SONNET_MODEL`) |
+| `UMUSHROOM_RAW_BASE` | Journal tab → UMUSHROOM view: `https://raw.githubusercontent.com/<owner>/dispatch-umushroom/main`. Display-only read of a public repo; no key, no AI, no cost. Unset = "not connected" (D-23) |
 | `PORT` | Default 3001 |
 | `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
 | `ANTHROPIC_DAILY_CAP` | **USD** cap per UTC day, measured from real usage (default $5; 0 = off) |
@@ -109,6 +110,7 @@ server/routes/
   markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id
   ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
   journal.js               GET /api/journal | GET /api/journal/:id | POST …/:id/{watch,pitch,manual-price} — append-only
+  umushroom.js             GET /api/umushroom | GET /api/umushroom/note/:date — read-only view of the public paper-portfolio repo (D-23)
   portfolio.js             GET /api/portfolio — T212 holdings + P&L computation
   events.js                GET /api/events  |  POST /api/events/refresh
   risk.js                  GET /api/risk    |  POST /api/risk/refresh
@@ -139,6 +141,7 @@ server/providers/
 server/markets/            instruments.js · sources.js · service.js — free Markets data + provenance
 server/ideas/              generator.js · store.js — on-demand idea cards (every one logged to the Journal)
 server/journal/            store.js · migrate.js — append-only trade Journal (stage 1)
+server/umushroom/          source.js — fetch + validate + label the public UMushroom repo files (fails closed; see D-23)
 server/research/           five-agent pipeline — see "Institutional Research" below
 server/jobs/
   marketsScheduler.js      Markets refresh, weekdays 07:45 + 14:45 UK, one catch-up after sleep
