@@ -97,12 +97,28 @@ function parseNotesIndex(text) {
   return a;
 }
 
-function parseJsonl(text) {
+// Every log entry is reduced to known fields of the expected type, so a file with
+// odd shapes (objects where text is expected, null entries) cannot crash the client.
+const str = (v) => (typeof v === "string" ? v : undefined);
+const strList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : undefined);
+function cleanEntry(o, fields, lists) {
+  const out = { id: o.id, date: o.date };
+  for (const k of fields) { const v = str(o[k]); if (v !== undefined) out[k] = v; }
+  for (const k of lists) { const v = strList(o[k]); if (v !== undefined) out[k] = v; }
+  return out;
+}
+const DECISION_FIELDS = ["type", "verdict", "title", "reasoning", "whatWouldChangeMyMind", "outcome"];
+const CHALLENGE_FIELDS = ["pr", "kind", "challenge", "evidence", "confidence", "reply", "outcome", "reason"];
+
+function parseJsonl(text, fields = DECISION_FIELDS, lists = ["alternativesRejected", "unverified", "positions"]) {
   const items = []; let bad = 0;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    try { const o = JSON.parse(line); if (o && typeof o === "object" && o.id && DATE_RE.test(o.date || "")) items.push(o); else bad++; }
-    catch { bad++; }
+    try {
+      const o = JSON.parse(line);
+      if (o && typeof o === "object" && typeof o.id === "string" && o.id && DATE_RE.test(o.date || "")) items.push(cleanEntry(o, fields, lists));
+      else bad++;
+    } catch { bad++; }
   }
   return { items, bad };
 }
@@ -110,7 +126,14 @@ function parseJsonl(text) {
 function parseReflections(text) {
   const a = JSON.parse(text);
   need(Array.isArray(a), "reflections is not a list");
-  return a;
+  return a.map((r) => {
+    need(r && typeof r === "object" && !Array.isArray(r) && typeof r.text === "string" && (r.week === undefined || num(r.week)),
+      "a reflection is missing its text or has a bad week");
+    const out = { week: r.week, text: r.text };
+    if (str(r.date)) out.date = r.date;
+    for (const k of ["returnPct", "benchmarkReturnPct", "alphaPct"]) if (num(r[k])) out[k] = r[k];
+    return out;
+  });
 }
 
 // ── view: arithmetic only, done here so it is tested and labelled ─────────────
@@ -200,7 +223,7 @@ async function load(now = new Date()) {
     get("status", "status.json", parseStatus),
     get("notes", "notes/index.json", parseNotesIndex),
     get("decisions", "journal/decisions.jsonl", parseJsonl),
-    get("challenges", "journal/challenges.jsonl", parseJsonl),
+    get("challenges", "journal/challenges.jsonl", (t) => parseJsonl(t, CHALLENGE_FIELDS, [])),
     get("reflections", "journal/reflections.json", parseReflections),
   ]);
 

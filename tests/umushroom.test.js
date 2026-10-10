@@ -161,6 +161,19 @@ describe("umushroom source", () => {
     expect(out.notes).toHaveLength(2);
   });
 
+  test("malformed log and reflection entries cannot reach the client", async () => {
+    mockRepo(goodFiles({
+      "journal/reflections.json": [null],
+      "journal/decisions.jsonl": JSON.stringify({ id: "D-1", date: "2026-10-10", title: { x: 1 }, reasoning: "ok", unverified: ["a", 5] }) + "\n",
+    }));
+    const out = await src.load(NOW);
+    expect(out.errors.reflections).toMatch(/missing its text/);
+    expect(out.reflections).toBeNull();
+    expect(out.decisions[0].title).toBeUndefined();      // object where text is expected: dropped
+    expect(out.decisions[0].reasoning).toBe("ok");
+    expect(out.decisions[0].unverified).toEqual(["a"]);
+  });
+
   test("jsonl: bad lines are counted, not hidden", async () => {
     mockRepo(goodFiles({ "journal/decisions.jsonl": '{"id":"D-1","date":"2026-10-10"}\nnot json\n{"no":"id"}\n' }));
     const out = await src.load(NOW);
