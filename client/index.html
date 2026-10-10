@@ -7123,7 +7123,7 @@ function App() {
     const v = um.view; const errs = um.errors || {};
     const errList = Object.keys(errs);
     const tile = (k, val, sub, cls) => E('div', { className: 'um-tile' }, E('div', { className: 'k' }, k), E('div', { className: 'v ' + (cls || '') }, val), sub && E('div', { className: 's' }, sub));
-    const dayText = v ? (v.dayNumber == null ? '—' : v.dayNumber < 0 ? 'Starts in ' + (-v.dayNumber) + 'd' : 'Day ' + Math.min(v.dayNumber, v.totalDays || v.dayNumber)) : '—';
+    const dayText = v ? (v.dayNumber == null ? '—' : v.dayNumber <= 0 ? 'Starts in ' + (1 - v.dayNumber) + 'd' : 'Day ' + Math.min(v.dayNumber, v.totalDays || v.dayNumber)) : '—';
 
     // 1. Summary — plain English first, for the owner and for anyone else reading
     const summary = E('div', { className: 'card um-sec' },
@@ -7133,7 +7133,7 @@ function App() {
       v && E('div', { className: 'um-label' }, v.label),
       v ? E('div', { className: 'um-tiles' },
           tile('Verdict', E('span', { className: 'jr-badge ' + v.verdict.toLowerCase(), style: { margin: 0, fontSize: 13 } }, v.verdict), v.verdictReason),
-          tile('Progress', dayText, v.totalDays ? 'of ' + v.totalDays + ' days · ends ' + v.windowEnd : ''),
+          tile('Progress', dayText, v.totalDays ? 'of ' + v.totalDays + ' · ends ' + v.windowEnd : ''),
           tile('Portfolio', pct(v.returnPct), v.navGBP != null ? '£' + Number(v.navGBP).toLocaleString('en-GB') : '', tone(v.returnPct)),
           tile('S&P 500', pct(v.benchmarkReturnPct), 'same start', tone(v.benchmarkReturnPct)),
           tile('Alpha', pct(v.alphaPct), 'portfolio − S&P', tone(v.alphaPct)),

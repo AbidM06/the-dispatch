@@ -79,8 +79,8 @@ describe("umushroom source", () => {
     expect(out.errors).toEqual({});
     const v = out.view;
     expect(v.verdict).toBe("HOLD");
-    expect(v.dayNumber).toBe(2);            // 12 → 14 Oct
-    expect(v.totalDays).toBe(56);
+    expect(v.dayNumber).toBe(3);            // 12 Oct = Day 1, so 14 Oct = Day 3
+    expect(v.totalDays).toBe(57);           // 12 Oct … 7 Dec inclusive
     expect(v.ageDays).toBe(1);
     expect(v.warnings).toEqual([]);
     const a = v.positions.find((p) => p.ticker === "AAA");
@@ -138,6 +138,27 @@ describe("umushroom source", () => {
     expect(v.triggers.find((t) => t.id === "HY").mismatch).toBe(true);
     expect(v.triggers.find((t) => t.id === "FED").mismatch).toBe(false); // event triggers are the PM's call
     expect(v.warnings.join(" ")).toMatch(/HY spread/);
+  });
+
+  test("valid JSON with a malformed optional collection marks only that file unavailable", async () => {
+    const pf = portfolio(); pf.triggers = {};
+    mockRepo(goodFiles({ "portfolio.json": pf }));
+    const out = await src.load(NOW);
+    expect(out.errors.portfolio).toMatch(/triggers must be a list/);
+    expect(out.view).toBeUndefined();
+    expect(out.notes).toHaveLength(2); expect(out.decisions).toHaveLength(1);
+    const st = status(); st.triggers = [];
+    mockRepo(goodFiles({ "status.json": st })); src._reset();
+    expect((await src.load(NOW)).errors.status).toMatch(/triggers must be an object/);
+  });
+
+  test("an unexpected failure while building the view is contained", async () => {
+    const pf = portfolio(); pf.positions[0].thesisBreakers = 5; // not validated; map over a number would only matter if used
+    mockRepo(goodFiles({ "portfolio.json": pf }));
+    jest.spyOn(Array.prototype, "filter").mockImplementationOnce(() => { throw new Error("boom"); });
+    const out = await src.load(NOW);
+    expect(out.errors.view).toMatch(/boom/);
+    expect(out.notes).toHaveLength(2);
   });
 
   test("jsonl: bad lines are counted, not hidden", async () => {

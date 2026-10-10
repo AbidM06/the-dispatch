@@ -69,6 +69,10 @@ function parsePortfolio(text) {
     need(x && typeof x.ticker === "string" && num(x.weightPct) && num(x.targetUSD) && num(x.reviewLevelUSD),
       "position " + (x && x.ticker) + " is missing weight, target or review level");
   const total = p.positions.reduce((s, x) => s + x.weightPct, 0) + (p.cash || []).reduce((s, c) => s + (num(c.weightPct) ? c.weightPct : 0), 0);
+  for (const k of ["cash", "triggers", "drawdownLadder", "calendar", "reflectionDates"])
+    need(p[k] === undefined || Array.isArray(p[k]), k + " must be a list");
+  need((p.calendar || []).every((c) => Array.isArray(c) && typeof c[0] === "string"), "calendar entries must be [date, event, status]");
+  need(p.constraints === undefined || (p.constraints && typeof p.constraints === "object"), "constraints must be an object");
   p._weightTotal = Math.round(total * 100) / 100;
   return p;
 }
@@ -78,7 +82,9 @@ function parseStatus(text) {
   need(s && s.schemaVersion === 1, "unsupported schemaVersion");
   need(DATE_RE.test(s.asOf || ""), "asOf is not a date");
   need(VERDICTS.includes(s.verdict), "verdict must be HOLD, WATCH or ACT");
-  need(s.positions && typeof s.positions === "object", "no positions");
+  need(s.positions && typeof s.positions === "object" && !Array.isArray(s.positions), "no positions");
+  need(s.triggers === undefined || (s.triggers && typeof s.triggers === "object" && !Array.isArray(s.triggers)), "triggers must be an object");
+  need(s.unverified === undefined || Array.isArray(s.unverified), "unverified must be a list");
   return s;
 }
 
@@ -157,9 +163,10 @@ function buildView(portfolio, status, now = new Date()) {
   for (const t of triggers) if (t.mismatch) warnings.push("Trigger " + t.name + ": the reading and the fired flag disagree.");
 
   const start = win.start, end = win.end;
-  // Days elapsed since the window opened (0 on the first day; negative before it opens).
-  const dayNumber = start ? daysBetween(start, today) : null;
-  const totalDays = start && end ? daysBetween(start, end) : null;
+  // Calendar-day ordinal: the first day of the window is Day 1 (0 or below = not started yet);
+  // the window runs start..end inclusive, so totalDays counts both ends.
+  const dayNumber = start ? daysBetween(start, today) + 1 : null;
+  const totalDays = start && end ? daysBetween(start, end) + 1 : null;
 
   return {
     asOf: status.asOf, ageDays, phase: status.phase || null,
@@ -199,7 +206,11 @@ async function load(now = new Date()) {
 
   const out = { configured: true, base: b.base, fetchedAt: new Date().toISOString(), errors,
     stale: [pf, st, ni, dc, ch, rf].some((x) => x && x.stale) };
-  if (pf && st) out.view = buildView(pf.value, st.value, now);
+  if (pf && st) {
+    // Validation above should make this safe; if anything unexpected still throws, only this section goes dark.
+    try { out.view = buildView(pf.value, st.value, now); }
+    catch (err) { errors.view = "could not be read (" + err.message + ")"; }
+  }
   const notes = ni ? [...ni.value].sort((a, c) => a.date.localeCompare(c.date)) : null;
   out.notes = notes;
   if (notes && notes.length) {
