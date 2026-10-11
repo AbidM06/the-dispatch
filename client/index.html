@@ -1200,6 +1200,38 @@ tbody tr:hover td { background: var(--bg-alt); }
 .jr-body a { color: var(--ink); border-bottom: 1px dotted var(--border-med); text-decoration: none; }
 .jr-pitch { border-left: 2px solid var(--gold-border); padding: 4px 10px; margin: 6px 0; font-family: var(--sans); white-space: pre-wrap; }
 .jr-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+/* ── Journal: UMushroom view ── */
+.um-tabs { margin-bottom: 14px; }
+.um-label { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--ink-mid); border-left: 2px solid var(--gold-border); padding: 2px 10px; margin: 6px 0 12px; }
+.um-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin: 10px 0 4px; }
+.um-tile { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; background: var(--bg); }
+.um-tile .k { font-size: 8.5px; letter-spacing: .14em; color: var(--ink-low); text-transform: uppercase; }
+.um-tile .v { font-family: var(--mono); font-size: 17px; margin-top: 3px; color: var(--ink); }
+.um-tile .s { font-family: var(--mono); font-size: 9.5px; color: var(--ink-mid); margin-top: 2px; }
+.um-pos { color: var(--pos); } .um-neg { color: var(--neg); } .um-warn { color: var(--gold); }
+.um-box { border: 1px solid var(--gold-border); border-radius: var(--radius); padding: 8px 12px; margin: 10px 0; font-size: 11.5px; line-height: 1.55; color: var(--ink); background: var(--gold-dim); }
+.um-box.bad { border-color: var(--neg); }
+.um-sec { margin-bottom: 16px; }
+.um-note { font-size: 12.5px; line-height: 1.65; color: var(--ink); max-width: 860px; }
+.um-note .h1 { font-size: 15px; font-weight: 600; margin: 4px 0 8px; }
+.um-note .h2, .um-note .h3, .um-note .h4 { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-mid); margin: 14px 0 4px; }
+.um-note p { margin: 6px 0; } .um-note ul { margin: 6px 0 6px 18px; padding: 0; }
+.um-note table { margin: 8px 0; font-size: 11.5px; } .um-note td, .um-note th { padding: 5px 10px; }
+.um-arch { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.um-arch button { background: transparent; border: 1px solid var(--border); border-radius: 3px; padding: 3px 8px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-mid); cursor: pointer; }
+.um-arch button.on { background: var(--gold-dim); color: var(--gold); border-color: var(--gold-border); }
+.um-tbl { overflow-x: auto; }
+.um-tbl td, .um-tbl th { white-space: nowrap; padding: 8px 10px; font-size: 11.5px; }
+.um-tbl td.num { font-family: var(--mono); text-align: right; } .um-tbl th.num { text-align: right; }
+.um-det { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 8px; background: var(--bg); }
+.um-det > summary { cursor: pointer; padding: 9px 12px; font-size: 12px; list-style-position: inside; }
+.um-det .jr-body { white-space: pre-wrap; }
+.um-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.um-sm { font-family: var(--mono); font-size: 11px; line-height: 1.7; color: var(--ink-mid); }
+.um-sm b { color: var(--ink); font-weight: 600; }
+.jr-badge.hold, .jr-badge.intact, .jr-badge.conceded { color: var(--pos); border-color: var(--pos); }
+.jr-badge.watch, .jr-badge.partly, .jr-badge.judgement { color: var(--gold); border-color: var(--gold-border); }
+.jr-badge.act, .jr-badge.broken, .jr-badge.overridden, .jr-badge.fact { color: var(--neg); border-color: var(--neg); }
 @media (max-width: 760px) { .jr-head { grid-template-columns: auto minmax(0,1fr) auto; } .jr-head .jr-ref { grid-column: 2 / -1; text-align: left; } }
 </style>
 </head>
@@ -1232,6 +1264,45 @@ const PIE_COLORS = ['#1c3a5e','#1a7a4a','#c8972a','#5b21b6','#8b4513','#2d6a8f']
 // Never calls external APIs directly.
 
 const API_BASE = window.location.hostname === 'localhost' ? '' : '';
+
+// ─── UMUSHROOM: tiny safe Markdown renderer (headings, bullets, tables, bold/italic) ───
+function umInline(text, key) {
+  const out = []; const re = /(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g; let last = 0, m, i = 0;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const t = m[0];
+    out.push(React.createElement(t.startsWith('**') ? 'b' : 'i', { key: key + '-' + (i++) }, t.startsWith('**') ? t.slice(2, -2) : t.slice(1, -1)));
+    last = m.index + t.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+function UmMarkdown(md) {
+  const lines = String(md || '').replace(/\r/g, '').split('\n');
+  const out = []; let i = 0, k = 0;
+  const cells = (ln) => ln.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(s => s.trim());
+  while (i < lines.length) {
+    const ln = lines[i]; let m;
+    if (!ln.trim()) { i++; continue; }
+    if ((m = /^(#{1,4})\s+(.*)$/.exec(ln))) { out.push(React.createElement('div', { key: k++, className: 'h' + m[1].length }, umInline(m[2], 'h' + k))); i++; continue; }
+    if (/^\s*\|/.test(ln)) {
+      const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(lines[i]); i++; }
+      const body = rows.filter(r => !/^\s*\|?\s*:?-{2,}/.test(r)).map(cells);
+      if (body.length) out.push(React.createElement('table', { key: k++ },
+        React.createElement('thead', null, React.createElement('tr', null, body[0].map((c, j) => React.createElement('th', { key: j }, umInline(c, 'th' + j))))),
+        React.createElement('tbody', null, body.slice(1).map((r, a) => React.createElement('tr', { key: a }, r.map((c, j) => React.createElement('td', { key: j }, umInline(c, 'td' + a + j))))))));
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(ln)) {
+      const items = []; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; }
+      out.push(React.createElement('ul', { key: k++ }, items.map((t, a) => React.createElement('li', { key: a }, umInline(t, 'li' + a)))));
+      continue;
+    }
+    const para = []; while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|\s*\||\s*[-*]\s)/.test(lines[i])) { para.push(lines[i]); i++; }
+    out.push(React.createElement('p', { key: k++ }, umInline(para.join(' '), 'p' + k)));
+  }
+  return out;
+}
 
 async function apiFetch(path, opts) {
   const res = await fetch(`${API_BASE}${path}`, opts);
@@ -1584,6 +1655,14 @@ function App() {
   const [sealedIdeas, setSealedIdeasRaw]    = useState(() => readJson('dispatch-sealed-ideas', []));  // idea ids awaiting my pitch
   const [pitchDraft, setPitchDraft]         = useState({});
   const [jrPriceDraft, setJrPriceDraft]     = useState({});
+  // Journal tab, UMushroom view (display-only; data comes from the public paper-portfolio repo via /api/umushroom)
+  const [journalView, setJournalViewRaw] = useState(() => { try { return localStorage.getItem('dispatch-journal-view') === 'umushroom' ? 'umushroom' : 'ideas'; } catch { return 'ideas'; } });
+  const [um, setUm]               = useState(null);   // last /api/umushroom response
+  const [umLoading, setUmLoading] = useState(false);
+  const [umErr, setUmErr]         = useState(null);
+  const [umNote, setUmNote]       = useState(null);   // archived note picked by the reader: { date, markdown } | { date, error }
+  const [umAllDecisions, setUmAllDecisions] = useState(false);
+  function setJournalView(v) { setJournalViewRaw(v); try { localStorage.setItem('dispatch-journal-view', v); } catch {} }
   function setPitchMode(v) { setPitchModeRaw(v); try { localStorage.setItem('dispatch-pitch-mode', JSON.stringify(v)); } catch {} }
   function setSealedIdeas(fn) {
     setSealedIdeasRaw(prev => { const next = fn(prev); try { localStorage.setItem('dispatch-sealed-ideas', JSON.stringify(next)); } catch {} return next; });
@@ -1712,7 +1791,7 @@ function App() {
   }, [research && research.reportId]);
 
   // ── Journal loads when its tab is opened (no AI, no cost) ─────────────────
-  useEffect(() => { if (tab === 'journal') loadJournal(); }, [tab]);
+  useEffect(() => { if (tab === 'journal') { if (journalView === 'umushroom') loadUmushroom(); else loadJournal(); } }, [tab, journalView]);
 
   // ── Fetch data on mount ────────────────────────────────────────────────
   useEffect(() => {
@@ -1916,6 +1995,18 @@ function App() {
   }
 
   // ── JOURNAL ────────────────────────────────────────────────────────────────
+  async function loadUmushroom() {
+    setUmLoading(true); setUmErr(null);
+    try { setUm(await apiFetch('/api/umushroom')); setUmNote(null); }
+    catch (err) { setUm(null); setUmErr(err.message); }
+    setUmLoading(false);
+  }
+  async function openUmNote(date) {
+    setUmNote({ date, loading: true });
+    try { const r = await apiFetch('/api/umushroom/note/' + encodeURIComponent(date)); setUmNote({ date, markdown: r.markdown, title: r.title, verdict: r.verdict }); }
+    catch (err) { setUmNote({ date, error: err.message }); }
+  }
+
   async function loadJournal() {
     setJournalLoading(true);
     try {
@@ -7006,6 +7097,139 @@ function App() {
     );
   }
 
+  // ── JOURNAL TAB: switch between the idea-card Journal and the UMushroom paper portfolio ──
+  function renderJournalTab() {
+    const seg = React.createElement('div', { className: 'jr-seg um-tabs' },
+      React.createElement('button', { className: journalView === 'ideas' ? 'on' : '', onClick: () => setJournalView('ideas') }, 'IDEA CARDS'),
+      React.createElement('button', { className: journalView === 'umushroom' ? 'on' : '', onClick: () => setJournalView('umushroom') }, 'UMUSHROOM'));
+    return React.createElement('div', null, seg, journalView === 'umushroom' ? renderUmushroom() : renderJournal());
+  }
+
+  function renderUmushroom() {
+    const E = React.createElement;
+    const pct = (v, d = 2) => (v == null || !isFinite(v)) ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(d) + '%';
+    const tone = (v) => v == null ? '' : v > 0 ? 'um-pos' : v < 0 ? 'um-neg' : '';
+    const px = (v) => v == null ? '—' : Number(v).toLocaleString('en-GB', { maximumFractionDigits: v >= 100 ? 2 : 3 });
+    const unavailable = (what, why) => E('div', { className: 'engine-empty' }, what + ' unavailable' + (why ? ' — ' + why : '') + '. Nothing is filled in.');
+    const head = (title, sub) => E('div', null, E('div', { className: 'idc-panel-title' }, title), sub && E('div', { className: 'idc-sub', style: { marginBottom: 8 } }, sub));
+
+    if (umLoading && !um) return E('div', { className: 'engine-empty' }, 'Loading the paper portfolio…');
+    if (umErr) return E('div', { className: 'card' }, unavailable('The paper portfolio', umErr), E('button', { className: 'btn', style: { marginTop: 10 }, onClick: loadUmushroom }, 'RETRY'));
+    if (!um) return null;
+    if (!um.configured) return E('div', { className: 'card' }, head('UMUSHROOM PAPER PORTFOLIO'),
+      E('div', { className: 'idc-sub' }, 'Not connected. Add UMUSHROOM_RAW_BASE to .env (see .env.example) and restart the server. This view only reads a public GitHub repository: no key, no AI, no cost.'));
+    if (um.error) return E('div', { className: 'card' }, unavailable('The paper portfolio', um.error));
+
+    const v = um.view; const errs = um.errors || {};
+    const errList = Object.keys(errs);
+    const tile = (k, val, sub, cls) => E('div', { className: 'um-tile' }, E('div', { className: 'k' }, k), E('div', { className: 'v ' + (cls || '') }, val), sub && E('div', { className: 's' }, sub));
+    const dayText = v ? (v.dayNumber == null ? '—' : v.dayNumber <= 0 ? 'Starts in ' + (1 - v.dayNumber) + 'd' : 'Day ' + Math.min(v.dayNumber, v.totalDays || v.dayNumber)) : '—';
+
+    // 1. Summary — plain English first, for the owner and for anyone else reading
+    const summary = E('div', { className: 'card um-sec' },
+      head('UMUSHROOM · ' + (v ? v.name.toUpperCase() : 'PAPER PORTFOLIO'),
+        'An eight-week paper-money test: can an AI-transition portfolio beat the S&P 500 while keeping a severe-shock loss inside 18%? An AI portfolio manager writes a note each weekday and says HOLD, WATCH or ACT; a second AI (Codex) reviews it. ' +
+        'The default is to do nothing: it acts only when a rule written in advance is hit.'),
+      v && E('div', { className: 'um-label' }, v.label),
+      v ? E('div', { className: 'um-tiles' },
+          tile('Verdict', E('span', { className: 'jr-badge ' + v.verdict.toLowerCase(), style: { margin: 0, fontSize: 13 } }, v.verdict), v.verdictReason),
+          tile('Progress', dayText, v.totalDays ? 'of ' + v.totalDays + ' · ends ' + v.windowEnd : ''),
+          tile('Portfolio', pct(v.returnPct), v.navGBP != null ? '£' + Number(v.navGBP).toLocaleString('en-GB') : '', tone(v.returnPct)),
+          tile('S&P 500', pct(v.benchmarkReturnPct), 'same start', tone(v.benchmarkReturnPct)),
+          tile('Alpha', pct(v.alphaPct), 'portfolio − S&P', tone(v.alphaPct)),
+          tile('Drawdown', pct(v.drawdownFromPeakPct), v.drawdownLimitPct != null ? 'limit −' + v.drawdownLimitPct + '%' : '', tone(v.drawdownFromPeakPct)),
+          tile('Changes', v.changesThisWeek != null ? v.changesThisWeek + ' / ' + (v.maxChangesPerWeek ?? '—') : '—', 'this week'))
+        : unavailable('Summary', errs.status || errs.portfolio),
+      v && v.phase === 'pre-entry' && E('div', { className: 'um-box' }, 'Not invested yet: positions are entered at the open on ' + v.windowStart + '. Figures are zero until then.'),
+      v && v.warnings.length > 0 && E('div', { className: 'um-box bad' }, E('b', null, 'Check these figures: '), v.warnings.join(' ')),
+      um.stale && E('div', { className: 'um-box' }, 'GitHub could not be reached just now, so this is the last copy that loaded.'),
+      errList.length > 0 && E('div', { className: 'um-box' }, E('b', null, 'Unavailable: '), errList.map(k => k + ' (' + errs[k] + ')').join(' · ')),
+      v && v.unverified.length > 0 && E('div', { className: 'idc-sub' }, E('b', null, 'Marked unverified: '), v.unverified.join(' · ')),
+      E('div', { style: { marginTop: 8 } }, E('button', { className: 'btn', onClick: loadUmushroom, disabled: umLoading }, umLoading ? 'LOADING…' : 'RELOAD'),
+        E('span', { className: 'idc-sub', style: { marginLeft: 10 } }, 'status as of ' + (v ? v.asOf : '—') + ' · fetched ' + mkFmtWhen(um.fetchedAt))));
+
+    // 2. Today's note + archive
+    const shown = umNote || (um.latestNote ? { date: um.latestNote.date, markdown: um.latestNote.markdown, title: um.latestNote.title, verdict: um.latestNote.verdict } : null);
+    const note = E('div', { className: 'card um-sec' },
+      head(umNote ? 'MORNING NOTE · ' + umNote.date : 'LATEST MORNING NOTE' + (shown ? ' · ' + shown.date : '')),
+      !um.notes ? unavailable('Notes', errs.notes)
+        : !shown ? E('div', { className: 'engine-empty' }, 'No notes yet.')
+        : shown.loading ? E('div', { className: 'idc-sub' }, 'Loading…')
+        : shown.error ? unavailable('That note', shown.error)
+        : E('div', { className: 'um-note' }, UmMarkdown(shown.markdown)),
+      um.notes && um.notes.length > 1 && E('div', { className: 'um-arch' },
+        um.notes.slice().reverse().map(n => E('button', { key: n.date, className: shown && shown.date === n.date ? 'on' : '', title: n.summary || n.title, onClick: () => openUmNote(n.date) }, n.date.slice(5) + ' ' + n.verdict))));
+
+    // 3. Positions
+    const levelCell = (p) => p.level ? E('span', { className: 'jr-badge ' + (p.level === 'target hit' ? 'ok' : 'missing') }, p.level) : null;
+    const positions = E('div', { className: 'card um-sec' },
+      head('POSITIONS', 'Prices in US$ unless a currency is shown next to the ticker. Distance is how far the price would have to move to reach the target or the review level. Thesis status is the portfolio manager\'s judgement against the named thesis-breakers.'),
+      !v ? unavailable('Positions', errs.status || errs.portfolio) : E('div', { className: 'um-tbl' }, E('table', null,
+        E('thead', null, E('tr', null, ['Position', 'Weight', 'Price', 'To target', 'To review', 'Thesis'].map((h, i) => E('th', { key: h, className: i > 0 && i < 5 ? 'num' : '' }, h)))),
+        E('tbody', null, v.positions.map(p => E('tr', { key: p.ticker, title: p.thesisBreakers.length ? 'Thesis-breakers: ' + p.thesisBreakers.join('; ') : '' },
+          E('td', null, E('b', null, p.ticker), p.currency && p.currency !== 'USD' && E('span', { className: 'idc-sub' }, ' (' + p.currency + ')'), ' ', E('span', { className: 'idc-sub' }, p.view || ''), levelCell(p)),
+          E('td', { className: 'num' }, p.weightPct + '%'),
+          E('td', { className: 'num' }, px(p.price), p.priceStatus !== 'ok' && E('span', { className: 'jr-badge unknown', title: p.priceSource || '' }, p.priceStatus)),
+          E('td', { className: 'num ' + tone(p.toTargetPct) }, p.toTargetPct == null ? '—' : pct(p.toTargetPct, 1) + ' (' + px(p.targetUSD) + ')'),
+          E('td', { className: 'num ' + tone(p.toReviewPct) }, p.toReviewPct == null ? '—' : pct(p.toReviewPct, 1) + ' (' + px(p.reviewLevelUSD) + ')'),
+          E('td', null, p.thesis ? E('span', { className: 'jr-badge ' + p.thesis, style: { margin: 0 } }, p.thesis) : '—', p.thesisNote && E('span', { className: 'idc-sub', style: { marginLeft: 6 } }, p.thesisNote))))))));
+
+    // 4. Early-warning triggers, drawdown steps, upcoming events
+    const risk = v && E('div', { className: 'card um-sec' }, E('div', { className: 'um-two' },
+      E('div', null, head('EARLY-WARNING TRIGGERS'), E('div', { className: 'um-sm' }, v.triggers.map(t =>
+        E('div', { key: t.id }, E('b', null, t.name), ': ', t.reading == null ? 'no reading' : String(t.reading) + (t.unit === '%' ? '%' : ''),
+          t.level != null ? ' (' + t.direction + ' ' + t.level + ')' : ' (' + t.direction + ')',
+          t.fired ? E('span', { className: 'jr-badge act' }, 'fired') : E('span', { className: 'jr-badge ok' }, 'clear'),
+          t.asOf && E('span', { className: 'idc-sub', style: { marginLeft: 6 } }, t.asOf))))),
+      E('div', null, head('DRAWDOWN STEPS'), E('div', { className: 'um-sm' }, v.ladder.map(l => E('div', { key: l.atPct }, E('b', null, l.atPct + '%'), ': ', l.action)))),
+      E('div', null, head('COMING UP'), E('div', { className: 'um-sm' }, v.upcoming.length === 0 ? 'Nothing listed.' : v.upcoming.map((u, i) =>
+        E('div', { key: i }, E('b', null, u.date.slice(5)), ' ', u.event, u.dateStatus && E('span', { className: 'idc-sub', style: { marginLeft: 6 } }, u.dateStatus)))))));
+
+    // 5. Decision log
+    const dec = um.decisions ? um.decisions.slice().reverse() : null;
+    const decList = dec ? (umAllDecisions ? dec : dec.slice(0, 6)) : [];
+    const decisions = E('div', { className: 'card um-sec' },
+      head('DECISION LOG', 'Every call, with the reasoning at the time and what would have changed my mind. Entries are never edited.'),
+      !dec ? unavailable('The decision log', errs.decisions) : dec.length === 0 ? E('div', { className: 'engine-empty' }, 'No decisions yet.')
+        : decList.map(d => E('details', { key: d.id, className: 'um-det' },
+            E('summary', null, E('b', null, d.id), ' · ' + d.date + ' · ', d.title || '', d.verdict && E('span', { className: 'jr-badge ' + String(d.verdict).toLowerCase() }, d.verdict), d.type && E('span', { className: 'jr-badge' }, d.type)),
+            E('div', { className: 'jr-body' },
+              d.reasoning && E('div', null, E('b', null, 'Why: '), d.reasoning),
+              d.whatWouldChangeMyMind && E('div', { style: { marginTop: 6 } }, E('b', null, 'What would change my mind: '), d.whatWouldChangeMyMind),
+              Array.isArray(d.alternativesRejected) && d.alternativesRejected.length > 0 && E('div', { style: { marginTop: 6 } }, E('b', null, 'Rejected: '), d.alternativesRejected.join(' · ')),
+              Array.isArray(d.unverified) && d.unverified.length > 0 && E('div', { style: { marginTop: 6 } }, E('b', null, 'Unverified: '), d.unverified.join(' · ')),
+              E('div', { style: { marginTop: 6 } }, E('b', null, 'Outcome: '), d.outcome ? (typeof d.outcome === 'string' ? d.outcome : JSON.stringify(d.outcome)) : 'not yet reviewed')))),
+      dec && dec.length > 6 && E('button', { className: 'btn', style: { marginTop: 8 }, onClick: () => setUmAllDecisions(x => !x) }, umAllDecisions ? 'SHOW LATEST 6' : 'SHOW ALL ' + dec.length),
+      um.badLines && (um.badLines.decisions > 0) && E('div', { className: 'idc-sub', style: { marginTop: 6 } }, um.badLines.decisions + ' unreadable line(s) in the decision log were skipped.'));
+
+    // 6. Codex challenges and replies
+    const ch = um.challenges ? um.challenges.slice().reverse() : null;
+    const challenges = E('div', { className: 'card um-sec' },
+      head('CODEX CHALLENGES AND REPLIES', 'Codex reviews on Fridays and whenever a trade is proposed. It can overturn a verdict only by showing a factual error; otherwise the portfolio manager holds its view and records why.'),
+      !ch ? unavailable('The challenge log', errs.challenges) : ch.length === 0 ? E('div', { className: 'engine-empty' }, 'No challenges yet.')
+        : ch.map(c => E('details', { key: c.id, className: 'um-det' },
+            E('summary', null, E('b', null, c.id), ' · ' + c.date + ' · ', (c.challenge || '').slice(0, 90), c.kind && E('span', { className: 'jr-badge ' + String(c.kind).toLowerCase() }, c.kind),
+              c.outcome && E('span', { className: 'jr-badge ' + String(c.outcome).toLowerCase().replace(/\s.*/, '') }, c.outcome)),
+            E('div', { className: 'jr-body' },
+              E('div', null, E('b', null, 'Challenge: '), c.challenge), c.evidence && E('div', { style: { marginTop: 6 } }, E('b', null, 'Evidence: '), c.evidence),
+              c.confidence && E('div', { style: { marginTop: 6 } }, E('b', null, 'Codex confidence: '), c.confidence),
+              c.reply && E('div', { style: { marginTop: 6 } }, E('b', null, 'My reply: '), c.reply),
+              c.reason && E('div', { style: { marginTop: 6 } }, E('b', null, 'Why: '), c.reason),
+              c.pr && E('div', { className: 'idc-sub', style: { marginTop: 6 } }, 'Pull request ' + c.pr)))));
+
+    // 7. Reflections
+    const refl = E('div', { className: 'card um-sec' },
+      head('REFLECTIONS', 'Scored against the S&P 500 at week 4 and week 8.'),
+      !um.reflections ? unavailable('Reflections', errs.reflections)
+        : um.reflections.length === 0 ? E('div', { className: 'engine-empty' }, 'None yet' + (v && v.reflectionDates.length ? ' — due ' + v.reflectionDates.map(r => 'week ' + r.week + ' on ' + r.date).join(', ') : '') + '.')
+        : um.reflections.map((r, i) => E('details', { key: i, className: 'um-det', open: true },
+            E('summary', null, E('b', null, 'Week ' + r.week), ' · ' + (r.date || ''), E('span', { className: 'idc-sub', style: { marginLeft: 8 } },
+              'portfolio ' + pct(r.returnPct) + ' · S&P ' + pct(r.benchmarkReturnPct) + ' · alpha ' + pct(r.alphaPct))),
+            E('div', { className: 'jr-body' }, r.text))));
+
+    return E('div', null, summary, note, positions, risk, decisions, challenges, refl);
+  }
+
   // ── TAB RENDER ─────────────────────────────────────────────────────────────
   function renderTab() {
     switch(tab) {
@@ -7016,7 +7240,7 @@ function App() {
       case 'signals':   return renderSignals();
       case 'research':  return renderResearch();
       case 'news':      return renderNews();
-      case 'journal':   return renderJournal();
+      case 'journal':   return renderJournalTab();
       case 'glossary':  return renderGlossary();
       case 'interview': return renderInterview();
       default:          return renderMarket();
