@@ -101,9 +101,19 @@ function parseNotesIndex(text) {
 // odd shapes (objects where text is expected, null entries) cannot crash the client.
 const str = (v) => (typeof v === "string" ? v : undefined);
 const strList = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string") : undefined);
+// A decision outcome may be text or a small object; keep objects reduced to scalar fields.
+function outcomeVal(v) {
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = {};
+    for (const [k, x] of Object.entries(v).slice(0, 12)) if (["string", "number", "boolean"].includes(typeof x)) o[k] = x;
+    return Object.keys(o).length ? o : undefined;
+  }
+  return undefined;
+}
 function cleanEntry(o, fields, lists) {
   const out = { id: o.id, date: o.date };
-  for (const k of fields) { const v = str(o[k]); if (v !== undefined) out[k] = v; }
+  for (const k of fields) { const v = k === "outcome" ? outcomeVal(o[k]) : str(o[k]); if (v !== undefined) out[k] = v; }
   for (const k of lists) { const v = strList(o[k]); if (v !== undefined) out[k] = v; }
   return out;
 }

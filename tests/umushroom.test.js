@@ -230,4 +230,9 @@ describe("umushroom routes", () => {
   test("there are no write routes", async () => {
     for (const m of ["post", "put", "patch", "delete"]) expect((await request(app)[m]("/api/umushroom")).status).toBe(404);
   });
+
+  test("decision outcome objects are preserved (scalar fields only)", () => {
+    const { items } = src.parseJsonl(JSON.stringify({ id: "D-9", date: "2026-10-12", outcome: { result: "right", pct: 2.1, nested: { x: 1 } } }));
+    expect(items[0].outcome).toEqual({ result: "right", pct: 2.1 });
+  });
 });
