@@ -232,7 +232,7 @@ describe("umushroom routes", () => {
   });
 
   test("decision outcome objects are preserved (scalar fields only)", () => {
-    const { items } = src.parseJsonl(JSON.stringify({ id: "D-9", date: "2026-10-12", outcome: { result: "right", pct: 2.1, nested: { x: 1 } } }));
+    const { items } = require("../server/umushroom/source").parseJsonl(JSON.stringify({ id: "D-9", date: "2026-10-12", outcome: { result: "right", pct: 2.1, nested: { x: 1 } } }));
     expect(items[0].outcome).toEqual({ result: "right", pct: 2.1 });
   });
 });
