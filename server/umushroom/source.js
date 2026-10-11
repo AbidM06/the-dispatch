@@ -182,6 +182,7 @@ function buildView(portfolio, status, now = new Date()) {
       thesis: q && ["intact", "watch", "broken"].includes(q.thesis) ? q.thesis : null,
       thesisNote: q ? q.thesisNote || "" : "",
       thesisBreakers: x.thesisBreakers || [],
+      currency: typeof x.currency === "string" ? x.currency : "USD",
     };
   });
 

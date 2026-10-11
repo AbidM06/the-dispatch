@@ -7163,11 +7163,11 @@ function App() {
     // 3. Positions
     const levelCell = (p) => p.level ? E('span', { className: 'jr-badge ' + (p.level === 'target hit' ? 'ok' : 'missing') }, p.level) : null;
     const positions = E('div', { className: 'card um-sec' },
-      head('POSITIONS', 'Prices in US$. Distance is how far the price would have to move to reach the target or the review level. Thesis status is the portfolio manager\'s judgement against the named thesis-breakers.'),
+      head('POSITIONS', 'Prices in US$ unless a currency is shown next to the ticker. Distance is how far the price would have to move to reach the target or the review level. Thesis status is the portfolio manager\'s judgement against the named thesis-breakers.'),
       !v ? unavailable('Positions', errs.status || errs.portfolio) : E('div', { className: 'um-tbl' }, E('table', null,
         E('thead', null, E('tr', null, ['Position', 'Weight', 'Price', 'To target', 'To review', 'Thesis'].map((h, i) => E('th', { key: h, className: i > 0 && i < 5 ? 'num' : '' }, h)))),
         E('tbody', null, v.positions.map(p => E('tr', { key: p.ticker, title: p.thesisBreakers.length ? 'Thesis-breakers: ' + p.thesisBreakers.join('; ') : '' },
-          E('td', null, E('b', null, p.ticker), ' ', E('span', { className: 'idc-sub' }, p.view || ''), levelCell(p)),
+          E('td', null, E('b', null, p.ticker), p.currency && p.currency !== 'USD' && E('span', { className: 'idc-sub' }, ' (' + p.currency + ')'), ' ', E('span', { className: 'idc-sub' }, p.view || ''), levelCell(p)),
           E('td', { className: 'num' }, p.weightPct + '%'),
           E('td', { className: 'num' }, px(p.price), p.priceStatus !== 'ok' && E('span', { className: 'jr-badge unknown', title: p.priceSource || '' }, p.priceStatus)),
           E('td', { className: 'num ' + tone(p.toTargetPct) }, p.toTargetPct == null ? '—' : pct(p.toTargetPct, 1) + ' (' + px(p.targetUSD) + ')'),
