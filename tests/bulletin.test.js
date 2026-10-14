@@ -132,6 +132,7 @@ describe("bulletin — success path", () => {
     expect(prompt).toMatch(/cause for concern/);
     expect(prompt).toMatch(/what to look out for/);
     expect(prompt).not.toMatch(/pitchScript|read aloud/i);
+    expect(callClaude.mock.calls[0][0]).not.toMatch(/JPMorgan|Spring Week/i);
   });
 });
 
