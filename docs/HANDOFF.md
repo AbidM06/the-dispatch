@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-09-30 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/zen-gates-3v2jhm`
+**Last updated:** 2026-10-14 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/magical-carson-7nyf2s`
 
 ---
 
@@ -44,6 +44,7 @@ Working and merged (PR #4, 2026-09-28):
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
+| Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -143,6 +144,13 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-14 — Claude (Morning Bulletin)
+- Owner's screenshot: News tab showed 'Regime classification unavailable — AI offline. Enable ANTHROPIC_API_KEY' and a hardcoded Gold/10Y table. That was `buildFallbackBulletin()` — canned text, saved to the log as the day's bulletin, unlabelled. Removed it (D-24): failures now return 503 `available: false` + reason, shown in a red panel; nothing saved.
+- Why the AI call failed is unknown (no server log available). Hardened the likely paths: reply parsing now tolerates web-search narration around the JSON, both cite-tag forms are stripped, max tokens 6000 → 8000. Also fixed the client's REFRESH button staying stuck on 'GENERATING…' after an error.
+- Pitch script ('read aloud at JPM session') → `newsSummary`: what it is, why it matters, any concern, what to watch. Older stored bulletins still show their `pitchScript`.
+- 489 tests (new: `tests/bulletin.test.js`).
+- Next: owner updates the Mac, presses REFRESH BULLETIN, reports the reason if it still fails. `brief.js` seed usage (§4) is unchanged.
 
 ### 2026-09-28 — Claude (Journal stage 2)
 - Owner answered the stage-2 questions (D-18). Built `server/journal/tracker.js`: daily-bar
