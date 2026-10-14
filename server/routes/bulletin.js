@@ -1,7 +1,7 @@
 /**
  * server/routes/bulletin.js
  * ─────────────────────────────────────────────────────────────────────────────
- * Morning Bulletin — JPMorgan Spring Week prep.
+ * Morning Bulletin — a daily read of the day's most market-moving story.
  *
  *   GET  /api/bulletin          — latest bulletin (today's if generated, else most recent)
  *   GET  /api/bulletin/history  — rolling log (?days=7)
@@ -9,7 +9,9 @@
  *
  * News source: Finnhub market news (real-time, already wired).
  * Analysis:    Claude Sonnet — single call, structured JSON output.
- *              Falls back to deterministic summary if AI unavailable.
+ *              If the AI call cannot run or fails, the route answers 503 with
+ *              `available: false` and the plain-English reason. Nothing is
+ *              invented and nothing is saved as the day's bulletin (D-02, D-24).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 "use strict";
@@ -33,7 +35,8 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function stripCiteTags(str) {
   if (typeof str !== "string") return str;
-  return str.replace(/<cite[^>]*>(.*?)<\/cite>/gs, "$1").replace(/<\/?cite[^>]*>/g, "");
+  // web_search emits both `<cite …>` and `(cite …>` opening forms (see AGENTS.md).
+  return str.replace(/[<(]cite[^>]*>(.*?)<\/cite>/gs, "$1").replace(/(?:<\/cite>|[<(]cite[^>]*>)/g, "");
 }
 function deepStrip(obj) {
   if (typeof obj === "string") return stripCiteTags(obj);
@@ -146,7 +149,7 @@ async function fetchTwitterContext(headline) {
 }
 
 // ── Shared prompt builders ────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are a dual-role expert: (1) a senior macro economist at a major research house, and (2) a senior S&T professional at JPMorgan briefing buy-side clients before market open. You produce morning bulletins combining rigorous economic analysis with immediately actionable cross-asset trading ideas. Your audience is an Economics student preparing for JPMorgan Spring Week.
+const SYSTEM_PROMPT = `You are a dual-role expert: (1) a senior macro economist at a major research house, and (2) a senior sales & trading professional briefing buy-side clients before market open. You produce morning bulletins combining rigorous economic analysis with immediately actionable cross-asset trading ideas. Your reader is a student learning how markets work: explain plainly, and say why each point matters.
 
 ACCURACY RULES — NON-NEGOTIABLE:
 - Only cite specific figures (yields, spreads, price levels, bps moves, % changes) that appear in the source article or in the LIVE MACRO DATA block below. Never invent statistics.
@@ -194,7 +197,7 @@ Return ONLY a valid JSON object — no markdown, no text outside the JSON:
     "publishedAt": "[ISO timestamp]",
     "summary": "[factual summary drawn from the article, ~150 chars — no invented detail]"
   },
-  "pitchScript": "[A flowing paragraph read aloud in ~60 seconds. Structure: (1) Headline + source [5s]. (2) What happened — use only figures from the article or the live macro data [15s]. (3) Which client types are most exposed and why [15s]. (4) One core trade + one hedge, named precisely, with a one-line mechanism each [15s]. (5) Bottom line + the next catalyst to watch [10s]. Crisp, jargon-dense, zero filler.]",
+  "newsSummary": "[A short plain-English summary, 4-6 sentences (~100 words), for someone following markets. Cover in order: (1) what the news is, (2) why it matters — its significance for rates, equities, credit, FX or commodities, (3) is there cause for concern, and how serious — say plainly if there is not, (4) what to look out for next — the specific data release, decision, level or event. Only figures from the article or the live data above. No script, no filler.]",
   "analysis": {
     "economistView": {
       "macroRegime": "[The macro regime this event signals — be specific: e.g. stagflation, demand shock, supply-side inflation, credit contraction, risk-off flight-to-quality. Explain why in one sentence.]",
@@ -287,61 +290,111 @@ router.post("/refresh", requireWriteAuth, async (req, res) => {
     })
     .join("\n\n");
 
-  // ── 2. AI unavailable → deterministic fallback ────────────────────────────
-  if (budget.getApiFallbackInfo().active || process.env.LOW_COST_MODE === "true") {
-    const top = articles[0];
-    const bulletin = buildFallbackBulletin(top, articles);
-    appendBulletin(bulletin);
-    sendMacNotification(bulletin.article.headline, (bulletin.pitchScript || "").slice(0, 100) + "…");
-    return res.json({ source: "deterministic", fetchedAt: now(), data: bulletin });
-  }
+  // ── 2. AI unavailable → say so; never invent a bulletin (D-02, D-24) ──────
+  const off = aiUnavailableReason();
+  if (off) return unavailable(res, off, articles[0]);
 
   // ── 3. Generate with Claude ────────────────────────────────────────────────
-  const macroContext  = await fetchMacroContext();
-  const moversContext = await fetchMarketMovers();
-  const xContext      = await fetchTwitterContext(articles[0]?.headline);
-  const prevBulletin  = getLatest();
-  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin);
-
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON object in Claude response");
-
-    const parsed  = JSON.parse(jsonMatch[0]);
-    const cleaned = deepStrip(parsed);
-
-    const bulletin = {
-      date:        todayStr(),
-      bulletinId:  `${todayStr()}-${(cleaned.article?.source || "finnhub").toLowerCase().replace(/\s+/g, "-")}`,
-      generatedAt: now(),
-      dataSource:  "finnhub",
-      article:     cleaned.article    || {},
-      pitchScript: cleaned.pitchScript || "",
-      analysis:    fixOpportunitiesNesting(cleaned.analysis || {}),
-      metadata: {
-        next_fetch:  new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) + "T07:00:00Z",
-        api_version: "1.1",
-      },
-    };
-
+    const bulletin = await generateWithClaude(articles, articleList);
     appendBulletin(bulletin);
     sendMacNotification(
       bulletin.article.headline || "Morning Bulletin Ready",
-      (bulletin.pitchScript || "").slice(0, 120) + "…"
+      (bulletin.newsSummary || "").slice(0, 120) + "…"
     );
-
     return res.json({ source: "live", fetchedAt: now(), data: bulletin });
-
   } catch (err) {
     console.error("[bulletin] Claude error:", err.message);
-    const top      = articles[0];
-    const bulletin = buildFallbackBulletin(top, articles);
-    appendBulletin(bulletin);
-    sendMacNotification(bulletin.article.headline, "Deterministic bulletin — AI unavailable.");
-    return res.json({ source: "deterministic", fetchedAt: now(), data: bulletin, warning: err.message });
+    return unavailable(res, err.message, articles[0]);
   }
 });
+
+/** Why the AI cannot run right now, in plain English — or null when it can. */
+function aiUnavailableReason() {
+  if (process.env.LOW_COST_MODE === "true")
+    return "Low-cost mode is on (LOW_COST_MODE=true in .env), so all AI calls are switched off.";
+  if (process.env.DISABLE_AI === "true")
+    return "AI is disabled (DISABLE_AI=true in .env).";
+  if (!process.env.ANTHROPIC_API_KEY)
+    return "ANTHROPIC_API_KEY is not set in .env, so Claude cannot be reached.";
+  const fb = budget.getApiFallbackInfo();
+  if (fb.active)
+    return `Anthropic reported a billing problem, so AI is paused for another ~${fb.retryInMins} min. Check your Anthropic credit.`;
+  return null;
+}
+
+/** 503 with the reason and the real top headline (a fact, not analysis). Nothing is saved. */
+function unavailable(res, reason, top) {
+  const lastBulletin = getLatest();
+  return res.status(503).json({
+    available:  false,
+    reason,
+    fetchedAt:  now(),
+    topArticle: top ? { headline: top.headline || "", source: top.source || "", url: top.url || "" } : null,
+    lastBulletinDate: lastBulletin?.date || null,
+  });
+}
+
+/**
+ * Pull the bulletin object out of the model's reply. The reply can hold several
+ * text blocks (web_search narration around the JSON), so a greedy `{…}` match is
+ * not enough: try the whole text, then every balanced `{…}` (string-aware) and
+ * keep the first that parses and looks like a bulletin.
+ */
+function extractBulletinJson(raw) {
+  const text = String(raw || "").replace(/```(?:json)?/gi, "");
+  const looksRight = o => o && typeof o === "object" && o.article && o.analysis;
+  try { const o = JSON.parse(text.trim()); if (looksRight(o)) return o; } catch { /* fall through */ }
+
+  for (let start = text.indexOf("{"); start !== -1; start = text.indexOf("{", start + 1)) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) {
+        try { const o = JSON.parse(text.slice(start, i + 1)); if (looksRight(o)) return o; } catch { /* try next start */ }
+        break;
+      }
+    }
+  }
+  return null;
+}
+
+/** One Sonnet call → a validated bulletin object. Throws a plain-English Error on any failure. */
+async function generateWithClaude(articles, articleList) {
+  const macroContext  = await fetchMacroContext();
+  const moversContext = await fetchMarketMovers();
+  const xContext      = await fetchTwitterContext(articles[0]?.headline);
+  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, getLatest());
+
+  const raw    = await callClaude(SYSTEM_PROMPT, userPrompt, 8000, MODEL_SONNET);
+  const parsed = extractBulletinJson(raw);
+  if (!parsed) {
+    throw new Error("Claude answered, but the reply was not a complete bulletin (it may have been cut off). " +
+      "Nothing was saved. Try again; the reply began: \"" + String(raw || "").trim().slice(0, 120).replace(/\s+/g, " ") + "\"");
+  }
+  const cleaned = deepStrip(parsed);
+  const summary = typeof cleaned.newsSummary === "string" ? cleaned.newsSummary.trim() : "";
+  if (!cleaned.article?.headline || !summary) {
+    throw new Error("Claude's reply was missing the headline or the summary, so it was not saved. Try again.");
+  }
+
+  return {
+    date:        todayStr(),
+    bulletinId:  `${todayStr()}-${(cleaned.article.source || "finnhub").toLowerCase().replace(/\s+/g, "-")}`,
+    generatedAt: now(),
+    dataSource:  "finnhub",
+    article:     cleaned.article,
+    newsSummary: summary,
+    analysis:    fixOpportunitiesNesting(cleaned.analysis || {}),
+    metadata: {
+      next_fetch:  new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) + "T07:00:00Z",
+      api_version: "1.2",
+    },
+  };
+}
 
 // ── macOS notification ────────────────────────────────────────────────────────
 /**
@@ -380,54 +433,8 @@ function sendMacNotification(title, body) {
   }
 }
 
-// ── Deterministic fallback ────────────────────────────────────────────────────
-function buildFallbackBulletin(top, articles) {
-  const headline = top?.headline || "No headline available";
-  const source   = top?.source   || "Unknown";
-  const url      = top?.url      || "";
-  const summary  = top?.summary  || "";
-  const pubAt    = top?.datetime
-    ? new Date(typeof top.datetime === "number" ? top.datetime * 1000 : top.datetime).toISOString()
-    : now();
-
-  return {
-    date:        todayStr(),
-    bulletinId:  `${todayStr()}-deterministic`,
-    generatedAt: now(),
-    dataSource:  "finnhub",
-    article: { headline, source, url, publishedAt: pubAt, summary },
-    pitchScript: `"${headline}" — reported by ${source}. ${summary} This story is relevant because it may affect cross-asset positioning across rates, equities, and credit. Monitor closely for follow-through in European and US session.`,
-    analysis: {
-      economistView: {
-        macroRegime:              "Regime classification unavailable — AI offline. Enable ANTHROPIC_API_KEY.",
-        transmissionMechanism:    `${headline} → assess impact on rates, credit, and FX.`,
-        historicalContext:        "Historical analogy generation requires AI. See article for context.",
-        centralBankImplications:  "Central bank response analysis unavailable in deterministic mode.",
-        tailRisks:                "Tail risk analysis requires AI. Monitor for follow-up data releases.",
-      },
-      tradingView: {
-        clientExposure:  "Hedge funds, long-only asset managers, and credit investors are likely exposed to this development.",
-        clientConcerns:  "Volatility, liquidity, and correlation risk in a risk-off environment.",
-        opportunities: [
-          { asset: "10Y UST", direction: "Neutral", conviction: "Low", hedge: "Standalone", rationale: "Monitor yield moves for rates signal" },
-          { asset: "Gold",    direction: "Long",    conviction: "Low", hedge: "Standalone", rationale: "Flight-to-safety hedge in uncertainty" },
-        ],
-      },
-      risks: [
-        "AI analysis unavailable — enable ANTHROPIC_API_KEY for full risk assessment.",
-        "Data surprises could invalidate any preliminary directional view.",
-        "Geopolitical escalation risk not captured in deterministic mode.",
-      ],
-    },
-    metadata: {
-      next_fetch:  new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) + "T07:00:00Z",
-      api_version: "1.1",
-    },
-  };
-}
-
 module.exports = router;
-module.exports._internal = { sendMacNotification, NOTIFY_SCRIPT };
+module.exports._internal = { sendMacNotification, NOTIFY_SCRIPT, extractBulletinJson, aiUnavailableReason };
 module.exports.generateBulletin = async function() {
   // Callable by the scheduler without going through HTTP
   const existing = getTodaysBulletin();
@@ -439,44 +446,22 @@ module.exports.generateBulletin = async function() {
   try { articles = await finnhub.getMarketNews("general", 20); } catch (err) { console.error("[bulletin] News fetch:", err.message); return null; }
   if (!articles?.length) { console.warn("[bulletin] No articles from Finnhub."); return null; }
 
+  const off = aiUnavailableReason();
+  if (off) { console.warn("[bulletin] AI unavailable — no bulletin made:", off); return null; }
+
   const articleList = articles.slice(0, 15).map((a, i) => {
     const time = a.datetime ? new Date(typeof a.datetime === "number" ? a.datetime * 1000 : a.datetime).toISOString() : "unknown";
     return `[${i + 1}] SOURCE: ${a.source || "Unknown"} | TIME: ${time}\nHEADLINE: ${a.headline || ""}\nSUMMARY: ${a.summary || "(no summary)"}\nURL: ${a.url || ""}`;
   }).join("\n\n");
 
-  if (budget.getApiFallbackInfo().active || process.env.LOW_COST_MODE === "true") {
-    const b = buildFallbackBulletin(articles[0], articles);
-    appendBulletin(b);
-    sendMacNotification(b.article.headline, b.pitchScript.slice(0, 100) + "…");
-    return b;
-  }
-
-  const macroContext  = await fetchMacroContext();
-  const moversContext = await fetchMarketMovers();
-  const xContext      = await fetchTwitterContext(articles[0]?.headline);
-  const prevBulletin  = getLatest();
-  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin);
-
   try {
-    const raw       = await callClaude(SYSTEM_PROMPT, userPrompt, 6000, MODEL_SONNET);
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON in Claude response");
-    const cleaned   = deepStrip(JSON.parse(jsonMatch[0]));
-    const bulletin  = {
-      date: todayStr(), bulletinId: `${todayStr()}-${(cleaned.article?.source||"finnhub").toLowerCase().replace(/\s+/g,"-")}`,
-      generatedAt: now(), dataSource: "finnhub",
-      article: cleaned.article || {}, pitchScript: cleaned.pitchScript || "",
-      analysis: fixOpportunitiesNesting(cleaned.analysis || {}),
-      metadata: { next_fetch: new Date(Date.now()+86_400_000).toISOString().slice(0,10)+"T07:00:00Z", api_version: "1.1" },
-    };
+    const bulletin = await generateWithClaude(articles, articleList);
     appendBulletin(bulletin);
-    sendMacNotification(bulletin.article.headline || "Morning Bulletin", (bulletin.pitchScript||"").slice(0,120)+"…");
+    sendMacNotification(bulletin.article.headline || "Morning Bulletin", (bulletin.newsSummary || "").slice(0, 120) + "…");
     console.log("[bulletin] Generated:", bulletin.article.headline);
     return bulletin;
   } catch (err) {
     console.error("[bulletin] Scheduler generate error:", err.message);
-    const b = buildFallbackBulletin(articles[0], articles);
-    appendBulletin(b); sendMacNotification(b.article.headline, (b.pitchScript || "").slice(0, 100) + "…");
-    return b;
+    return null;   // no invented bulletin (D-24)
   }
 };

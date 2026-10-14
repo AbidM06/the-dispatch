@@ -9,7 +9,8 @@
  *   bulletinId   — "YYYY-MM-DD-<source>"
  *   generatedAt  — ISO timestamp
  *   article      — { headline, source, url, publishedAt, summary }
- *   pitchScript  — full text of the 1-minute pitch
+ *   newsSummary  — short plain summary: what happened, why it matters, concern, what to watch
+ *                  (entries before 2026-10 carry `pitchScript` instead — a read-aloud script)
  *   analysis     — { economistView, tradingView, risks }
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -18,27 +19,42 @@
 const fs   = require("fs");
 const path = require("path");
 
-const LOG_FILE = path.join(__dirname, "../../data/bulletin_log.jsonl");
+const DEFAULT_LOG = path.join(__dirname, "../../data/bulletin_log.jsonl");
+// BULLETIN_LOG_PATH lets tests use a temp file; read per call so it can change.
+const logFile = () => process.env.BULLETIN_LOG_PATH || DEFAULT_LOG;
 
 function ensureDir() {
-  fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+  fs.mkdirSync(path.dirname(logFile()), { recursive: true });
 }
 
 /** Append one bulletin to the JSONL log. */
 function appendBulletin(bulletin) {
   ensureDir();
-  fs.appendFileSync(LOG_FILE, JSON.stringify(bulletin) + "\n", "utf8");
+  fs.appendFileSync(logFile(), JSON.stringify(bulletin) + "\n", "utf8");
 }
 
-/** Read all bulletins from the log, newest first. Skips corrupted lines. */
+/**
+ * Before 2026-10 a failed AI call saved a canned "deterministic" bulletin
+ * (bulletinId `<date>-deterministic`) that read like real analysis. Those are
+ * invented text (D-02) — they stay in the file but are never served again, so
+ * they can no longer be mistaken for today's bulletin or block a real one.
+ */
+function isLegacyFallback(b) {
+  return typeof b?.bulletinId === "string" && b.bulletinId.endsWith("-deterministic");
+}
+
+/** Read all bulletins from the log, newest first. Skips corrupted lines and legacy fallbacks. */
 function readAll() {
   try {
-    const raw = fs.readFileSync(LOG_FILE, "utf8");
+    const raw = fs.readFileSync(logFile(), "utf8");
     return raw
       .split("\n")
       .filter(l => l.trim())
       .reduce((acc, l) => {
-        try { acc.push(JSON.parse(l)); } catch { /* skip malformed line */ }
+        try {
+          const b = JSON.parse(l);
+          if (!isLegacyFallback(b)) acc.push(b);
+        } catch { /* skip malformed line */ }
         return acc;
       }, [])
       .reverse(); // newest first

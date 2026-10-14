@@ -300,7 +300,7 @@ The same rule now covers most surfaces (ported from the external review on
 old `rateVal()` fed the live model hardcoded rates labelled as FRED); the no-AI
 `narrativeEngine` describes only fetched, dated FRED figures (no events, no back-filled
 defaults, no seed rates — with no data it returns empty arrays); the Events/Risk routes
-never serve the old seed stories; the economic calendar has no hand-typed dates
+never serve the old seed stories; the Morning Bulletin returns 503 `available: false` + reason when the AI fails (D-24; no canned analysis); the economic calendar has no hand-typed dates
 (`economicSource: "unavailable"` when Finnhub's paid endpoint refuses); and AI prompts
 carry no fixed topic list or event-laden worked examples. `tests/reviewFixes.test.js`
 guards all of this, plus the bulletin notification (execFile + argv — AI text never

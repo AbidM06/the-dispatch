@@ -1638,6 +1638,7 @@ function App() {
   const [newsTicker, setNewsTicker]   = useState('AMD');
   const [bulletin, setBulletin]             = useState(null);
   const [bulletinLoading, setBulletinLoading] = useState(false);
+  const [bulletinError, setBulletinError]     = useState(null);   // { reason, topArticle } when the AI could not make one
   const [tickerNews, setTickerNews]   = useState(null);
   const [ideaCards, setIdeaCards]     = useState([]);
   const [ideaBusy, setIdeaBusy]       = useState(null);   // { origin, headlineId? } while generating
@@ -2095,16 +2096,22 @@ function App() {
 
   async function refreshBulletin() {
     setBulletinLoading(true);
+    setBulletinError(null);
     try {
       const resp = await fetch('/api/bulletin/refresh?force=true', { method: 'POST' });
       const json = await resp.json();
-      if (!resp.ok) { showToast(json.error || 'Refresh failed', 'error'); return; }
+      if (!resp.ok) {
+        // 503 { available:false, reason } = the AI could not make a bulletin. Say why, on screen.
+        setBulletinError({ reason: json.reason || json.error || 'Refresh failed', topArticle: json.topArticle || null });
+        return;
+      }
       setBulletin(json.data || null);
       showToast('Morning bulletin generated', 'success');
     } catch (err) {
-      showToast('Bulletin refresh error: ' + err.message, 'error');
+      setBulletinError({ reason: 'Bulletin refresh error: ' + err.message, topArticle: null });
+    } finally {
+      setBulletinLoading(false);
     }
-    setBulletinLoading(false);
   }
 
   // ── GLOSSARY: load all terms + term of the day ───────────────────────────
@@ -6058,7 +6065,7 @@ function App() {
           React.createElement('div', { style:{fontFamily:'var(--serif)',fontSize:22,fontWeight:700,color:'var(--ink)'} }, 'Morning Bulletin'),
           React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',letterSpacing:'0.1em',marginTop:3} },
             b
-              ? 'JPM SPRING WEEK PREP  ·  ' + (b.date || '') + '  ·  SOURCE: ' + (b.dataSource || 'FINNHUB').toUpperCase() + '  ·  ' + (b.generatedAt ? new Date(b.generatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + ' GMT' : '')
+              ? 'DAILY READ  ·  ' + (b.date || '') + '  ·  SOURCE: ' + (b.dataSource || 'FINNHUB').toUpperCase() + '  ·  ' + (b.generatedAt ? new Date(b.generatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + ' GMT' : '')
               : 'Daily briefing — generated at 07:00 GMT · Powered by Finnhub + Claude'
           )
         ),
@@ -6074,10 +6081,23 @@ function App() {
         )
       ),
 
+      // AI could not make a bulletin — show why; nothing invented
+      bulletinError && React.createElement('div', { className:'card', style:{padding:'18px 22px',marginBottom:12,borderLeft:'2px solid var(--red)'} },
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,fontWeight:700,color:'var(--red)',letterSpacing:'0.12em',marginBottom:8} }, 'BULLETIN UNAVAILABLE — NOTHING WAS GENERATED OR SAVED'),
+        React.createElement('div', { style:{fontSize:13,color:'var(--ink)',lineHeight:1.6,marginBottom: bulletinError.topArticle && bulletinError.topArticle.headline ? 10 : 0} }, bulletinError.reason),
+        bulletinError.topArticle && bulletinError.topArticle.headline && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:10,color:'var(--steel)',lineHeight:1.6} },
+          'Top headline right now (no analysis): ',
+          bulletinError.topArticle.url
+            ? React.createElement('a', { href:bulletinError.topArticle.url, target:'_blank', rel:'noopener noreferrer', style:{color:'var(--gold)',textDecoration:'none'} }, bulletinError.topArticle.headline)
+            : bulletinError.topArticle.headline,
+          bulletinError.topArticle.source ? ' — ' + bulletinError.topArticle.source : ''
+        )
+      ),
+
       // No bulletin yet
       !b && !bulletinLoading && React.createElement('div', { className:'card', style:{textAlign:'center',padding:32,borderStyle:'dashed',borderColor:'rgba(255,255,255,.1)'} },
         React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:11,color:'var(--steel)',marginBottom:8} }, 'NO BULLETIN FOR TODAY'),
-        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, 'Click GENERATE BULLETIN to fetch live news and produce your 1-minute JPM pitch script.')
+        React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)'} }, 'Click GENERATE BULLETIN to fetch live news and get a short summary of the day\'s biggest story.')
       ),
 
       bulletinLoading && !b && React.createElement('div', { style:{padding:32,textAlign:'center',fontFamily:'var(--mono)',fontSize:11,color:'var(--steel)'} },
@@ -6111,13 +6131,14 @@ function App() {
             }, '↗ Read full article')
           ),
 
-          // Pitch script
+          // Short summary: what happened, why it matters, concern, what to watch
           React.createElement('div', { className:'card', style:{borderLeft:'2px solid #3B82F6',padding:'22px 26px'} },
             React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8,fontWeight:700,color:'#3B82F6',letterSpacing:'0.12em',marginBottom:10} },
-              '1-MINUTE PITCH SCRIPT  ·  READ ALOUD AT JPM SESSION'
+              'SUMMARY  ·  WHAT IT MEANS, ANY CONCERN, WHAT TO WATCH'
             ),
-            React.createElement('div', { style:{fontFamily:'var(--serif)',fontSize:'clamp(15px,1.4vw,19px)',color:'var(--ink)',lineHeight:1.85,fontStyle:'italic'} },
-              '"' + (b.pitchScript || 'Pitch script unavailable.') + '"'
+            React.createElement('div', { style:{fontSize:'clamp(14px,1.25vw,17px)',color:'var(--ink)',lineHeight:1.8} },
+              // Older stored bulletins carry `pitchScript` (a read-aloud script) instead of `newsSummary`.
+              b.newsSummary || b.pitchScript || 'Summary unavailable.'
             )
           )
         ),
