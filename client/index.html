@@ -7178,6 +7178,7 @@ function App() {
         : shown.loading ? E('div', { className: 'idc-sub' }, 'Loading…')
         : shown.error ? unavailable('That note', shown.error)
         : E('div', { className: 'um-note' }, UmMarkdown(shown.markdown)),
+      um.notesSkipped && um.notesSkipped.length > 0 && E('div', { className: 'um-box bad' }, E('b', null, 'Skipped in the notes index: '), um.notesSkipped.join(' · ')),
       um.notes && um.notes.length > 1 && E('div', { className: 'um-arch' },
         um.notes.slice().reverse().map(n => E('button', { key: n.date, className: shown && shown.date === n.date ? 'on' : '', title: n.summary || n.title, onClick: () => openUmNote(n.date) }, n.date.slice(5) + ' ' + n.verdict))));
 

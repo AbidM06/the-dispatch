@@ -22,7 +22,8 @@ const TTL_MS        = 5 * 60 * 1000;
 const TIMEOUT_MS    = 8000;
 const MAX_FILE_CHARS = 400_000;
 const DATE_RE       = /^\d{4}-\d{2}-\d{2}$/;
-const NOTE_FILE_RE  = /^notes\/\d{4}-\d{2}-\d{2}\.md$/;
+// notes/YYYY-MM-DD.md, optionally with a lowercase slug: notes/2026-10-12-plan-update.md (D-25)
+const NOTE_FILE_RE  = /^notes\/\d{4}-\d{2}-\d{2}(-[a-z0-9]+)*\.md$/;
 const VERDICTS      = ["HOLD", "WATCH", "ACT"];
 
 const store = new Map(); // url → { text, fetchedAt }
@@ -88,13 +89,25 @@ function parseStatus(text) {
   return s;
 }
 
+/**
+ * Returns { items, skipped }. The file must be a list; each entry is checked on its own.
+ * A bad entry is skipped and named in `skipped` (plain English) so one slip does not hide
+ * every note (D-25). The file path of a kept entry always matches NOTE_FILE_RE.
+ */
 function parseNotesIndex(text) {
   const a = JSON.parse(text);
   need(Array.isArray(a), "notes index is not a list");
-  for (const n of a)
-    need(n && DATE_RE.test(n.date || "") && NOTE_FILE_RE.test(n.file || "") && VERDICTS.includes(n.verdict),
-      "a notes index entry has a bad date, file or verdict");
-  return a;
+  const items = [], skipped = [];
+  const label = (n, i) => {
+    const d = n && typeof n.date === "string" ? n.date.replace(/[^0-9-]/g, "").slice(0, 10) : "";
+    return d ? "entry for " + d : "entry " + (i + 1);
+  };
+  a.forEach((n, i) => {
+    const ok = n && typeof n === "object" && typeof n.date === "string" && DATE_RE.test(n.date)
+      && typeof n.file === "string" && NOTE_FILE_RE.test(n.file) && VERDICTS.includes(n.verdict);
+    if (ok) items.push(n); else skipped.push(label(n, i) + " has a bad date, file or verdict");
+  });
+  return { items, skipped };
 }
 
 // Every log entry is reduced to known fields of the expected type, so a file with
@@ -245,8 +258,9 @@ async function load(now = new Date()) {
     try { out.view = buildView(pf.value, st.value, now); }
     catch (err) { errors.view = "could not be read (" + err.message + ")"; }
   }
-  const notes = ni ? [...ni.value].sort((a, c) => a.date.localeCompare(c.date)) : null;
+  const notes = ni ? [...ni.value.items].sort((a, c) => a.date.localeCompare(c.date)) : null;
   out.notes = notes;
+  out.notesSkipped = ni ? ni.value.skipped : [];
   if (notes && notes.length) {
     const latest = notes[notes.length - 1];
     const body = await get("latestNote", latest.file, (t) => t);
@@ -264,7 +278,7 @@ async function loadNote(date) {
   const b = baseUrl();
   if (!b.configured || b.error) throw Object.assign(new Error(b.error || "UMushroom is not configured"), { status: 503 });
   if (!DATE_RE.test(date)) throw Object.assign(new Error("bad date"), { status: 400 });
-  const idx = parseNotesIndex((await fetchText(b.base, "notes/index.json")).text);
+  const idx = parseNotesIndex((await fetchText(b.base, "notes/index.json")).text).items;
   const entry = idx.find((n) => n.date === date);
   if (!entry) throw Object.assign(new Error("no note for that date"), { status: 404 });
   const f = await fetchText(b.base, entry.file);
