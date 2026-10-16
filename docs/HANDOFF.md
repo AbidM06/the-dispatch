@@ -45,6 +45,7 @@ Working and merged (PR #4, 2026-09-28):
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
 | Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
+| UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -144,6 +145,11 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-16 — Claude (UMUSHROOM notes section)
+- Owner reported the UMUSHROOM view not updating. Cause: `parseNotesIndex` required `notes/YYYY-MM-DD.md` exactly; the 12 Oct entry is `notes/2026-10-12-plan-update.md`, so the whole notes list failed closed. Everything else loaded (checked by running the validators against the live repo).
+- Fix: optional lowercase suffix accepted; a bad entry is skipped and named on screen (D-25). Tests: 3 new/changed in `tests/umushroom.test.js`.
+- Next: Codex review, owner merge, pull and restart on the Mac. Known gap: two notes on the same date would share one archive button (the archive is keyed by date); not hit yet.
 
 ### 2026-10-14 — Claude (Morning Bulletin)
 - Owner's screenshot: News tab showed 'Regime classification unavailable — AI offline. Enable ANTHROPIC_API_KEY' and a hardcoded Gold/10Y table. That was `buildFallbackBulletin()` — canned text, saved to the log as the day's bulletin, unlabelled. Removed it (D-24): failures now return 503 `available: false` + reason, shown in a red panel; nothing saved.

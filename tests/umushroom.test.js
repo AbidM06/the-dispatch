@@ -206,10 +206,29 @@ describe("umushroom source", () => {
     expect(calls.every((u) => u.startsWith(BASE + "/"))).toBe(true);
   });
 
-  test("an index entry that points outside notes/ is rejected", async () => {
-    mockRepo(goodFiles({ "notes/index.json": [{ date: "2026-10-12", title: "x", verdict: "HOLD", file: "../secrets.md" }] }));
+  test("an index entry that points outside notes/ is skipped, the rest still show (D-25)", async () => {
+    mockRepo(goodFiles({ "notes/index.json": [
+      { date: "2026-10-12", title: "x", verdict: "HOLD", file: "../secrets.md" },
+      { date: "2026-10-13", title: "ok", verdict: "WATCH", file: "notes/2026-10-13.md" },
+    ] }));
     const out = await src.load(NOW);
-    expect(out.errors.notes).toMatch(/bad date, file or verdict/);
+    expect(out.errors.notes).toBeUndefined();
+    expect(out.notes.map((n) => n.date)).toEqual(["2026-10-13"]);
+    expect(out.notesSkipped).toEqual(["entry for 2026-10-12 has a bad date, file or verdict"]);
+  });
+
+  test("a dated note with a lowercase suffix is accepted; other shapes are not", () => {
+    const mk = (file) => JSON.stringify([{ date: "2026-10-12", title: "t", verdict: "ACT", file }]);
+    expect(src.parseNotesIndex(mk("notes/2026-10-12-plan-update.md")).items).toHaveLength(1);
+    for (const bad of ["notes/2026-10-12-Plan.md", "notes/2026-10-12-.md", "notes/x/2026-10-12.md", "notes/2026-10-12-plan/../../a.md", "notes/trial-2026-10-12.md"])
+      expect(src.parseNotesIndex(mk(bad)).items).toHaveLength(0);
+  });
+
+  test("a notes index that is not a list is still an error for the whole section", async () => {
+    mockRepo(goodFiles({ "notes/index.json": { not: "a list" } }));
+    const out = await src.load(NOW);
+    expect(out.errors.notes).toMatch(/not a list/);
+    expect(out.notes).toBeNull();
   });
 });
 
