@@ -58,7 +58,7 @@ Red-team this report. Return EXACTLY this JSON object:
   "confidence": "HIGH|MEDIUM|LOW"
 }`;
 
-  const raw  = await callAgent("redteam", SYSTEM, user, { maxTokens: 5000, search: "force", usage });
+  const raw  = await callAgent("redteam", SYSTEM, user, { maxTokens: 8000, search: "force", usage });
   const data = anthropic.extractJSON(raw, "object");
   if (!data || !data.verdict) throw new Error("redTeam: could not parse red-team JSON");
   return data;

@@ -498,7 +498,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
   QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
 - Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
-  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5.5; `server/providers/models.js`) for every draft (all seven types) and reviewer, Haiku 5.5 for claim extraction only (D-26). **No Haiku stand-in (D-19):** a failed Sonnet call throws `SONNET_UNAVAILABLE` with a plain-English reason and the report is unavailable.
+  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5.5; `server/providers/models.js`) for every draft (all seven types) and the auditor / cross-asset PM, **Opus 5.5 (`claude-opus-5-5`) for the red team and IC chair only (D-27)**, Haiku 5.5 for claim extraction only (D-26). **No Haiku stand-in (D-19):** a failed Sonnet or Opus call throws `SONNET_UNAVAILABLE` with a plain-English reason and the report is unavailable.
 - **Every agent receives the verified FRED block** (`verifiedBlock`) — reviewers used to judge
   the draft with no market data of their own.
 - **Fact check before audit**: `factCheck.checkClaims()` settles FACT claims naming exactly one

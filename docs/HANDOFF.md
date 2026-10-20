@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/haiku-5-5`
+**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/market-compare-charts`
 
 ---
 
@@ -46,7 +46,8 @@ Working and merged (PR #4, 2026-09-28):
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
 | Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
 | UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
-| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Owner to generate one report afterwards and compare the cost receipt and claim count with a pre-change one |
+| Red team + IC chair on Opus 5.5 (D-27) | Claude | `claude/opus-reviewers` | Merged (PR #5, 2026-10-20). Owner to restart the Mac, generate one report and compare its receipt with an earlier one |
+| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
 | More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | PR open (draft); needs Codex review. Then PR 2 (Journal idea charts), 3 (yield curve/macro), 4 (charts in reports), one at a time |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
@@ -152,6 +153,12 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).
 - PR 1: new COMPARE view in the Markets tab (2–4 series, rebased to 100 or A − B spread, 6M/1Y/5Y), plus 1Y/5Y on the single charts. Server `getComparison` intersects dates (nothing filled), refuses meaningless spreads / non-positive rebase bases / prediction markets; legend + summary table + source links; colours validated for both themes. Checked in a real browser (day + night, 1–4 series, refusal message) against the real server code with mocked upstream data; Yahoo/FRED not reachable from the cloud session, so live data is unverified until the owner runs it.
 - Next: Codex review, owner merge; then PR 2.
+### 2026-10-20 — Claude (Opus 5.5 reviewers)
+- Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
+- Added `claude-opus-5-5` to `aiCost` ($4/$20; cache reads 0.05x — its list price is $0.20/M, not the usual 0.1x). Raised token caps (red team 8000, chair 7000) because Opus always thinks and thinking counts toward `max_tokens`. Fixed `sonnetFailure()` so an Opus failure no longer reads "Claude Sonnet (claude-opus-5-5)". Estimate assumption $0.70 → $0.85. 499 tests (3 updated, 3 new).
+- Not verified live (no Anthropic key in the cloud session). Cost is a ballpark (+~$0.10–0.20 per report), not measured — compare receipts. Rollback per role: `RESEARCH_REDTEAM_MODEL` / `RESEARCH_CHAIR_MODEL=claude-sonnet-5-5`.
+- Codex P2 on PR #5: the pre-run estimate averaged old Sonnet-only receipts. `estimateReport` now leaves out receipts whose red team / chair model differs from what the next run would use (falls back to the $0.85 assumption, and says why).
+- Next: merge PR #4 first, then this one; Codex review; restart; compare one report's receipt.
 
 ### 2026-10-20 — Claude (Haiku 5.5)
 - Owner asked to move the research tab's second agent (claim extraction, the only Haiku agent there) to Haiku 5.5, and chose **every Haiku job**, reason: better extraction quality + lower cost. Thinking left at Haiku 5.5's default; draft revision stays on Sonnet (it runs under `lead`, not Haiku).
