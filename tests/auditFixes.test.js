@@ -1,5 +1,5 @@
 /**
- * tests/auditFixes.test.js — D-29: the Codex data-integrity audit (items 2–6).
+ * tests/auditFixes.test.js — D-30: the Codex data-integrity audit (items 2–6).
  * (Item 1, the Brief, is D-28 / tests/brief.test.js; the bulletin's data block is
  * covered in tests/bulletin.test.js.)
  *

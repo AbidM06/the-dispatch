@@ -67,8 +67,8 @@ const INSTRUMENTS = [
 
   // ── Commodities ─────────────────────────────────────────────────────────────
   { id: "GOLD",   label: "Gold",        group: "commodities", kind: "price", decimals: 1, sources: [y("GC=F")] },
-  { id: "WTI",    label: "WTI crude",   group: "commodities", kind: "price", decimals: 2, sources: [y("CL=F"), fr("DCOILWTICO")] },
-  { id: "BRENT",  label: "Brent crude", group: "commodities", kind: "price", decimals: 2, sources: [y("BZ=F"), fr("DCOILBRENTEU")] },
+  { id: "WTI",    label: "WTI crude",   group: "commodities", kind: "price", decimals: 2, spreadUnit: "USD/bbl", sources: [y("CL=F"), fr("DCOILWTICO")] },
+  { id: "BRENT",  label: "Brent crude", group: "commodities", kind: "price", decimals: 2, spreadUnit: "USD/bbl", sources: [y("BZ=F"), fr("DCOILBRENTEU")] },
   { id: "COPPER", label: "Copper",      group: "commodities", kind: "price", decimals: 3, sources: [y("HG=F")] },
   { id: "NATGAS", label: "Natural gas", group: "commodities", kind: "price", decimals: 3, sources: [y("NG=F"), fr("DHHNGSP")] },
 

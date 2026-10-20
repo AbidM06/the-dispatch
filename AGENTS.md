@@ -107,7 +107,7 @@ npm run test:coverage
 client/index.html          Single-file React app (createElement, no JSX build)
 server/index.js            Express entry point — mounts all routes
 server/routes/
-  markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id
+  markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id (tf 1d|1h|1y|5y) | GET /api/markets/compare
   ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
   journal.js               GET /api/journal | GET /api/journal/:id | POST …/:id/{watch,pitch,manual-price} — append-only
   umushroom.js             GET /api/umushroom | GET /api/umushroom/note/:date — read-only view of the public paper-portfolio repo (D-23)
@@ -182,7 +182,7 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   source fails, and still writes the legacy `snapshot:rates` / `snapshot:data` cache keys
   (only the Daily Brief reads them now). Events, Risk and the AI-refresh fallback read
   `markets.narrativeContext()` — straight from the snapshot, so a carried-forward rate keeps
-  `stale` / `staleSince` and the no-AI cards say STALE (D-29). Freshness is **measured** from the
+  `stale` / `staleSince` and the no-AI cards say STALE (D-30). Freshness is **measured** from the
   print time (≤2 min Real-time, ≤30 min Delayed ~N, else Last trade; FRED = Daily close / Monthly)
   and `GET /api/markets` **re-grades exchange prints against now** (`ageFreshness`, pure) —
   a 14:45 print is not "Real-time" at 17:00.
@@ -190,6 +190,7 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   (post-NYSE-open) London, DST-safe via Intl. Each slot runs once, keyed `YYYY-MM-DD@HH:MM`
   in `lastScheduledDate`; asleep through several slots → ONE catch-up for the latest.
   Marks the slot done even on failure. A bare-date marker (pre-slot format) means "day done".
+- **Compare / overlay** (D-28): `GET /api/markets/compare?ids=A,B[,C,D]&tf=1d|1y|5y&mode=rebased|spread` plots 2–4 fixed instruments on SHARED dates only — a day missing from any series is dropped and counted, never filled or interpolated. `rebased` sets each series to 100 on the first shared day (refused if a start value is ≤ 0); `spread` is A − B, allowed only for two series in the same unit (rates/credit/macro in %, or WTI vs Brent in USD/bbl). Prediction markets are not comparable. Free sources only, no AI. 1Y/5Y are daily bars (Yahoo `range=1y|5y`, FRED trimmed to the window). Each series is cut to the selected window (6M/1Y/5Y) regardless of the source's own default. Series colours are `--cmp-1..4` (validated palette slots, colour follows the picker slot).
 - Routes: `GET /api/markets` (never fetches unless no snapshot exists), `POST /api/markets/refresh`
   (manual; ignored if <60 s since last), `GET /api/markets/history/:id?tf=1d|1h`, `GET /api/markets/status`.
 - UI: MARKETS tab (table ↔ chart grid, click a row for its chart; TradingView Lightweight
@@ -517,7 +518,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - `RESEARCH_MULTI_AGENT=false` → one draft call per report (`singleCallReport`), still priced,
   versioned and stored; QA honestly NOT_RUN.
 - Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).
-- **`dataAsOf` (D-29)** is the date of the report's OLDEST verified figure (`macroContext.oldestFigureDate`),
+- **`dataAsOf` (D-30)** is the date of the report's OLDEST verified figure (`macroContext.oldestFigureDate`),
   `null` when it was given none — never the generation date. `research.dataFetchedAt` is when the data was
   retrieved; `generatedAt` is when the report was made. The client shows all of them.
 - **The Morning Bulletin uses the same verified block** (`macroContext.getMacroContext()` + `toPromptBlock()`):

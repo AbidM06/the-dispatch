@@ -109,7 +109,7 @@ const LIVE_RATES = {
   hy_spread: { value: 3.05, date: "2026-09-25", source: "FRED" },
   t10y2y:    { value: 0.41, date: "2026-09-25", source: "FRED" },
 };
-// Events/Risk read the Markets snapshot directly (D-29), so the fixture stands in for it.
+// Events/Risk read the Markets snapshot directly (D-30), so the fixture stands in for it.
 let ratesSpy = null;
 function seedLiveRates() {
   ratesSpy = jest.spyOn(require("../server/markets/service"), "narrativeContext").mockReturnValue({ rates: LIVE_RATES });

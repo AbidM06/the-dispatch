@@ -296,7 +296,7 @@ describe("qualityGate", () => {
 
 // ══════════════════════════════════════════════════════════════════════════════
 describe("orchestrator", () => {
-  test("report.dataAsOf is the date of the OLDEST verified figure, not the generation date (D-29)", async () => {
+  test("report.dataAsOf is the date of the OLDEST verified figure, not the generation date (D-30)", async () => {
     mockAgents();
     const macroCtx = { facts: {
       dgs10: { key: "dgs10", label: "10Y", group: "rates", value: 4.5, formatted: "4.50%", source: "FRED", seriesId: "DGS10", asOf: "2026-10-13" },
@@ -307,7 +307,7 @@ describe("orchestrator", () => {
     expect(report.dataAsOf).not.toBe(new Date().toISOString().slice(0, 10));
   });
 
-  test("with no verified figures dataAsOf is null — never today's date (D-29)", async () => {
+  test("with no verified figures dataAsOf is null — never today's date (D-30)", async () => {
     mockAgents();
     const report = await orch.runPipeline({ type: "macro", topic: "", ratesContext: "ctx" });
     expect(report.dataAsOf).toBeNull();

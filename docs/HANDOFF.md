@@ -40,14 +40,15 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
-| Data-accuracy audit items 2–6 (D-29): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-28, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
+| Data-accuracy audit items 2–6 (D-30): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-29, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
 | Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
 | UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
-| Red team + IC chair on Opus 5.5 (D-27) — builds on `claude/haiku-5-5` (same files: `models.js`, `aiCost.js`) | Claude | `claude/opus-reviewers` | PR open (draft), **based on `claude/haiku-5-5`** — merge PR #4 first; needs Codex review. Owner to generate one report and compare its receipt with a pre-change one |
-| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Owner to generate one report afterwards and compare the cost receipt and claim count with a pre-change one |
+| Red team + IC chair on Opus 5.5 (D-27) | Claude | `claude/opus-reviewers` | Merged (PR #5, 2026-10-20). Owner to restart the Mac, generate one report and compare its receipt with an earlier one |
+| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
+| More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | PR open (draft); needs Codex review. Then PR 2 (Journal idea charts), 3 (yield curve/macro), 4 (charts in reports), one at a time |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -87,7 +88,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 - **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
   [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
-  Confirmed with mocked checks. Items 2–6 are fixed on `claude/audit-data-integrity` (D-29, PR pending); item 1 (Brief) on `claude/brief-no-seed` (D-28):
+  Confirmed with mocked checks. Items 2–6 are fixed on `claude/audit-data-integrity` (D-30, PR pending); item 1 (Brief) on `claude/brief-no-seed` (D-29):
   1. **P1 Brief** (`server/routes/brief.js`) manufactures missing values: March-2026
      `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
      reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
@@ -148,14 +149,20 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## Session log (newest first)
 
-### 2026-10-20 — Claude (audit items 2–6, D-29)
+### 2026-10-20 — Claude (audit items 2–6, D-30)
 - Owner: 'next task should be the audit bugs'. Questioned first; owner chose one PR for all five, the bulletin reusing the research data block, both date labels on reports, and stale rates read directly from Markets and labelled (not dropped).
 - Verified each audit item against the code before fixing. Codex was right on all five. One detail it missed: `fred.getAllRates()` returns observation objects, so the bulletin's `.toFixed` threw and the whole block vanished; the tweet cross-check had the same shape bug (always 'contradicted'/threw). Fixed both by using `macroContext` facts.
 - FRED `limit` 1 → 10. Bulletin: `getMacroContext()` + `toPromptBlock()`. Schemas: `.passthrough()` on event/risk items. Markets: `narrativeContext()` (Events/Risk/AI refresh), `ageFreshness()` on `GET /api/markets` (exchange prints only), narrative cards name the true source and say STALE. Research: `dataAsOf` = oldest figure's date, `dataFetchedAt`, client footer 'Fetched … · Oldest figure …'.
 - Tests: 17 new (`tests/auditFixes.test.js`, +4 in `bulletin.test.js`, +2 in `researchPipeline.test.js`); they fail on `main`'s code. Full suite green. Checked the client in headless Chromium against a fixture (loads, no page errors, aged labels served). Not verified against live Yahoo/FRED/Anthropic (sandbox).
-- Not done: aging DAILY/monthly FRED rows in Markets (they carry no age in their label; the research layer's 2-trading-day STALE rule covers reports) and the real economic calendar. `writeCompatCache` is kept only because `brief.js` on `main` still reads `snapshot:rates`; delete it after PR #7 (D-28) merges.
+- Not done: aging DAILY/monthly FRED rows in Markets (they carry no age in their label; the research layer's 2-trading-day STALE rule covers reports) and the real economic calendar. `writeCompatCache` is kept only because `brief.js` on `main` still reads `snapshot:rates`; delete it after PR #7 (D-29) merges.
 - Next: Codex review, owner merge, `git pull`, restart. Then: the real economic calendar (§3.4).
 
+### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
+- Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).
+- PR 1: new COMPARE view in the Markets tab (2–4 series, rebased to 100 or A − B spread, 6M/1Y/5Y), plus 1Y/5Y on the single charts. Server `getComparison` intersects dates (nothing filled), refuses meaningless spreads / non-positive rebase bases / prediction markets; legend + summary table + source links; colours validated for both themes. Checked in a real browser (day + night, 1–4 series, refusal message) against the real server code with mocked upstream data; Yahoo/FRED not reachable from the cloud session, so live data is unverified until the owner runs it.
+- Codex P1: prediction-market charts showed lifetime history under a 1Y/5Y label (Polymarket only offers 'max'). Now trimmed to the window, with a note when the market is younger than the range.
+- Codex P1 (round 2): a 6M comparison of FRED-only series showed a year or more. `getComparison` now cuts every series to the selected window (6M / 1Y / 5Y) before intersecting, whatever the source's own default.
+- Next: Codex review, owner merge; then PR 2.
 ### 2026-10-20 — Claude (Opus 5.5 reviewers)
 - Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
 - Added `claude-opus-5-5` to `aiCost` ($4/$20; cache reads 0.05x — its list price is $0.20/M, not the usual 0.1x). Raised token caps (red team 8000, chair 7000) because Opus always thinks and thinking counts toward `max_tokens`. Fixed `sonnetFailure()` so an Opus failure no longer reads "Claude Sonnet (claude-opus-5-5)". Estimate assumption $0.70 → $0.85. 499 tests (3 updated, 3 new).

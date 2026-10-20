@@ -137,8 +137,8 @@ describe("bulletin — success path", () => {
   });
 });
 
-// ── D-29: the bulletin's macro block is the verified, dated research layer ─────
-describe("bulletin — verified market data block (D-29)", () => {
+// ── D-30: the bulletin's macro block is the verified, dated research layer ─────
+describe("bulletin — verified market data block (D-30)", () => {
   const TODAY = new Date().toISOString().slice(0, 10);
   const VALUES = { DGS10: 4.37, DFII10: 1.91, T10YIE: 2.46, T10Y2Y: 0.41, DGS2: 4.0, DFF: 3.9, BAMLH0A0HYM2: 3.17,
                    DCOILBRENTEU: 99.5, DCOILWTICO: 95.1, VIXCLS: 17.2, DEXUSEU: 1.09 };

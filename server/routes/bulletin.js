@@ -57,7 +57,7 @@ function fixOpportunitiesNesting(analysis) {
   return analysis;
 }
 
-// ── Verified macro facts (D-29) ───────────────────────────────────────────────
+// ── Verified macro facts (D-30) ───────────────────────────────────────────────
 // The same dated, stale-flagged layer every research report uses (providers/macroContext):
 // each figure carries its own source and observation date, newer Markets prices are
 // overlaid, and a figure older than 2 trading days is marked STALE. The bulletin used to
