@@ -314,6 +314,26 @@ describe("longer ranges + compare/overlay — real closes on shared dates only",
     await expect(markets.getHistory("GOLD", "10y")).resolves.toMatchObject({ tf: "1d" });   // unknown → default, as before
   });
 
+  test("Polymarket 1Y / 5Y are trimmed to the window (not lifetime history under a 1Y label), with a note when the market is younger", async () => {
+    const DAY = 86400, now = Math.floor(NOW / 1000);
+    global.fetch = makeFetch((url) => url.includes("clob.polymarket.com")
+      ? { status: 200, body: { history: [
+          { t: now - 800 * DAY, p: 0.2 }, { t: now - 400 * DAY, p: 0.25 },     // older than 1 year
+          { t: now - 200 * DAY, p: 0.3 }, { t: now - 10 * DAY, p: 0.4 }] } }
+      : null);
+    const markets = require("../server/markets/service");
+    await markets.refresh("manual");
+    const id = markets.getSnapshot().items.find(i => i.group === "predictions").id;
+    const y1 = await markets.getHistory(id, "1y");
+    expect(y1.points.map(p => p.v)).toEqual([30, 40]);                 // only the last 365 days
+    expect(y1.note).toBeUndefined();                                    // history covers the whole year
+    const y5 = await markets.getHistory(id, "5y");
+    expect(y5.points).toHaveLength(4);
+    expect(y5.note).toMatch(/Market history starts .* shorter than 5 years/);
+    const all = await markets.getHistory(id, "1d");                     // unchanged behaviour
+    expect(all.points).toHaveLength(4);
+  });
+
   test("rebased: every series starts at 100 on the first shared day; a day missing from one series is dropped from all, and counted", async () => {
     const markets = require("../server/markets/service");
     const c = await markets.getComparison(["WTI", "BRENT"], "1y", "rebased");

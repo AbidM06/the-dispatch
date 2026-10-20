@@ -303,9 +303,23 @@ async function polymarketTop(tags, count) {
 async function polymarketHistory({ tokenId }, tf) {
   const [interval, fidelity] = tf === "1h" ? ["1w", 60] : ["max", 1440];
   const j = await getJson(`https://clob.polymarket.com/prices-history?market=${tokenId}&interval=${interval}&fidelity=${fidelity}`);
-  const points = (j.history || []).map(p => ({ t: p.t, v: round(p.p * 100, 2) }));
+  let points = (j.history || []).map(p => ({ t: p.t, v: round(p.p * 100, 2) }));
   if (!points.length) throw new Error("Polymarket: empty history");
-  return { type: "line", points, source: "Polymarket", sourceUrl: "https://polymarket.com" };
+  // 1Y / 5Y mean exactly that window. Polymarket only offers "max", so trim to the window, and say so
+  // when the market is younger than the range (never show lifetime history under a 1Y/5Y label).
+  let note;
+  if (tf === "1y" || tf === "5y") {
+    const years = tf === "5y" ? 5 : 1;
+    const cutoff = Math.floor(Date.now() / 1000) - years * 365 * 86400;
+    const inWindow = points.filter(p => p.t >= cutoff);
+    if (!inWindow.length) throw new Error(`Polymarket: no prices in the last ${years === 1 ? "year" : years + " years"}`);
+    const first = points[0].t;
+    if (first > cutoff + 7 * 86400) {
+      note = `Market history starts ${new Date(first * 1000).toLocaleDateString("en-GB", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" })} — shorter than ${years === 1 ? "1 year" : years + " years"}`;
+    }
+    points = inWindow;
+  }
+  return { type: "line", points, source: "Polymarket", sourceUrl: "https://polymarket.com", note };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

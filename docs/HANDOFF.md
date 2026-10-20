@@ -152,6 +152,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 ### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
 - Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).
 - PR 1: new COMPARE view in the Markets tab (2–4 series, rebased to 100 or A − B spread, 6M/1Y/5Y), plus 1Y/5Y on the single charts. Server `getComparison` intersects dates (nothing filled), refuses meaningless spreads / non-positive rebase bases / prediction markets; legend + summary table + source links; colours validated for both themes. Checked in a real browser (day + night, 1–4 series, refusal message) against the real server code with mocked upstream data; Yahoo/FRED not reachable from the cloud session, so live data is unverified until the owner runs it.
+- Codex P1: prediction-market charts showed lifetime history under a 1Y/5Y label (Polymarket only offers 'max'). Now trimmed to the window, with a note when the market is younger than the range.
 - Next: Codex review, owner merge; then PR 2.
 ### 2026-10-20 — Claude (Opus 5.5 reviewers)
 - Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
