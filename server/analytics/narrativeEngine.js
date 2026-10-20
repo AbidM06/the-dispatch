@@ -68,8 +68,9 @@ function generateEvents(s) {
     ticker:   "MACRO",
     date:     s.dgs10.asOf,
     detail:   `Latest observation (${SRC("DGS10", s.dgs10)}).` +
-              (s.dfii10 ? ` Real yield ${fmt(s.dfii10.value)}%.` : "") +
-              (s.t10yie ? ` Breakeven ${fmt(s.t10yie.value)}%.` : ""),
+              // each appended figure carries its own date and STALE flag — it may be stale when the 10Y is not
+              (s.dfii10 ? ` Real yield ${fmt(s.dfii10.value)}% (${SRC("DFII10", s.dfii10)}).` : "") +
+              (s.t10yie ? ` Breakeven ${fmt(s.t10yie.value)}% (${SRC("T10YIE", s.t10yie)}).` : ""),
     basis:    "observation",
   });
   if (s.t10y2y) out.push({

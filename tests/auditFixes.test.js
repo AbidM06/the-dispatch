@@ -135,6 +135,21 @@ describe("Events/Risk read the Markets snapshot with stale flags intact (audit i
   });
 });
 
+describe("every figure on a combined event card is dated and STALE-flagged (Codex review of PR #9)", () => {
+  test("a fresh 10Y with a carried-forward real yield and breakeven: the secondary figures say STALE", () => {
+    const { generateNarrative } = require("../server/analytics/narrativeEngine");
+    const n = generateNarrative({ rates: {
+      dgs10:  { value: 4.5,  date: "2026-10-19", source: "FRED" },
+      dfii10: { value: 1.91, date: "2026-10-14", source: "FRED", stale: true },
+      t10yie: { value: 2.46, date: "2026-10-14", source: "FRED", stale: true },
+    } });
+    const tenY = n.events.find(e => /10Y Treasury/.test(e.headline));
+    expect(tenY.detail).toMatch(/Real yield 1\.91% \(FRED DFII10, as of 2026-10-14 — STALE/);
+    expect(tenY.detail).toMatch(/Breakeven 2\.46% \(FRED T10YIE, as of 2026-10-14 — STALE/);
+    expect(tenY.detail).toMatch(/Latest observation \(FRED DGS10, as of 2026-10-19\)\./);   // the fresh one is not flagged
+  });
+});
+
 // ── 6. Research "data as of" ───────────────────────────────────────────────────
 describe("research data-as-of is the oldest figure, not the generation date (audit item 6)", () => {
   test("oldestFigureDate: earliest date among rows, timestamps trimmed, null when none", () => {
