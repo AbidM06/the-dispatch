@@ -102,7 +102,17 @@ describe("reviewer steps (llm.callAgent) fail with a plain reason too", () => {
     const llm = require("../server/research/llm");
     await expect(llm.callAgent("redteam", "s", "u")).rejects.toMatchObject({
       code: "SONNET_UNAVAILABLE", message: expect.stringMatching(/overloaded .*The red team step could not run, and no lower-quality model was used/) });
-    expect(calls).toEqual([llm.MODEL_SONNET]);
+    expect(calls).toEqual([llm.MODEL_OPUS]);   // the red team runs on Opus 5.5 (D-27)
+  });
+
+  test("an Opus failure is labelled Opus on screen, not Sonnet", async () => {
+    jest.resetModules();
+    const anthropic = require("../server/providers/anthropic");
+    const e = anthropic.sonnetFailure(Object.assign(new Error("x"), { status: 529 }), "claude-opus-5-5", { step: "IC chair" });
+    expect(e.message).toMatch(/^Claude Opus \(claude-opus-5-5\) was overloaded/);
+    expect(e.code).toBe("SONNET_UNAVAILABLE");
+    const s = anthropic.sonnetFailure(Object.assign(new Error("x"), { status: 529 }), "claude-sonnet-5-5");
+    expect(s.message).toMatch(/^Claude Sonnet \(claude-sonnet-5-5\)/);
   });
 
   test("the QA reason names each reviewer that failed and why", () => {

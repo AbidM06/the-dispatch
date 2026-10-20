@@ -32,6 +32,12 @@ const orchestrator = require("../research/orchestrator");
 const reportStore  = require("../research/reportStore");
 const interrogator = require("../research/interrogator");
 const cost         = require("../providers/aiCost");
+const { modelForRole } = require("../research/llm");
+
+// The models the next run would use for the roles whose model affects cost (D-27): receipts from a
+// different mix are not averaged into the estimate.
+const estimateFor = (type) => cost.estimateReport(type, reportStore.recentForType(type),
+  { roleModels: { redteam: modelForRole("redteam"), chair: modelForRole("chair") } });
 const redTeamLog   = require("../research/redTeamLog");
 const transport    = require("../providers/claudeTransport");
 
@@ -311,7 +317,7 @@ router.get("/report", (req, res) => {
 // (or a stated default when none exist yet). Nothing is called.
 router.get("/report/estimate", (req, res) => {
   const type = VALID_TYPES.has(req.query.type) ? req.query.type : "macro";
-  res.json({ type, ...cost.estimateReport(type, reportStore.recentForType(type)), spend: cost.spendSummary() });
+  res.json({ type, ...estimateFor(type), spend: cost.spendSummary() });
 });
 
 // ── POST /api/research/report/refresh ────────────────────────────────────────
@@ -321,7 +327,7 @@ router.post("/report/refresh", requireWriteAuth, async (req, res) => {
 
   // A manual refresh spends real money. Above the threshold, the caller must
   // have seen the estimate and confirmed it.
-  const estimate = cost.estimateReport(type, reportStore.recentForType(type));
+  const estimate = estimateFor(type);
   if (!confirm && estimate.estimateUSD > cost.confirmThresholdUSD()) {
     return res.status(409).json({
       error: "confirmation_required",

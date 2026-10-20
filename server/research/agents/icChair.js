@@ -84,7 +84,7 @@ ${SCORE_DIMENSIONS.map(d => `    "${d}": <0-100>`).join(",\n")}
 
 Scoring guidance: 90+ exceptional, 80-89 institutional grade, 70-79 acceptable with issues, <70 material problems. If a reviewer did NOT run, score the affected dimensions from what you can verify yourself and note the gap in unresolvedQuestions.`;
 
-  const raw  = await callAgent("chair", SYSTEM, user, { maxTokens: 4000, usage });
+  const raw  = await callAgent("chair", SYSTEM, user, { maxTokens: 7000, usage });
   const data = anthropic.extractJSON(raw, "object");
   if (!data || !data.status || !data.dimensionScores) {
     throw new Error("icChair: could not parse adjudication JSON");

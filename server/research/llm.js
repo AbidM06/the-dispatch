@@ -33,15 +33,16 @@ const anthropic = require("../providers/anthropic");
 // capable than the Sonnet 4.5 this pipeline was first written against.
 const models       = require("../providers/models");
 const MODEL_HAIKU  = models.HAIKU;
-const MODEL_SONNET = models.sonnetModel();   // SONNET_MODEL in .env (default Sonnet 5)
+const MODEL_SONNET = models.sonnetModel();   // SONNET_MODEL in .env (default Sonnet 5.5)
+const MODEL_OPUS   = models.OPUS;            // red team + IC chair: the two judgement roles (D-27)
 
 const ROLE_DEFAULTS = {
   lead:      MODEL_SONNET,
   extract:   MODEL_HAIKU,
   auditor:   MODEL_SONNET,
-  redteam:   MODEL_SONNET,
+  redteam:   MODEL_OPUS,
   portfolio: MODEL_SONNET,
-  chair:     MODEL_SONNET,
+  chair:     MODEL_OPUS,
   chat:      MODEL_SONNET,
   ideas:     MODEL_SONNET,
 };
@@ -153,4 +154,4 @@ async function callAgent(role, system, user, opts = {}) {
 const ROLE_LABEL = { lead: "lead analyst", auditor: "data auditor", redteam: "red team", portfolio: "cross-asset PM",
   chair: "IC chair", chat: "interrogation", ideas: "trade idea", extract: "claim extraction" };
 
-module.exports = { callAgent, modelForRole, newUsageTracker, buildUserContent, MODEL_HAIKU, MODEL_SONNET };
+module.exports = { callAgent, modelForRole, newUsageTracker, buildUserContent, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS };
