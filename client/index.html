@@ -1491,6 +1491,15 @@ function LazyMount({ height, children }) {
  * Dotted High/Low lines over the visible period, last-value tag on the axis,
  * crosshair with an O/H/L/C (or value) read-out in the top-left.
  */
+/** How often a line series really prints, from the spacing of its own points (never assumed): daily, weekly, monthly… */
+function mkSeriesCadence(points) {
+  const t = (points || []).map(p => p.t).sort((a, b) => a - b);
+  if (t.length < 3) return 'periodic';
+  const gaps = t.slice(1).map((x, i) => x - t[i]).sort((a, b) => a - b);
+  const med = gaps[Math.floor(gaps.length / 2)] / 86400;
+  return med <= 4 ? 'daily' : med <= 10 ? 'weekly' : med <= 40 ? 'monthly' : med <= 120 ? 'quarterly' : 'periodic';
+}
+
 function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null, showSource = false }) {
   const boxRef    = useRef(null);
   const legendRef = useRef(null);
@@ -1594,7 +1603,7 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false, fetch
     state.hist.sourceUrl
       ? React.createElement('a', { href: state.hist.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, (state.hist.source || 'source') + ' ↗')
       : (state.hist.source || 'unknown source'),
-    ' · daily' + (state.hist.type === 'ohlc' ? ' candles' : ' closes') + (rangeLabel[state.hist.tf] ? ', last ' + rangeLabel[state.hist.tf] : ''));
+    ' · ' + (state.hist.type === 'ohlc' ? 'daily candles' : mkSeriesCadence(state.hist.points) + ' observations') + (rangeLabel[state.hist.tf] ? ', last ' + rangeLabel[state.hist.tf] : ''));
   return React.createElement(React.Fragment, null, React.createElement('div', { className: 'mk-chart', style: { height } },
     React.createElement('div', { className: 'mk-chart-legend', ref: legendRef }),
     state.loading && React.createElement('div', { className: 'mk-chart-msg' }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading chart…'),
