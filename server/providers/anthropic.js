@@ -24,7 +24,7 @@ const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, exp
 const MODEL_SONNET = models.sonnetModel();  // SONNET_MODEL (default Sonnet 5) — macro, commodities, equity, thematic
 
 // Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
-// must keep the basic variant. Sending the wrong variant for a model is a 400.
+// must keep the basic variant (so does Haiku 5.5 — dynamic filtering is unconfirmed for it). Sending the wrong variant for a model is a 400.
 const WEB_SEARCH_DYNAMIC = "web_search_20260209";
 const WEB_SEARCH_BASIC   = "web_search_20250305";
 // Dynamic filtering (web_search_20260209) needs Claude 4.6 or later; Haiku 4.5 takes the basic tool.
@@ -47,7 +47,7 @@ function apiKey() {
 async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
   const body = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: models.maxTokensFor(model, maxTokens),
     ...models.searchRequest(model, systemPrompt, webSearchTool(model)),
     messages:   [{ role: "user", content: userPrompt }],
   };
@@ -55,8 +55,12 @@ async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
   // Priced, recorded, receipt-attributed and (in batch mode) batched in one place.
   const json = await transport.send(body, { label: "Anthropic" });
 
+  const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  const noRoom = models.outOfRoomError(model, text, json.stop_reason);
+  if (noRoom) throw noRoom;
+
   return {
-    text:    (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n"),
+    text,
     sources: extractSearchSources(json.content || []),
   };
 }

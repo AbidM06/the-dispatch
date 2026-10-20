@@ -497,7 +497,7 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - **Lead draft reuses `fetchResearchReport`** so all existing report shapes/renderers are unchanged.
   QA metadata is attached to the research payload (`reportId`, `institutionalQA`, `claimsCount`, `sourcesCount`).
 - Base pipeline = 6 calls (draft, extract, audit, red-team, PM, chair); each revision round +2.
-  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5.5; `server/providers/models.js`) for every draft (all seven types) and reviewer, Haiku 4.5 for claim extraction only. **No Haiku stand-in (D-19):** a failed Sonnet call throws `SONNET_UNAVAILABLE` with a plain-English reason and the report is unavailable.
+  All calls pass through the USD budget gate. Models: `SONNET_MODEL` (default Sonnet 5.5; `server/providers/models.js`) for every draft (all seven types) and reviewer, Haiku 5.5 for claim extraction only (D-26). **No Haiku stand-in (D-19):** a failed Sonnet call throws `SONNET_UNAVAILABLE` with a plain-English reason and the report is unavailable.
 - **Every agent receives the verified FRED block** (`verifiedBlock`) — reviewers used to judge
   the draft with no market data of their own.
 - **Fact check before audit**: `factCheck.checkClaims()` settles FACT claims naming exactly one
@@ -552,13 +552,13 @@ a cloud sandbox and could never reach `localhost:3001`. Auto-start at login:
 4. **Budget caps are USD**, measured from real usage and persisted; a budget error never falls
    through to another paid provider. $20/month warn-only, $5/day hard.
 4b. **No AI on a schedule by default** — research, bulletin and events/risk are button-driven.
-5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-sonnet-5-5`, `claude-haiku-4-5`. Never
+5. **Model ids carry no date suffix** — `claude-sonnet-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (`claude-haiku-4-5` is the rollback). Never
    hardcode a Sonnet id: use `models.sonnetModel()`. The web_search
    tool type is model-dependent (`web_search_20260209` for Sonnet 5 / 5.5, `web_search_20250305` for
-   Haiku 4.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
+   Haiku 4.5 and 5.5 — dynamic filtering is unconfirmed for Haiku 5.5); sending the wrong variant is a 400, so use `webSearchTool(model)`.
    **Forced tool use** (`tool_choice` `any`/`tool`) is also a 400 on Sonnet 5.5 — never set it
    directly; use `models.searchRequest(model, system, tool)`, which forces only where allowed
-   (Haiku 4.5, Sonnet 5) and otherwise sends `auto` + a "search first" instruction.
+   (Haiku 4.5, Sonnet 5; Haiku 5.5 is deliberately not forced, D-26) and otherwise sends `auto` + a "search first" instruction.
 6. **Markets data is free-only** (budget £0). Yahoo is unofficial — keep fallbacks per instrument.
 7. **Freshness is measured, not assumed** — never label a value "live" without its print time.
 8. **Stale values are shown flagged**, never silently reused or replaced by seeds.

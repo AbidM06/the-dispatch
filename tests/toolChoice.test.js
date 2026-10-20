@@ -31,15 +31,23 @@ test("research drafts on Sonnet 5.5 send no forced tool_choice, and ask for a se
   expect(bodies[0].system).toMatch(/^SYSTEM\n\nUse the web_search tool before you answer/);
 });
 
-test("Haiku and Sonnet 5 still force the search (they accept it)", async () => {
+test("Sonnet 5 still forces the search (it accepts it)", async () => {
   const { bodies } = setup("claude-sonnet-5");
   const anthropic = require("../server/providers/anthropic");
-  await anthropic.callClaude("SYSTEM", "u", 100);                         // Haiku by design
   await anthropic.callWithFallbackSourced("SYSTEM", "u", 100);            // Sonnet 5
-  for (const b of bodies) {
-    expect(b.tool_choice).toEqual({ type: "any" });
-    expect(b.system).toBe("SYSTEM");
-  }
+  expect(bodies[0].tool_choice).toEqual({ type: "any" });
+  expect(bodies[0].system).toBe("SYSTEM");
+});
+
+test("Haiku 5.5 (the Haiku jobs) is never forced: auto + the search instruction; Haiku 4.5 still forces", async () => {
+  const { bodies } = setup();
+  const anthropic = require("../server/providers/anthropic");
+  await anthropic.callClaude("SYSTEM", "u", 100);                         // Haiku by design
+  expect(bodies[0].model).toBe("claude-haiku-5-5");
+  expect(bodies[0].tool_choice).toBeUndefined();
+  expect(bodies[0].system).toMatch(/Use the web_search tool before you answer/);
+  const models = require("../server/providers/models");
+  expect(models.supportsForcedToolChoice("claude-haiku-4-5")).toBe(true);
 });
 
 test("reviewer calls with search: 'force' on Sonnet 5.5 use auto + the instruction; 'auto' search is unchanged", async () => {
@@ -59,4 +67,39 @@ test("an unknown future model gets the safe form (never forced)", () => {
   const models = require("../server/providers/models");
   expect(models.supportsForcedToolChoice("claude-sonnet-6")).toBe(false);
   expect(models.searchRequest("claude-sonnet-6", "S", { type: "x" }).tool_choice).toBeUndefined();
+});
+
+// ── Haiku 5.5 thinking headroom (Codex review of PR #4) ──────────────────────
+describe("Haiku 5.5 thinking counts toward max_tokens", () => {
+  test("every Haiku 5.x call gets extra room; Sonnet and Haiku 4.5 caps are untouched", () => {
+    jest.resetModules();
+    const models = require("../server/providers/models");
+    expect(models.maxTokensFor("claude-haiku-5-5", 900)).toBe(900 + models.HAIKU_THINKING_HEADROOM);
+    expect(models.maxTokensFor("claude-haiku-4-5", 900)).toBe(900);
+    expect(models.maxTokensFor("claude-sonnet-5-5", 900)).toBe(900);
+  });
+
+  test("callClaude (Haiku by design) and callAgent('extract') send the raised cap", async () => {
+    const { bodies } = setup();
+    const anthropic = require("../server/providers/anthropic");
+    const llm = require("../server/research/llm");
+    const models = require("../server/providers/models");
+    await anthropic.callClaude("S", "u", 900);
+    await llm.callAgent("extract", "S", "u", { maxTokens: 6000 });
+    expect(bodies[0].max_tokens).toBe(900 + models.HAIKU_THINKING_HEADROOM);
+    expect(bodies[1].max_tokens).toBe(6000 + models.HAIKU_THINKING_HEADROOM);
+  });
+
+  test("a reply that hit max_tokens with no text fails plainly instead of parsing nothing", async () => {
+    jest.resetModules();
+    jest.doMock("../server/providers/claudeTransport", () => ({
+      send: jest.fn(async () => ({ stop_reason: "max_tokens", content: [{ type: "thinking", thinking: "" }] })),
+      currentContext: () => ({}), runWithContext: (_c, fn) => fn(),
+    }));
+    jest.doMock("../server/providers/budget", () => ({ checkAndIncrement: jest.fn(), isApiFallback: () => false, getStatus: () => ({}) }));
+    const anthropic = require("../server/providers/anthropic");
+    const llm = require("../server/research/llm");
+    await expect(anthropic.callClaude("S", "u", 900)).rejects.toMatchObject({ code: "MAX_TOKENS_NO_TEXT" });
+    await expect(llm.callAgent("extract", "S", "u")).rejects.toMatchObject({ code: "MAX_TOKENS_NO_TEXT", message: expect.stringMatching(/whole token limit/) });
+  });
 });

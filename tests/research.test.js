@@ -203,8 +203,12 @@ describe("web search tool variant is matched to the model", () => {
     expect(anthropic.webSearchTool("claude-haiku-4-5").type).toBe("web_search_20250305");
   });
 
+  test("Haiku 5.5 takes the basic tool too (dynamic filtering unconfirmed for it)", () => {
+    expect(anthropic.webSearchTool("claude-haiku-5-5").type).toBe("web_search_20250305");
+  });
+
   test("model ids carry no date suffix", () => {
-    expect(anthropic.MODEL).toBe("claude-haiku-4-5");
+    expect(anthropic.MODEL).toBe("claude-haiku-5-5");
     expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
   });
 });

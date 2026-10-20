@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-14 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/magical-carson-7nyf2s`
+**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/haiku-5-5`
 
 ---
 
@@ -46,6 +46,7 @@ Working and merged (PR #4, 2026-09-28):
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
 | Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
 | UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
+| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Owner to generate one report afterwards and compare the cost receipt and claim count with a pre-change one |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -145,6 +146,12 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-20 — Claude (Haiku 5.5)
+- Owner asked to move the research tab's second agent (claim extraction, the only Haiku agent there) to Haiku 5.5, and chose **every Haiku job**, reason: better extraction quality + lower cost. Thinking left at Haiku 5.5's default; draft revision stays on Sonnet (it runs under `lead`, not Haiku).
+- `models.HAIKU` → `claude-haiku-5-5`; `aiCost` prices it $0.10/$0.50 per M tokens up to 100K prompt tokens, $0.50/$2.50 above (4.5 entry kept for old receipts); 5.5 kept OFF the forced-tool_choice list and on the basic web-search tool because neither was verifiable without a live API key. 496 tests (5 updated, 4 new). D-26.
+- Codex P1 on PR #4: thinking counts toward `max_tokens`, and several Haiku caps are 900–1,000. Fixed centrally: every Haiku 5.x call gets +4,000 headroom (`models.maxTokensFor`), and an empty `max_tokens` reply fails with a plain message. Still not verified live (no Anthropic key in the cloud session). Rollback: `RESEARCH_EXTRACT_MODEL=claude-haiku-4-5` (extraction only) or revert the PR.
+- Next: Codex review, owner merge, restart, then compare one report's receipt/claim count.
 
 ### 2026-10-16 — Claude (UMUSHROOM notes section)
 - Owner reported the UMUSHROOM view not updating. Cause: `parseNotesIndex` required `notes/YYYY-MM-DD.md` exactly; the 12 Oct entry is `notes/2026-10-12-plan-update.md`, so the whole notes list failed closed. Everything else loaded (checked by running the validators against the live repo).
