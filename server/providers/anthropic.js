@@ -47,7 +47,7 @@ function apiKey() {
 async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
   const body = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: models.maxTokensFor(model, maxTokens),
     ...models.searchRequest(model, systemPrompt, webSearchTool(model)),
     messages:   [{ role: "user", content: userPrompt }],
   };
@@ -55,8 +55,12 @@ async function _callClaudeOnce(systemPrompt, userPrompt, maxTokens, model) {
   // Priced, recorded, receipt-attributed and (in batch mode) batched in one place.
   const json = await transport.send(body, { label: "Anthropic" });
 
+  const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  const noRoom = models.outOfRoomError(model, text, json.stop_reason);
+  if (noRoom) throw noRoom;
+
   return {
-    text:    (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n"),
+    text,
     sources: extractSearchSources(json.content || []),
   };
 }

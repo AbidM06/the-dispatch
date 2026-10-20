@@ -125,7 +125,7 @@ async function callAgent(role, system, user, opts = {}) {
 
   const body = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: models.maxTokensFor(model, maxTokens),
     system,
     messages: [{ role: "user", content: buildUserContent(user, sharedPrefix) }],
   };
@@ -145,10 +145,10 @@ async function callAgent(role, system, user, opts = {}) {
   }
   recordUsage(usage, role, json);
 
-  return (json.content || [])
-    .filter(b => b.type === "text")
-    .map(b => b.text)
-    .join("\n");
+  const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  const noRoom = models.outOfRoomError(model, text, json.stop_reason);
+  if (noRoom) throw noRoom;
+  return text;
 }
 
 const ROLE_LABEL = { lead: "lead analyst", auditor: "data auditor", redteam: "red team", portfolio: "cross-asset PM",
