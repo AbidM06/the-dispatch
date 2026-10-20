@@ -196,7 +196,9 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   HYOAS and T10Y2Y (not the legacy `snapshot:rates` key — it drops `stale`).
 - Each row: current, previous value, delta in bps (against the quote's own previous close/observation),
   signal, `asOf`, source, link, `stale`. A series Markets lacks is `available: false` — never back-filled.
-  Regime, drivers and prose use only the series that exist; `whyItMatters` is `null` if any is missing.
+  Regime, drivers and prose use only the series that exist: each `whyItMatters` sentence is built from
+  figures that were fetched, and it is `null` when none applies AND a series is missing — so it never
+  says "no stress signals" on partial data.
 - No snapshot (or none of the five series) → 503 `available: false` + reason; the Desk tab shows it.
 - `nextEvent` is `{available: false, reason}` until the FRED release-dates calendar exists. There is no
   "actionable setup" and no holdings talk. `tests/brief.test.js` guards all of this.

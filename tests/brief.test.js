@@ -138,6 +138,18 @@ describe("GET /api/brief", () => {
     expect(body.data.whyItMatters).toBeNull();
   });
 
+  test("prose from the series that exist is still shown; nothing is said about the missing one", async () => {
+    setSnapshot(snapshot([
+      { id: "US10Y", ok: false, attempted: [] },
+      item("REAL10", 2.10, 2.05), item("BEI10", 2.0, 2.0),
+      item("HYOAS", 2.8, 2.8), item("T10Y2Y", 0.4, 0.4),
+    ]));
+    const { data } = (await request(app).get("/api/brief")).body;
+    expect(data.missing).toEqual(["DGS10"]);
+    expect(data.whyItMatters).toBe("Real yields at 2.10% mechanically compress growth equity multiples.");
+    expect(data.regime).not.toMatch(/Rates restrictive/);
+  });
+
   test("calm figures with everything present: no-stress sentence, not invented drivers", async () => {
     setSnapshot(snapshot([
       item("US10Y", 4.0, 4.0), item("REAL10", 1.0, 1.0), item("BEI10", 2.0, 2.0),
