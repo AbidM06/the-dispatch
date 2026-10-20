@@ -11,9 +11,11 @@
  * nobody could see what anything actually cost. Every figure here is computed
  * from the token counts the API returns, never guessed.
  *
- * PRICES — Anthropic list prices, USD per million tokens, checked 2026-09-28.
+ * PRICES — Anthropic list prices, USD per million tokens, checked 2026-10-20.
  * If Anthropic changes prices, update PRICES and PRICES_CHECKED together.
  *   Sonnet 5.5 $2 in / $10 out      Sonnet 5   $2 in / $10 out
+ *   Haiku 5.5  $0.10 in / $0.50 out for prompts up to 100K tokens,
+ *              $0.50 in / $2.50 out above that (the `long` rate card)
  *   Haiku 4.5  $1 in / $5 out
  *   Cache write 1.25x input (5-min TTL) · cache read 0.1x input
  *   Message Batches: 50% of the synchronous rate
@@ -27,10 +29,12 @@
 const fs   = require("fs");
 const path = require("path");
 
-const PRICES_CHECKED = "2026-09-28";
+const PRICES_CHECKED = "2026-10-20";
+// `long` (optional) is the rate card used when a call's prompt exceeds `long.above` tokens.
 const PRICES = {
   "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-5":  { input: 2, output: 10 },
+  "claude-haiku-5-5": { input: 0.10, output: 0.50, long: { above: 100_000, input: 0.50, output: 2.50 } },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };
 const CACHE_WRITE_MULT = 1.25;
@@ -62,7 +66,10 @@ function priceCall({ model, usage = {}, batch = false }) {
   const key = priceKey(model);
   if (!key) return { usd: null, priced: false, tokens, webSearches, batchSavingsUSD: 0, cacheSavingsUSD: 0 };
 
-  const p = PRICES[key];
+  // Prompt length = every input token the call carried, cached or not.
+  const promptTokens = tokens.input + tokens.cacheWrite + tokens.cacheRead;
+  const base = PRICES[key];
+  const p = base.long && promptTokens > base.long.above ? base.long : base;
   const perTok = (rate) => rate / 1_000_000;
   const tokenUSD =
     tokens.input      * perTok(p.input) +

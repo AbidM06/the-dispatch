@@ -52,6 +52,17 @@ describe("aiCost.priceCall — dollars from real usage", () => {
     expect(p.usd).toBeCloseTo(0.5 + 0.5, 6);
   });
 
+  test("Haiku 5.5: $0.10/M input, $0.50/M output up to 100K prompt tokens", () => {
+    const p = aiCost.priceCall({ model: "claude-haiku-5-5", usage: { input_tokens: 100_000, output_tokens: 10_000 } });
+    expect(p.priced).toBe(true);
+    expect(p.usd).toBeCloseTo(0.1 * 0.1 + 0.5 * 0.01, 6);
+  });
+
+  test("Haiku 5.5: a prompt over 100K tokens (cached tokens included) is billed on the $0.50/$2.50 card", () => {
+    const p = aiCost.priceCall({ model: "claude-haiku-5-5", usage: { input_tokens: 60_000, cache_read_input_tokens: 60_000, output_tokens: 10_000 } });
+    expect(p.usd).toBeCloseTo(0.5 * 0.06 + 0.5 * 0.1 * 0.06 + 2.5 * 0.01, 6);
+  });
+
   test("cache writes cost 1.25x input, cache reads 0.1x", () => {
     const p = aiCost.priceCall({ model: "claude-sonnet-5", usage: { cache_creation_input_tokens: 1_000_000, cache_read_input_tokens: 1_000_000 } });
     expect(p.usd).toBeCloseTo(2 * 1.25 + 2 * 0.1, 6);
@@ -339,7 +350,14 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat", "ideas"]) {
       expect(llm.modelForRole(role)).toBe("claude-sonnet-5-5");
     }
-    expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
+    expect(llm.modelForRole("extract")).toBe("claude-haiku-5-5");
+  });
+
+  test("RESEARCH_EXTRACT_MODEL=claude-haiku-4-5 rolls extraction back without a code change (D-26)", () => {
+    process.env.RESEARCH_EXTRACT_MODEL = "claude-haiku-4-5";
+    jest.resetModules();
+    expect(require("../server/research/llm").modelForRole("extract")).toBe("claude-haiku-4-5");
+    delete process.env.RESEARCH_EXTRACT_MODEL;
   });
 
   test("SONNET_MODEL moves every Sonnet job; Haiku jobs and per-role overrides are unchanged", () => {
@@ -349,12 +367,12 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     const llm = require("../server/research/llm");
     const anthropic = require("../server/providers/anthropic");
     expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
-    expect(anthropic.MODEL).toBe("claude-haiku-4-5");
+    expect(anthropic.MODEL).toBe("claude-haiku-5-5");
     for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat"]) {
       expect(llm.modelForRole(role)).toBe("claude-sonnet-5");
     }
     expect(llm.modelForRole("ideas")).toBe("claude-sonnet-5-5");        // per-role override wins
-    expect(llm.modelForRole("extract")).toBe("claude-haiku-4-5");
+    expect(llm.modelForRole("extract")).toBe("claude-haiku-5-5");
   });
 
   test("Sonnet 5.5 is priced (never UNPRICED) and gets the dynamic web-search tool", () => {

@@ -24,7 +24,7 @@ const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, exp
 const MODEL_SONNET = models.sonnetModel();  // SONNET_MODEL (default Sonnet 5) — macro, commodities, equity, thematic
 
 // Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
-// must keep the basic variant. Sending the wrong variant for a model is a 400.
+// must keep the basic variant (so does Haiku 5.5 — dynamic filtering is unconfirmed for it). Sending the wrong variant for a model is a 400.
 const WEB_SEARCH_DYNAMIC = "web_search_20260209";
 const WEB_SEARCH_BASIC   = "web_search_20250305";
 // Dynamic filtering (web_search_20260209) needs Claude 4.6 or later; Haiku 4.5 takes the basic tool.

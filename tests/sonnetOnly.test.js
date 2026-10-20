@@ -12,7 +12,7 @@ function setup({ failWith, openaiKey = false } = {}) {
   jest.doMock("../server/providers/claudeTransport", () => ({
     send: jest.fn(async (body) => {
       calls.push(body.model);
-      if (failWith && body.model !== "claude-haiku-4-5") { const e = new Error("Overloaded"); e.status = failWith; throw e; }
+      if (failWith && body.model !== "claude-haiku-5-5") { const e = new Error("Overloaded"); e.status = failWith; throw e; }
       return { content: [{ type: "text", text: "ok" }] };
     }),
     currentContext: () => ({}),
@@ -34,7 +34,7 @@ describe("no silent Haiku stand-in for Sonnet", () => {
       code: "SONNET_UNAVAILABLE", status: 529,
       message: expect.stringMatching(/overloaded .*529.*No report was produced, and no lower-quality model was used/),
     });
-    expect(calls).not.toContain("claude-haiku-4-5");
+    expect(calls).not.toContain("claude-haiku-5-5");
   });
 
   test("research drafts: Sonnet → unavailable (no Haiku; no OpenAI without a key)", async () => {
@@ -49,13 +49,13 @@ describe("no silent Haiku stand-in for Sonnet", () => {
     await expect(anthropic.callWithFallbackSourced("s", "u", 100)).rejects.toMatchObject({
       code: "SONNET_UNAVAILABLE", message: expect.stringMatching(/rate limit/) });
     expect(openaiCalls).toHaveLength(1);
-    expect(calls).not.toContain("claude-haiku-4-5");
+    expect(calls).not.toContain("claude-haiku-5-5");
   });
 
   test("Haiku-by-design calls are untouched", async () => {
     const { anthropic, calls } = setup({});
     await anthropic.callClaude("s", "u", 100);
-    expect(calls).toEqual(["claude-haiku-4-5"]);
+    expect(calls).toEqual(["claude-haiku-5-5"]);
   });
 
   test("FX and Rates drafts use the same Sonnet → (OpenAI if keyed) path as every other report", () => {
