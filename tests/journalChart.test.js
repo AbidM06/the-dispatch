@@ -93,6 +93,18 @@ describe("journal idea chart", () => {
     expect(getHistory).toHaveBeenCalledWith("PM:fed-oct", "1d", { source: src });
   });
 
+  test("a Polymarket chart links to the saved market, not the provider homepage (and never to a non-Polymarket URL)", async () => {
+    const { app, journal, getHistory } = setup();
+    const now = nowSec();
+    getHistory.mockImplementation(async (id, tf) => ({ id, tf, type: "line", points: [{ t: now - 86400, v: 33 }, { t: now - 3600, v: 35 }], source: "Polymarket", sourceUrl: "https://polymarket.com" }));
+    const src = { provider: "polymarket", tokenId: "tok1" };
+    const mk = (url) => journal.logIdea(card({ marketId: "PM:fed-oct", marketHistory: src, priceAtIdea: { value: 33, source: "Polymarket", asOf: new Date().toISOString(), url, freshness: "x" } }));
+    const good = mk("https://polymarket.com/event/fed-oct");
+    expect((await request(app).get(`/api/journal/${good.entryId}/chart`)).body.sourceUrl).toBe("https://polymarket.com/event/fed-oct");
+    const bad = mk("https://evil.example/event/fed-oct");
+    expect((await request(app).get(`/api/journal/${bad.entryId}/chart`)).body.sourceUrl).toBe("https://polymarket.com");
+  });
+
   test("plain refusals: unknown entry 404, no instrument 404, incomplete levels 422, no price history → its own status", async () => {
     const { app, journal, getHistory } = setup();
     expect((await request(app).get("/api/journal/JRN-nope/chart")).status).toBe(404);

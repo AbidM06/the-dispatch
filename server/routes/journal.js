@@ -80,6 +80,9 @@ router.get("/:entryId/chart", async (req, res) => {
     // Dynamic markets (Polymarket) are priced from the history source saved on the card.
     // Cut to the window the chart labels: Polymarket's history is "max" and FRED's a year or more.
     const hist = markets.trimToRange(await markets.getHistory(idea.marketId, tf, { source: idea.marketHistory || undefined }), tf);
+    // Polymarket's history adapter only knows the provider homepage; the idea saved the exact market URL.
+    const ref = idea.priceAtIdea && idea.priceAtIdea.url;
+    if (hist.source === "Polymarket" && typeof ref === "string" && /^https:\/\/polymarket\.com\//.test(ref)) hist.sourceUrl = ref;
     res.json({ ...hist, entryId: e.entryId, levels });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
