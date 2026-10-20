@@ -135,7 +135,8 @@ function sonnetFailure(err, model, { step = null } = {}) {
     /timeout|timed out|abort/i.test(err.message || "") ? "did not answer in time (the request timed out)" :
     `failed (${err.message})`;
   const at = new Date().toISOString().slice(11, 16) + " UTC";
-  const out = new Error(`Claude Sonnet (${model}) ${what} at ${at}, after the automatic retries. ` +
+  const family = /opus/i.test(model) ? "Opus" : /haiku/i.test(model) ? "Haiku" : "Sonnet";
+  const out = new Error(`Claude ${family} (${model}) ${what} at ${at}, after the automatic retries. ` +
     (step ? `The ${step} step could not run, and no lower-quality model was used instead.`
           : "No report was produced, and no lower-quality model was used instead. Try again in a few minutes."));
   out.code = "SONNET_UNAVAILABLE";

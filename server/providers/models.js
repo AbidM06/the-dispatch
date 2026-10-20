@@ -12,6 +12,7 @@
 "use strict";
 
 const DEFAULT_SONNET = "claude-sonnet-5-5";   // owner switched 2026-09-29 (D-17)
+const OPUS           = "claude-opus-5-5";    // red team + IC chair only (D-27)
 const HAIKU          = "claude-haiku-5-5";   // owner switched from Haiku 4.5 on 2026-10-20 (D-26)
 
 function sonnetModel() {
@@ -41,4 +42,4 @@ function searchRequest(model, system, tool) {
   return { system: `${system || ""}${SEARCH_FIRST_INSTRUCTION}`, tools: [tool] };
 }
 
-module.exports = { sonnetModel, DEFAULT_SONNET, HAIKU, supportsForcedToolChoice, searchRequest, SEARCH_FIRST_INSTRUCTION };
+module.exports = { sonnetModel, DEFAULT_SONNET, OPUS, HAIKU, supportsForcedToolChoice, searchRequest, SEARCH_FIRST_INSTRUCTION };

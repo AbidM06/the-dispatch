@@ -14,6 +14,7 @@
  * PRICES — Anthropic list prices, USD per million tokens, checked 2026-10-20.
  * If Anthropic changes prices, update PRICES and PRICES_CHECKED together.
  *   Sonnet 5.5 $2 in / $10 out      Sonnet 5   $2 in / $10 out
+ *   Opus 5.5   $4 in / $20 out (cache reads $0.20 = 0.05x, not the usual 0.1x)
  *   Haiku 5.5  $0.10 in / $0.50 out for prompts up to 100K tokens,
  *              $0.50 in / $2.50 out above that (the `long` rate card)
  *   Haiku 4.5  $1 in / $5 out
@@ -30,8 +31,10 @@ const fs   = require("fs");
 const path = require("path");
 
 const PRICES_CHECKED = "2026-10-20";
+// `cacheRead` (optional) overrides CACHE_READ_MULT for a model whose cache reads are priced differently.
 // `long` (optional) is the rate card used when a call's prompt exceeds `long.above` tokens.
 const PRICES = {
+  "claude-opus-5-5":  { input: 4, output: 20, cacheRead: 0.05 },
   "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-sonnet-5":  { input: 2, output: 10 },
   "claude-haiku-5-5": { input: 0.10, output: 0.50, long: { above: 100_000, input: 0.50, output: 2.50 } },
@@ -71,16 +74,17 @@ function priceCall({ model, usage = {}, batch = false }) {
   const base = PRICES[key];
   const p = base.long && promptTokens > base.long.above ? base.long : base;
   const perTok = (rate) => rate / 1_000_000;
+  const readMult = p.cacheRead ?? CACHE_READ_MULT;
   const tokenUSD =
     tokens.input      * perTok(p.input) +
     tokens.cacheWrite * perTok(p.input) * CACHE_WRITE_MULT +
-    tokens.cacheRead  * perTok(p.input) * CACHE_READ_MULT +
+    tokens.cacheRead  * perTok(p.input) * readMult +
     tokens.output     * perTok(p.output);
   const mult = batch ? BATCH_MULT : 1;
   const usd  = tokenUSD * mult + webSearches * WEB_SEARCH_USD;
 
   // What the cached tokens would have cost uncached, net of the write premium.
-  const cacheSavingsUSD = (tokens.cacheRead * perTok(p.input) * (1 - CACHE_READ_MULT)
+  const cacheSavingsUSD = (tokens.cacheRead * perTok(p.input) * (1 - readMult)
     - tokens.cacheWrite * perTok(p.input) * (CACHE_WRITE_MULT - 1)) * mult;
 
   return {
@@ -201,9 +205,9 @@ function finalizeReceipt(receipt) {
 
 // ── Estimates ─────────────────────────────────────────────────────────────────
 // Used only until real receipts exist for a report type: a five-agent run is
-// ~6 Sonnet calls with ~10-15 web searches. Stated as an assumption so the
+// ~6 calls (red team + chair on Opus 5.5, the rest Sonnet/Haiku) with ~10-15 web searches. Stated as an assumption so the
 // UI can say so, and replaced by the measured average after the first run.
-const DEFAULT_ESTIMATE_USD = 0.70;
+const DEFAULT_ESTIMATE_USD = 0.85;
 
 /**
  * estimateReport — projected cost of the next run of a report type.

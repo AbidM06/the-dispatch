@@ -52,6 +52,15 @@ describe("aiCost.priceCall — dollars from real usage", () => {
     expect(p.usd).toBeCloseTo(0.5 + 0.5, 6);
   });
 
+  test("Opus 5.5: $4/M input, $20/M output; cache reads at $0.20/M (0.05x), writes 1.25x", () => {
+    const p = aiCost.priceCall({ model: "claude-opus-5-5", usage: { input_tokens: 1_000_000, output_tokens: 100_000 } });
+    expect(p.priced).toBe(true);
+    expect(p.usd).toBeCloseTo(4 + 2, 6);
+    const c = aiCost.priceCall({ model: "claude-opus-5-5", usage: { cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000 } });
+    expect(c.usd).toBeCloseTo(0.2 + 5, 6);
+    expect(c.cacheSavingsUSD).toBeCloseTo(4 * 0.95 - 4 * 0.25, 6);
+  });
+
   test("Haiku 5.5: $0.10/M input, $0.50/M output up to 100K prompt tokens", () => {
     const p = aiCost.priceCall({ model: "claude-haiku-5-5", usage: { input_tokens: 100_000, output_tokens: 10_000 } });
     expect(p.priced).toBe(true);
@@ -347,10 +356,22 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     const llm = require("../server/research/llm");
     const anthropic = require("../server/providers/anthropic");
     expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5-5");
-    for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat", "ideas"]) {
+    for (const role of ["lead", "auditor", "portfolio", "chat", "ideas"]) {
       expect(llm.modelForRole(role)).toBe("claude-sonnet-5-5");
     }
     expect(llm.modelForRole("extract")).toBe("claude-haiku-5-5");
+    expect(llm.modelForRole("redteam")).toBe("claude-opus-5-5");        // judgement roles (D-27)
+    expect(llm.modelForRole("chair")).toBe("claude-opus-5-5");
+  });
+
+  test("RESEARCH_REDTEAM_MODEL / RESEARCH_CHAIR_MODEL roll the Opus roles back to Sonnet without a code change (D-27)", () => {
+    process.env.RESEARCH_REDTEAM_MODEL = "claude-sonnet-5-5";
+    process.env.RESEARCH_CHAIR_MODEL = "claude-sonnet-5-5";
+    jest.resetModules();
+    const llm = require("../server/research/llm");
+    expect(llm.modelForRole("redteam")).toBe("claude-sonnet-5-5");
+    expect(llm.modelForRole("chair")).toBe("claude-sonnet-5-5");
+    delete process.env.RESEARCH_REDTEAM_MODEL; delete process.env.RESEARCH_CHAIR_MODEL;
   });
 
   test("RESEARCH_EXTRACT_MODEL=claude-haiku-4-5 rolls extraction back without a code change (D-26)", () => {
@@ -368,7 +389,7 @@ describe("SONNET_MODEL — one setting for every Sonnet job", () => {
     const anthropic = require("../server/providers/anthropic");
     expect(anthropic.MODEL_SONNET).toBe("claude-sonnet-5");
     expect(anthropic.MODEL).toBe("claude-haiku-5-5");
-    for (const role of ["lead", "auditor", "redteam", "portfolio", "chair", "chat"]) {
+    for (const role of ["lead", "auditor", "portfolio", "chat"]) {
       expect(llm.modelForRole(role)).toBe("claude-sonnet-5");
     }
     expect(llm.modelForRole("ideas")).toBe("claude-sonnet-5-5");        // per-role override wins
