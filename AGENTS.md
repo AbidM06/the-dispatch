@@ -109,7 +109,7 @@ server/index.js            Express entry point — mounts all routes
 server/routes/
   markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id (tf 1d|1h|1y|5y) | GET /api/markets/compare
   ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
-  journal.js               GET /api/journal | GET /api/journal/:id | POST …/:id/{watch,pitch,manual-price} — append-only
+  journal.js               GET /api/journal | GET /api/journal/:id | GET /api/journal/:id/chart | POST …/:id/{watch,pitch,manual-price} — append-only
   umushroom.js             GET /api/umushroom | GET /api/umushroom/note/:date — read-only view of the public paper-portfolio repo (D-23)
   portfolio.js             GET /api/portfolio — T212 holdings + P&L computation
   events.js                GET /api/events  |  POST /api/events/refresh
@@ -219,6 +219,7 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   strategic ≤366d, else `undeclared` (never guessed).
 - Routes: `GET /api/journal?watched=&origin=`, `GET /api/journal/:entryId`,
   `POST /api/journal/:entryId/{watch,pitch,manual-price}` (auth). No AI, no cost.
+- **Idea price chart** (D-28, PR 2): `GET /api/journal/:entryId/chart` returns real daily prices (the Markets history; shortest of 6M/1Y/5Y covering the idea's age plus ~a month, Polymarket via the card's saved `marketHistory`) plus the idea's own entry zone / target / stop. The Journal entry draws them as labelled lines (`MarketChart` with `fetchUrl`; autoscale keeps every level visible). Read-only — no AI, no write; never rendered for a sealed idea ("My pitch first"). A missing level is a 422, never drawn as zero.
 - Client: JOURNAL tab (filters, ★ watch, reference badge, frozen idea, pitches, manual
   price). "My pitch first" mode seals each new idea card until the owner writes a pitch
   (saved `beforeReveal: true`) or skips — in the Journal too; mode + sealed ids live in localStorage.

@@ -3,6 +3,8 @@
  *
  * GET  /api/journal?watched=true|false&origin=news|research&limit=
  * GET  /api/journal/:entryId              (both include stage-2 tracking; see journal/tracker.js)
+ * GET  /api/journal/:entryId/chart        real daily prices over a range covering the idea's age, plus the
+ *                                          idea's own entry zone / target / stop (read-only; no AI, no cost)
  * POST /api/journal/:entryId/watch         { watched }            (auth)
  * POST /api/journal/:entryId/pitch         { text, beforeReveal } (auth)
  * POST /api/journal/:entryId/manual-price  { price, note }        (auth)
@@ -15,6 +17,7 @@
 const { Router } = require("express");
 const journal    = require("../journal/store");
 const tracker    = require("../journal/tracker");
+const markets    = require("../markets/service");
 const requireWriteAuth = require("../middleware/auth");
 
 const router = Router();
@@ -51,6 +54,37 @@ router.get("/:entryId", (req, res) => {
   res.json({ entry: { ...e, tracking: tracker.trackingFor(e) } });
 });
 
+/** Shortest daily range (6M / 1Y / 5Y) that still shows ~a month of context before the idea. */
+function chartRange(createdAt, now = Date.now()) {
+  const ageDays = Math.max(0, (now - Date.parse(createdAt)) / 86_400_000);
+  return ageDays <= 150 ? "1d" : ageDays <= 330 ? "1y" : "5y";
+}
+
+router.get("/:entryId/chart", async (req, res) => {
+  try {
+    ensureBackfilled();
+    const e = journal.getEntry(req.params.entryId);
+    if (!e) return res.status(404).json({ error: "Journal entry not found" });
+    const idea = e.idea || {};
+    if (!idea.marketId) return res.status(404).json({ error: "This idea has no Markets instrument, so there is no price chart for it." });
+    // A missing level must stay missing: Number(null) is 0, which would draw a line at zero.
+    const level = (v) => (typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN);
+    const levels = {
+      entryLow: level(idea.entryLow), entryHigh: level(idea.entryHigh), target: level(idea.target), stop: level(idea.stop),
+      direction: idea.direction || null,
+    };
+    if (![levels.entryLow, levels.entryHigh, levels.target, levels.stop].every(Number.isFinite)) {
+      return res.status(422).json({ error: "This idea's levels are incomplete, so they cannot be drawn." });
+    }
+    const tf = chartRange(idea.createdAt);
+    // Dynamic markets (Polymarket) are priced from the history source saved on the card.
+    const hist = await markets.getHistory(idea.marketId, tf, { source: idea.marketHistory || undefined });
+    res.json({ ...hist, entryId: e.entryId, levels });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.post("/:entryId/watch", requireWriteAuth, (req, res) =>
   send(res, () => journal.setWatch(req.params.entryId, req.body?.watched !== false)));
 
@@ -60,4 +94,5 @@ router.post("/:entryId/pitch", requireWriteAuth, (req, res) =>
 router.post("/:entryId/manual-price", requireWriteAuth, (req, res) =>
   send(res, () => journal.addManualPrice(req.params.entryId, req.body?.price, req.body?.note)));
 
+router.chartRange = chartRange;
 module.exports = router;

@@ -1491,22 +1491,22 @@ function LazyMount({ height, children }) {
  * Dotted High/Low lines over the visible period, last-value tag on the axis,
  * crosshair with an O/H/L/C (or value) read-out in the top-left.
  */
-function MarketChart({ item, tf, theme, height = 190, interactive = false }) {
+function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null }) {
   const boxRef    = useRef(null);
   const legendRef = useRef(null);
   const [state, setState] = useState({ loading: true, error: null, hist: null });
 
   useEffect(() => {
     let cancelled = false;
-    const key = item.id + ':' + tf;
+    const key = fetchUrl || (item.id + ':' + tf);
     const cached = mkHistoryCache.get(key);
     if (cached) { setState({ loading: false, error: null, hist: cached }); return; }
     setState(s => ({ ...s, loading: true, error: null }));
-    apiFetch('/api/markets/history/' + encodeURIComponent(item.id) + '?tf=' + tf)
+    apiFetch(fetchUrl || ('/api/markets/history/' + encodeURIComponent(item.id) + '?tf=' + tf))
       .then(h => { mkHistoryCache.set(key, h); if (!cancelled) setState({ loading: false, error: null, hist: h }); })
       .catch(err => { if (!cancelled) setState({ loading: false, error: err.message, hist: null }); });
     return () => { cancelled = true; };
-  }, [item.id, tf]);
+  }, [item.id, tf, fetchUrl]);
 
   useEffect(() => {
     const h = state.hist;
@@ -1538,19 +1538,36 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false }) {
     };
     let series, hi, lo, lastVal;
     const priceFormat = { type: 'custom', minMove: Math.pow(10, -dec), formatter: (p) => mkFmtValue(item, p) };
+    // A Journal idea's own levels (entry zone, target, stop): drawn as labelled lines, and kept inside the
+    // visible price range so a level far from the price is never cut off.
+    const lv = h.levels || null;
+    const levelVals = lv ? [lv.entryLow, lv.entryHigh, lv.target, lv.stop].filter(Number.isFinite) : [];
+    const autoscaleInfoProvider = levelVals.length ? (orig) => {
+      const r = orig();
+      if (!r || !r.priceRange) return r;
+      return { priceRange: { minValue: Math.min(r.priceRange.minValue, ...levelVals), maxValue: Math.max(r.priceRange.maxValue, ...levelVals) }, margins: r.margins };
+    } : undefined;
     if (h.type === 'ohlc') {
       const bars = clean(h.bars);
-      series = chart.addCandlestickSeries({ upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat });
+      series = chart.addCandlestickSeries({ upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down, priceFormat, autoscaleInfoProvider });
       series.setData(bars.map(b => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
       hi = Math.max(...bars.map(b => b.h)); lo = Math.min(...bars.map(b => b.l)); lastVal = bars[bars.length - 1];
     } else {
       const pts = clean(h.points);
-      series = chart.addAreaSeries({ lineColor: line, lineWidth: 2, topColor: mkAlpha(line, 0.28), bottomColor: mkAlpha(line, 0.02), priceFormat, crosshairMarkerRadius: 4 });
+      series = chart.addAreaSeries({ lineColor: line, lineWidth: 2, topColor: mkAlpha(line, 0.28), bottomColor: mkAlpha(line, 0.02), priceFormat, crosshairMarkerRadius: 4, autoscaleInfoProvider });
       series.setData(pts.map(p => ({ time: p.t, value: p.v })));
       hi = Math.max(...pts.map(p => p.v)); lo = Math.min(...pts.map(p => p.v)); lastVal = pts[pts.length - 1];
     }
-    series.createPriceLine({ price: hi, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'High' });
-    series.createPriceLine({ price: lo, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'Low' });
+    if (lv) {
+      const lvl = (price, color, title, style) => series.createPriceLine({ price, color, lineWidth: 2, lineStyle: style, axisLabelVisible: true, title });
+      lvl(lv.target, up, 'Target', LWC.LineStyle.Solid);
+      lvl(lv.stop, down, 'Stop', LWC.LineStyle.Solid);
+      lvl(lv.entryHigh, line, 'Zone high', LWC.LineStyle.Dashed);
+      lvl(lv.entryLow, line, 'Zone low', LWC.LineStyle.Dashed);
+    } else {
+      series.createPriceLine({ price: hi, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'High' });
+      series.createPriceLine({ price: lo, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'Low' });
+    }
     chart.timeScale().fitContent();
 
     const setLegend = (d, t) => {
@@ -7242,6 +7259,13 @@ function App() {
                 ' · observed ' + (r.asOf ? mkFmtFull(r.asOf) : 'unknown'),
                 r.reason ? React.createElement('div', { className: 'idc-sub' }, r.reason) : null)
             : React.createElement('div', { className: 'idc-sub' }, r.reason || 'No reference price.'),
+          c.marketId && React.createElement(React.Fragment, null,
+            React.createElement('div', { className: 'idc-lbl' }, 'Price and the idea\'s levels'),
+            React.createElement(MarketChart, { item: (markets && markets.items || []).find(i => i.id === c.marketId) || { id: c.marketId, decimals: 2 },
+              tf: 'idea', theme: themeMode, height: 280, interactive: true, fetchUrl: '/api/journal/' + encodeURIComponent(e.entryId) + '/chart' }),
+            React.createElement('div', { className: 'mk-foot' },
+              'Real daily prices from the Markets sources (no AI). Lines are the idea as written: target ' + f(c.target) + ' · stop ' + f(c.stop) +
+              ' · entry zone ' + f(c.entryLow) + '–' + f(c.entryHigh) + '. The chart reads the Journal; it never changes it.')),
           React.createElement('div', { className: 'idc-lbl' }, 'The idea, exactly as generated'),
           IdeaCard(c, { open: true, readOnly: true }),
           React.createElement('div', { className: 'idc-lbl' }, 'My pitches'),
