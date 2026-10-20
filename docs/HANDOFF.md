@@ -30,7 +30,7 @@ Working and merged (PR #4, 2026-09-28):
   No AI runs on a schedule (research batch, bulletin, events/risk refresh are opt-in flags).
 - **No-fabrication policy (D-02)** — research, Sales/Macro, events/risk and the News
   calendar return "unavailable" rather than invented content. The Daily Brief now follows
-  it too (D-28, PR pending). **Coverage is not yet complete:** `aiRefreshJob` and the
+  it too (D-29, PR pending). **Coverage is not yet complete:** `aiRefreshJob` and the
   scenario engine still use seeds (see AGENTS.md "Known seed usage") and the audit's FRED /
   bulletin / freshness items (§4) are open — the policy is the rule, the audit tracks where
   the code does not meet it yet.
@@ -42,15 +42,16 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
-| Daily Brief: no seed data (D-28) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Takes audit item 1 (Brief) from Codex's list — Codex did not start `codex/brief-data-integrity`. |
+| Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Takes audit item 1 (Brief) from Codex's list — Codex did not start `codex/brief-data-integrity`. |
 | Data-accuracy audit: PR #3 leftovers (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Brief item is now Claude's (row above). Still **proposed, not implemented**: (2) FRED `limit=1` + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
 | Morning Bulletin: no canned fallback (honest 'unavailable' + reason), pitch script → short summary (D-24) | Claude | `claude/magical-carson-7nyf2s` | PR open (draft); needs Codex review, then owner merge + Mac restart. **Root cause of the owner's failed AI call is NOT yet known** — no log was available; the on-screen reason will now show it. Owner to press REFRESH BULLETIN after updating and report the reason shown |
 | UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
-| Red team + IC chair on Opus 5.5 (D-27) — builds on `claude/haiku-5-5` (same files: `models.js`, `aiCost.js`) | Claude | `claude/opus-reviewers` | PR open (draft), **based on `claude/haiku-5-5`** — merge PR #4 first; needs Codex review. Owner to generate one report and compare its receipt with a pre-change one |
-| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Owner to generate one report afterwards and compare the cost receipt and claim count with a pre-change one |
+| Red team + IC chair on Opus 5.5 (D-27) | Claude | `claude/opus-reviewers` | Merged (PR #5, 2026-10-20). Owner to restart the Mac, generate one report and compare its receipt with an earlier one |
+| Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
+| More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | PR open (draft); needs Codex review. Then PR 2 (Journal idea charts), 3 (yield curve/macro), 4 (charts in reports), one at a time |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -90,9 +91,9 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 - **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
   [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
-  Confirmed with mocked checks. Item 1 is fixed on `claude/brief-no-seed` (D-28, PR pending);
+  Confirmed with mocked checks. Item 1 is fixed on `claude/brief-no-seed` (D-29, PR pending);
   items 2–6 have no fix yet:
-  1. **P1 Brief — FIXED in PR (D-28)** (`server/routes/brief.js`) manufactured missing values: March-2026
+  1. **P1 Brief — FIXED in PR (D-29)** (`server/routes/brief.js`) manufactured missing values: March-2026
      `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
      reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
      hand-typed calendars with the current year guessed; fixed catalysts and instrument
@@ -153,13 +154,19 @@ In the owner's order of interest. **Propose and confirm before building each one
 ## Session log (newest first)
 
 ### 2026-10-20 — Claude (Daily Brief: no seed data)
-- Owner asked to fix the Brief seed data first (it loads on every page open). Questioned first; owner chose: 'What changed' compares against the **previous close from Markets**; **Actionable setup removed** (hardcoded HOLD/TRIM advice on old holdings AMD/SGLN/HBKS/HIES plus fixed claims like 'Q1 earnings Apr 22'); **Next event shows 'unavailable'** until a real calendar exists; **Brief only**, Claude owns it (D-28).
+- Owner asked to fix the Brief seed data first (it loads on every page open). Questioned first; owner chose: 'What changed' compares against the **previous close from Markets**; **Actionable setup removed** (hardcoded HOLD/TRIM advice on old holdings AMD/SGLN/HBKS/HIES plus fixed claims like 'Q1 earnings Apr 22'); **Next event shows 'unavailable'** until a real calendar exists; **Brief only**, Claude owns it (D-29).
 - `server/routes/brief.js` rewritten: reads `markets.getSnapshot()` directly (not the compat cache, which dropped `stale`). Each of the 5 rows carries current, previous, delta in bps (HY OAS is a % figure, so 3.17 vs 3.00 = +17bps), signal, `asOf`, source, link, stale flag. A series Markets lacks is `available: false` and is never back-filled; regime/drivers/prose only use series that exist. No snapshot (or none of the 5 series) → 503 `available: false` + reason. `whyItMatters` is built only from fetched figures (the old text named AMD and 'portfolio P&L').
 - Client: Desk tab shows the unavailable reason, per-row STALE badge, 'N/A' for missing rows, a provenance line (fetched time, oldest figure's date, stale/missing series), card renamed WHY IT MATTERS, and a Next-event 'unavailable' box. Checked in headless Chromium with a stale + missing-series fixture and with no snapshot.
 - Tests: `tests/brief.test.js` rewritten (12) incl. a guard that `brief.js` has no seeds, baselines, calendars or ticker advice; schema updated. Full suite green.
 - Not touched (still open): audit items 2–6 (FRED `limit=1`, bulletin HY OAS %→bps, freshness aging, research `dataAsOf`), `aiRefreshJob`/`scenario` seeds, the real economic calendar (FRED release dates, §3.4). The pre-existing regime rule labels any curve ≥ 0.3 'Bear steepener' (a level, not a move) — left as is; owner may want it revisited.
 - Next: Codex review, owner merge, `git pull`, restart; then pick the next audit item.
 
+### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
+- Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).
+- PR 1: new COMPARE view in the Markets tab (2–4 series, rebased to 100 or A − B spread, 6M/1Y/5Y), plus 1Y/5Y on the single charts. Server `getComparison` intersects dates (nothing filled), refuses meaningless spreads / non-positive rebase bases / prediction markets; legend + summary table + source links; colours validated for both themes. Checked in a real browser (day + night, 1–4 series, refusal message) against the real server code with mocked upstream data; Yahoo/FRED not reachable from the cloud session, so live data is unverified until the owner runs it.
+- Codex P1: prediction-market charts showed lifetime history under a 1Y/5Y label (Polymarket only offers 'max'). Now trimmed to the window, with a note when the market is younger than the range.
+- Codex P1 (round 2): a 6M comparison of FRED-only series showed a year or more. `getComparison` now cuts every series to the selected window (6M / 1Y / 5Y) before intersecting, whatever the source's own default.
+- Next: Codex review, owner merge; then PR 2.
 ### 2026-10-20 — Claude (Opus 5.5 reviewers)
 - Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
 - Added `claude-opus-5-5` to `aiCost` ($4/$20; cache reads 0.05x — its list price is $0.20/M, not the usual 0.1x). Raised token caps (red team 8000, chair 7000) because Opus always thinks and thinking counts toward `max_tokens`. Fixed `sonnetFailure()` so an Opus failure no longer reads "Claude Sonnet (claude-opus-5-5)". Estimate assumption $0.70 → $0.85. 499 tests (3 updated, 3 new).

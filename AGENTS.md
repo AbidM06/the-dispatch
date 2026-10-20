@@ -107,7 +107,7 @@ npm run test:coverage
 client/index.html          Single-file React app (createElement, no JSX build)
 server/index.js            Express entry point — mounts all routes
 server/routes/
-  markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id
+  markets.js               GET /api/markets | POST /api/markets/refresh | GET /api/markets/history/:id (tf 1d|1h|1y|5y) | GET /api/markets/compare
   ideas.js                 POST /api/ideas/news | POST /api/ideas/research | GET /api/ideas | DELETE /api/ideas/:id
   journal.js               GET /api/journal | GET /api/journal/:id | POST …/:id/{watch,pitch,manual-price} — append-only
   umushroom.js             GET /api/umushroom | GET /api/umushroom/note/:date — read-only view of the public paper-portfolio repo (D-23)
@@ -186,12 +186,13 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   (post-NYSE-open) London, DST-safe via Intl. Each slot runs once, keyed `YYYY-MM-DD@HH:MM`
   in `lastScheduledDate`; asleep through several slots → ONE catch-up for the latest.
   Marks the slot done even on failure. A bare-date marker (pre-slot format) means "day done".
+- **Compare / overlay** (D-28): `GET /api/markets/compare?ids=A,B[,C,D]&tf=1d|1y|5y&mode=rebased|spread` plots 2–4 fixed instruments on SHARED dates only — a day missing from any series is dropped and counted, never filled or interpolated. `rebased` sets each series to 100 on the first shared day (refused if a start value is ≤ 0); `spread` is A − B, allowed only for two series in the same unit (rates/credit/macro in %, or WTI vs Brent in USD/bbl). Prediction markets are not comparable. Free sources only, no AI. 1Y/5Y are daily bars (Yahoo `range=1y|5y`, FRED trimmed to the window). Each series is cut to the selected window (6M/1Y/5Y) regardless of the source's own default. Series colours are `--cmp-1..4` (validated palette slots, colour follows the picker slot).
 - Routes: `GET /api/markets` (never fetches unless no snapshot exists), `POST /api/markets/refresh`
   (manual; ignored if <60 s since last), `GET /api/markets/history/:id?tf=1d|1h`, `GET /api/markets/status`.
 - UI: MARKETS tab (table ↔ chart grid, click a row for its chart; TradingView Lightweight
   Charts 4.2.3 from jsDelivr, Apache-2.0 — keep the attribution logo).
 
-## Daily Brief (`routes/brief.js`, Desk tab) — D-28
+## Daily Brief (`routes/brief.js`, Desk tab) — D-29
 - Read-only, no AI, never fetches. Reads `markets.getSnapshot()` directly for US10Y, REAL10, BEI10,
   HYOAS and T10Y2Y (not the legacy `snapshot:rates` key — it drops `stale`).
 - Each row: current, previous value, delta in bps (against the quote's own previous close/observation),
@@ -319,7 +320,7 @@ guards all of this, plus the bulletin notification (execFile + argv — AI text 
 becomes shell or AppleScript source).
 
 ### Known seed usage (not yet compliant with D-02 — being audited)
-- (`server/routes/brief.js` was fixed in D-28 — it reads only the Markets snapshot; see
+- (`server/routes/brief.js` was fixed in D-29 — it reads only the Markets snapshot; see
   "Daily Brief" below. A test fails if it imports seeds again.)
 - `server/jobs/aiRefreshJob.js` — `WATCHLIST_SEED` when no snapshot (opt-in job only).
 - `server/routes/scenario.js` — seeded positions when no T212 snapshot (labelled; key decision

@@ -1122,6 +1122,23 @@ tbody tr:hover td { background: var(--bg-alt); }
 .mk-chart-msg, .mk-chart-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--ink-low); z-index: 2; }
 .mk-chart-note { inset: auto 4px 22px auto; }
 .mk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+/* Compare / overlay — series colours are categorical slots 1-4 of the validated palette, stepped per theme
+   (checked with the dataviz validator against the day and night surfaces). Colour follows the picker slot A-D. */
+:root { --cmp-1: #2a78d6; --cmp-2: #eb6834; --cmp-3: #1baf7a; --cmp-4: #eda100; }
+[data-theme="night"] { --cmp-1: #3987e5; --cmp-2: #d95926; --cmp-3: #199e70; --cmp-4: #c98500; }
+.mk-cmp-picker { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 12px; }
+.mk-cmp-slot { display: flex; flex-direction: column; gap: 3px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-low); }
+.mk-cmp-slot-row { display: flex; align-items: center; gap: 6px; }
+.mk-cmp-swatch { width: 12px; height: 3px; border-radius: 2px; flex: none; }
+.mk-cmp-select { background: var(--bg-card); color: var(--ink); border: 1px solid var(--border-med); border-radius: var(--radius-sm); padding: 5px 8px; font-family: var(--font); font-size: 10.5px; min-width: 170px; }
+.mk-cmp-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.mk-cmp-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 4px; font-size: 11px; color: var(--ink); }
+.mk-cmp-legend-item { display: inline-flex; align-items: center; gap: 7px; }
+.mk-cmp-readout { font-size: 9.5px; color: var(--ink-mid); min-height: 14px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mk-cmp-table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
+.mk-cmp-table th { text-align: left; font-weight: 500; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-low); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.mk-cmp-table td { padding: 5px 8px; border-bottom: 1px solid var(--rule); color: var(--ink); }
+.mk-cmp-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .mk-tile { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .mk-tile.stale { border-color: var(--neg); }
 .mk-tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -1559,6 +1576,170 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false }) {
     state.hist && state.hist.note && React.createElement('div', { className: 'mk-chart-note' }, state.hist.note),
     React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0, visibility: state.hist ? 'visible' : 'hidden' } })
   );
+}
+
+// ─── MARKETS · COMPARE / OVERLAY ─────────────────────────────────────────────
+// 2-4 Markets instruments on shared dates, rebased to 100, or the spread of two. The server aligns
+// the days (a day missing from any series is dropped and counted, never filled), so every plotted
+// point is a real close from the same sources as the single charts.
+const MK_CMP_VARS = ['--cmp-1', '--cmp-2', '--cmp-3', '--cmp-4'];
+const MK_CMP_SLOTS = ['A', 'B', 'C', 'D'];
+const MK_CMP_PRESETS = [
+  { label: 'Oil: WTI vs Brent',            ids: ['WTI', 'BRENT'],     mode: 'rebased' },
+  { label: 'Oil spread: WTI − Brent',      ids: ['WTI', 'BRENT'],     mode: 'spread' },
+  { label: 'Credit: HY vs IG spreads',     ids: ['HYOAS', 'IGOAS'],   mode: 'rebased' },
+  { label: 'Equities: S&P 500 vs FTSE 100', ids: ['SPX', 'UKX'],      mode: 'rebased' },
+  { label: 'Rates: 10Y − real yield',      ids: ['US10Y', 'REAL10'],  mode: 'spread' },
+];
+const MK_CMP_TFS = [['1d', '6M'], ['1y', '1Y'], ['5y', '5Y']];
+
+function mkCmpFmtUnit(v, dec, unit) {
+  if (v == null || !isFinite(v)) return '—';
+  const n = Number(v).toLocaleString('en-GB', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  return unit === '%' ? n + '%' : unit ? n + ' ' + unit : n;
+}
+function mkCmpDay(t) {
+  return new Date(t * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: '2-digit' });
+}
+
+function CompareChart({ ids, slots, tf, mode, theme, height = 340 }) {
+  const boxRef = useRef(null);
+  const readRef = useRef(null);
+  const [state, setState] = useState({ loading: true, error: null, data: null });
+  const key = ids.join(',') + '|' + tf + '|' + mode;
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ loading: true, error: null, data: null });
+    apiFetch('/api/markets/compare?ids=' + encodeURIComponent(ids.join(',')) + '&tf=' + tf + '&mode=' + mode)
+      .then(data => { if (!cancelled) setState({ loading: false, error: null, data }); })
+      .catch(err => { if (!cancelled) setState({ loading: false, error: err.message, data: null }); });
+    return () => { cancelled = true; };
+  }, [key]);
+
+  const d = state.data;
+  const spread = !!d && d.mode === 'spread';
+  const dec = d ? Math.max(...d.legs.map(l => l.decimals)) : 2;
+  const unit = d && spread ? d.series[0].unit : null;
+  const colorVar = (i) => MK_CMP_VARS[(slots && slots[i] != null ? slots[i] : i) % 4];
+
+  useEffect(() => {
+    if (!d || !boxRef.current || !window.LightweightCharts) return;
+    const LWC = window.LightweightCharts;
+    const ink = mkCssVar('--ink-mid'), rule = mkCssVar('--rule'), border = mkCssVar('--border'), low = mkCssVar('--ink-low');
+    const fmt = (v) => spread ? mkCmpFmtUnit(v, dec, unit) : Number(v).toFixed(1);
+    const chart = LWC.createChart(boxRef.current, {
+      autoSize: true,
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: ink, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10 },
+      grid: { vertLines: { color: rule }, horzLines: { color: rule } },
+      rightPriceScale: { borderColor: border, scaleMargins: { top: 0.12, bottom: 0.08 } },
+      timeScale: { borderColor: border, fixLeftEdge: true, fixRightEdge: true },
+      crosshair: { mode: LWC.CrosshairMode.Normal },
+      localization: { timeFormatter: mkCmpDay, priceFormatter: fmt },
+    });
+    const priceFormat = { type: 'custom', minMove: spread ? Math.pow(10, -dec) : 0.01, formatter: fmt };
+    const made = d.series.map((s, i) => {
+      const color = mkCssVar(colorVar(i));
+      const ser = spread
+        ? chart.addAreaSeries({ lineColor: color, lineWidth: 2, topColor: mkAlpha(color, 0.25), bottomColor: mkAlpha(color, 0.02), priceFormat, priceLineVisible: false, crosshairMarkerRadius: 4 })
+        : chart.addLineSeries({ color, lineWidth: 2, priceFormat, priceLineVisible: false, title: s.id, crosshairMarkerRadius: 4 });
+      ser.setData(s.points.map(p => ({ time: p.t, value: p.v })));
+      return ser;
+    });
+    made[0].createPriceLine({ price: spread ? 0 : 100, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: spread ? 'zero' : 'base 100' });
+    chart.timeScale().fitContent();
+
+    const last = (s) => s.points[s.points.length - 1];
+    const text = (t, vals) => mkCmpDay(t) + '   ' + d.series.map((s, i) => (spread ? '' : s.id + ' ') + fmt(vals[i])).join('   ·   ');
+    const setRead = (t, vals) => { if (readRef.current) readRef.current.textContent = text(t, vals); };
+    setRead(last(d.series[0]).t, d.series.map(s => last(s).v));
+    chart.subscribeCrosshairMove(param => {
+      const vals = param && param.time ? made.map(ser => { const x = param.seriesData.get(ser); return x ? x.value : null; }) : null;
+      if (vals && vals.every(v => v != null)) setRead(param.time, vals);
+      else setRead(last(d.series[0]).t, d.series.map(s => last(s).v));
+    });
+    return () => chart.remove();
+  }, [state.data, theme]);
+
+  const legendItems = d ? d.series.map((s, i) => {
+    const lastP = s.points[s.points.length - 1], firstP = s.points[0];
+    const value = spread ? mkCmpFmtUnit(lastP.v, dec, unit) : lastP.v.toFixed(1) + ' (' + (lastP.v - 100 >= 0 ? '+' : '') + (lastP.v - 100).toFixed(1) + '%)';
+    return React.createElement('span', { key: s.id, className: 'mk-cmp-legend-item' },
+      React.createElement('span', { className: 'mk-cmp-swatch', style: { background: 'var(' + colorVar(i) + ')' } }),
+      React.createElement('strong', null, s.label), React.createElement('span', { style: { color: 'var(--ink-mid)' } }, value));
+  }) : null;
+
+  const rows = d ? (spread
+    ? d.legs.map(l => ({ key: l.id, name: l.label, first: mkCmpFmtUnit(l.first, l.decimals, l.unit), last: mkCmpFmtUnit(l.last, l.decimals, l.unit),
+        chg: (l.last - l.first >= 0 ? '+' : '') + (l.last - l.first).toFixed(l.decimals), src: l, swatch: null }))
+        .concat([(() => { const s = d.series[0], a = s.points[0].v, b = s.points[s.points.length - 1].v;
+          return { key: 'spread', name: s.label + ' (spread)', first: mkCmpFmtUnit(a, dec, unit), last: mkCmpFmtUnit(b, dec, unit),
+            chg: (b - a >= 0 ? '+' : '') + (b - a).toFixed(dec) + (unit === '%' ? ' pts' : ' ' + unit), src: null, swatch: colorVar(0) }; })()])
+    : d.legs.map((l, i) => ({ key: l.id, name: l.label, first: mkCmpFmtUnit(l.first, l.decimals, l.unit), last: mkCmpFmtUnit(l.last, l.decimals, l.unit),
+        chg: ((l.last / l.first - 1) * 100 >= 0 ? '+' : '') + ((l.last / l.first - 1) * 100).toFixed(1) + '%', src: l, swatch: colorVar(i) }))) : [];
+
+  const dropped = d ? d.legs.filter(l => l.dropped > 0) : [];
+  return React.createElement('div', null,
+    d && React.createElement('div', { className: 'mk-cmp-legend', 'aria-label': 'Series' }, legendItems),
+    React.createElement('div', { className: 'mk-chart', style: { height } },
+      state.loading && React.createElement('div', { className: 'mk-chart-msg' }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading chart…'),
+      state.error && React.createElement('div', { className: 'mk-chart-msg', role: 'alert', style: { textAlign: 'center', padding: '0 24px', color: 'var(--ink-mid)', fontSize: 11 } }, 'Chart unavailable — ' + state.error),
+      React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0, visibility: d ? 'visible' : 'hidden' } })),
+    d && React.createElement('div', { className: 'mk-cmp-readout', ref: readRef, 'aria-live': 'off' }),
+    d && React.createElement('table', { className: 'mk-cmp-table' },
+      React.createElement('thead', null, React.createElement('tr', null,
+        ['Series', 'Start ' + mkCmpDay(Date.parse(d.from) / 1000), 'Latest ' + mkCmpDay(Date.parse(d.to) / 1000), 'Change', 'Source'].map((h, i) =>
+          React.createElement('th', { key: h, className: i >= 1 && i <= 3 ? 'num' : '' }, h)))),
+      React.createElement('tbody', null, rows.map(r => React.createElement('tr', { key: r.key },
+        React.createElement('td', null, r.swatch && React.createElement('span', { className: 'mk-cmp-swatch', style: { display: 'inline-block', background: 'var(' + r.swatch + ')', marginRight: 7, verticalAlign: 'middle' } }), r.name),
+        React.createElement('td', { className: 'num' }, r.first), React.createElement('td', { className: 'num' }, r.last), React.createElement('td', { className: 'num' }, r.chg),
+        React.createElement('td', null, r.src && r.src.sourceUrl
+          ? React.createElement('a', { className: 'mk-src', href: r.src.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, r.src.source + ' ↗')
+          : '—'))))),
+    d && React.createElement('div', { className: 'mk-foot' },
+      d.sharedDays + ' shared days, ' + mkCmpDay(Date.parse(d.from) / 1000) + ' → ' + mkCmpDay(Date.parse(d.to) / 1000) +
+      (spread ? '' : ' · every series rebased to 100 on ' + mkCmpDay(Date.parse(d.baseDate) / 1000)) + '. ' + d.note +
+      (dropped.length ? ' Left out as not shared: ' + dropped.map(l => l.label + ' ' + l.dropped + ' day' + (l.dropped > 1 ? 's' : '')).join(', ') + '.' : '')));
+}
+
+function ComparePanel({ items, groups, theme }) {
+  const pick = items.filter(i => i.group !== 'predictions');
+  const byId = new Map(pick.map(i => [i.id, i]));
+  const [cfg, setCfgRaw] = useState(() => {
+    try { const c = JSON.parse(localStorage.getItem('dispatch-mk-cmp') || 'null'); if (c && Array.isArray(c.slots)) return c; } catch {}
+    return { slots: ['SPX', 'UKX', '', ''], tf: '1y', mode: 'rebased' };
+  });
+  const setCfg = (patch) => setCfgRaw(c => { const n = { ...c, ...patch }; try { localStorage.setItem('dispatch-mk-cmp', JSON.stringify(n)); } catch {} return n; });
+
+  // Chosen ids in slot order, one per instrument, remembering each one's slot so its colour never changes.
+  const chosen = [];
+  cfg.slots.forEach((id, i) => { if (id && byId.has(id) && !chosen.some(c => c.id === id)) chosen.push({ id, slot: i }); });
+  const seg = (value, set, opts) => React.createElement('div', { className: 'mk-seg', role: 'group' },
+    opts.map(([v, label]) => React.createElement('button', { key: v, className: 'mk-seg-btn' + (value === v ? ' on' : ''), 'aria-pressed': value === v, onClick: () => set(v) }, label)));
+
+  const presets = MK_CMP_PRESETS.filter(p => p.ids.every(id => byId.has(id)));
+  return React.createElement('div', { className: 'card mk-card' },
+    React.createElement('div', { className: 'card-title' }, 'Compare', React.createElement('span', { className: 'mk-count' }, 'up to 4')),
+    presets.length > 0 && React.createElement('div', { className: 'mk-chips', style: { marginBottom: 12 } },
+      presets.map(p => React.createElement('button', { key: p.label, className: 'mk-chip', onClick: () => setCfg({ slots: p.ids.concat(['', '']).slice(0, 4), mode: p.mode }) }, p.label))),
+    React.createElement('div', { className: 'mk-cmp-picker' },
+      cfg.slots.map((id, i) => React.createElement('label', { key: i, className: 'mk-cmp-slot' },
+        'Series ' + MK_CMP_SLOTS[i],
+        React.createElement('span', { className: 'mk-cmp-slot-row' },
+          React.createElement('span', { className: 'mk-cmp-swatch', style: { background: 'var(' + MK_CMP_VARS[i] + ')' } }),
+          React.createElement('select', { className: 'mk-cmp-select', value: id, onChange: e => setCfg({ slots: cfg.slots.map((x, j) => j === i ? e.target.value : x) }) },
+            React.createElement('option', { value: '' }, i < 2 ? '— choose —' : '— none —'),
+            groups.filter(g => g.id !== 'predictions').map(g => {
+              const opts = pick.filter(it => it.group === g.id);
+              return opts.length ? React.createElement('optgroup', { key: g.id, label: g.label },
+                opts.map(it => React.createElement('option', { key: it.id, value: it.id }, it.label))) : null;
+            }))))),
+      React.createElement('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' } },
+        seg(cfg.mode, v => setCfg({ mode: v }), [['rebased', 'Rebased to 100'], ['spread', 'Spread (A − B)']]),
+        seg(cfg.tf, v => setCfg({ tf: v }), MK_CMP_TFS))),
+    chosen.length < 2
+      ? React.createElement('div', { className: 'mk-chart-msg', style: { position: 'static', height: 120 } }, 'Pick at least two instruments to compare.')
+      : React.createElement(CompareChart, { ids: chosen.map(c => c.id), slots: chosen.map(c => c.slot), tf: cfg.tf, mode: cfg.mode, theme }));
 }
 
 function App() {
@@ -2753,8 +2934,8 @@ function App() {
           ' · All times UK')
       ),
       React.createElement('div', { className:'mk-controls' },
-        seg(mkView, setMkView, [['table','Table'], ['charts','Charts']]),
-        (mkView === 'charts' || mkExpanded) && seg(mkTf, setMkTf, [['1d','Daily'], ['1h','Hourly']]),
+        seg(mkView, setMkView, [['table','Table'], ['charts','Charts'], ['compare','Compare']]),
+        mkView !== 'compare' && (mkView === 'charts' || mkExpanded) && seg(mkTf, setMkTf, [['1d','Daily'], ['1h','Hourly'], ['1y','1Y'], ['5y','5Y']]),
         React.createElement('button', { className:'btn btn-primary mk-refresh', onClick: refreshMarkets, disabled: marketsRefreshing, title:'Fetch fresh prices now (free sources, ~50 requests, no cost)' },
           marketsRefreshing ? React.createElement(React.Fragment, null, React.createElement('span', { className:'spin' }, '↻'), ' Refreshing…') : '↻ Refresh now')
       )
@@ -2843,7 +3024,9 @@ function App() {
       );
     }
 
-    const body = mkView === 'table'
+    const body = mkView === 'compare'
+      ? React.createElement(ComparePanel, { items, groups, theme: themeMode })
+      : mkView === 'table'
       ? visible.map(groupTable)
       : visible.map(g => {
           const rows = items.filter(i => i.group === g.id);
@@ -2855,7 +3038,7 @@ function App() {
 
     return React.createElement('div', { className:'mk-panel' },
       header,
-      chips,
+      mkView !== 'compare' && chips,
       body,
       failed.length > 0 && React.createElement('div', { className:'card mk-card mk-failed' },
         React.createElement('div', { className:'card-title' }, 'Unavailable at last refresh'),
