@@ -260,11 +260,23 @@ const dayEpoch = (d) => Math.floor(Date.parse(d + "T00:00:00Z") / 1000);
 /** The unit a difference between two instruments is expressed in, or null if a spread would be meaningless. */
 function spreadUnit(inst) { return inst.spreadUnit || (inst.kind === "macro" ? inst.unit || null : null); }
 
-/** day → value (the last print of each UTC day wins) from either history shape. */
-function dailyCloses(h) {
+/** First UTC day (YYYY-MM-DD) inside the range: 6 months, 1 year or 5 years back from today. */
+function windowStartDay(tf) {
+  const d = new Date();
+  if (tf === "5y") d.setUTCFullYear(d.getUTCFullYear() - 5);
+  else if (tf === "1y") d.setUTCFullYear(d.getUTCFullYear() - 1);
+  else d.setUTCMonth(d.getUTCMonth() - 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/** day → value (the last print of each UTC day wins) from either history shape, limited to the range. */
+function dailyCloses(h, fromDay) {
   const m = new Map();
   const rows = h.type === "ohlc" ? h.bars.map(b => [b.t, b.c]) : h.points.map(p => [p.t, p.v]);
-  for (const [t, v] of rows.sort((a, b) => a[0] - b[0])) if (Number.isFinite(v)) m.set(dayKey(t), v);
+  for (const [t, v] of rows.sort((a, b) => a[0] - b[0])) {
+    const day = dayKey(t);
+    if (day >= fromDay && Number.isFinite(v)) m.set(day, v);
+  }
   return m;
 }
 
@@ -283,7 +295,10 @@ async function getComparison(ids, tf = "1y", mode = "rebased") {
   }
 
   const hists  = await Promise.all(ids.map(id => getHistory(id, tf)));
-  const maps   = hists.map(dailyCloses);
+  // Each source has its own default window (FRED: a year, M2 five, CPI ten), so cut every series to the
+  // selected range here — the label must say what is plotted.
+  const fromDay = windowStartDay(tf);
+  const maps   = hists.map(h => dailyCloses(h, fromDay));
   const common = [...maps[0].keys()].filter(d => maps.every(m => m.has(d))).sort();
   if (common.length < MIN_COMMON_DAYS) {
     throw httpError(422, `Too little overlap to compare: only ${common.length} shared day${common.length === 1 ? "" : "s"} in this range (monthly and daily series share few dates).`);

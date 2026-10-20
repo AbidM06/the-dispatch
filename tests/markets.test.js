@@ -378,6 +378,20 @@ describe("longer ranges + compare/overlay — real closes on shared dates only",
     await expect(markets.getComparison(["T10Y2Y", "US10Y"], "1y", "rebased")).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/Can't rebase to 100: T10Y2Y/) });
   });
 
+  test("every range is cut to its window for every source: 6M really is six months (FRED defaults to a year or more)", async () => {
+    // FRED-only series with data from Dec 2025 (≈ 9 months before NOW) as well as the last two weeks.
+    const old = [["2025-12-01", 3], ["2026-02-01", 3.1], ["2026-03-27", 3.2], ["2026-03-30", 3.3], ["2026-04-01", 3.4]];
+    global.fetch = makeFetch((url) => url.includes("/fred/series/observations")
+      ? { status: 200, body: fredObsBody(old.concat(DAYS.map((d, i) => [d, 3.5 + i * 0.1]))) }
+      : null);
+    const markets = require("../server/markets/service");
+    const m6 = await markets.getComparison(["HYOAS", "IGOAS"], "1d", "rebased");
+    expect(m6.from).toBe("2026-03-30");                              // NOW is 28 Sep 2026 → window starts 28 Mar
+    expect(m6.sharedDays).toBe(2 + DAYS.length);                      // 30 Mar, 1 Apr + the 6 September days
+    const y1 = await markets.getComparison(["HYOAS", "IGOAS"], "1y", "rebased");
+    expect(y1.from).toBe("2025-12-01");                              // a year back still includes Dec 2025
+  });
+
   test("too few shared days is refused, not padded", async () => {
     series["BZ=F"] = [null, null, null, null, 53, 54];     // restored in beforeEach
     const markets = require("../server/markets/service");
