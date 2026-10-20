@@ -4,7 +4,9 @@
  * GET  /api/markets               — last Markets snapshot (never triggers a fetch,
  *                                   except the very first time when none exists)
  * POST /api/markets/refresh       — manual "Refresh now" (write-auth guarded)
- * GET  /api/markets/history/:id   — chart history, ?tf=1d (6 months daily) | 1h (1 month hourly)
+ * GET  /api/markets/history/:id   — chart history, ?tf=1d (6 months daily) | 1h (1 month hourly) | 1y | 5y (daily)
+ * GET  /api/markets/compare       — ?ids=A,B[,C,D]&tf=1d|1y|5y&mode=rebased|spread — overlay / spread of 2–4
+ *                                   instruments on shared dates (real closes only, nothing filled)
  * GET  /api/markets/status        — scheduler status (next/last run)
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -44,6 +46,15 @@ router.get("/status", (req, res) => res.json(scheduler.getStatus()));
 router.get("/history/:id", async (req, res) => {
   try {
     res.json(await markets.getHistory(req.params.id, req.query.tf));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.get("/compare", async (req, res) => {
+  try {
+    const ids = String(req.query.ids || "").split(",");
+    res.json(await markets.getComparison(ids, req.query.tf || "1y", req.query.mode || "rebased"));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

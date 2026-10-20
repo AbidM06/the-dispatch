@@ -265,6 +265,120 @@ describe("marketsScheduler — default 07:45 + 14:45 London", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+describe("longer ranges + compare/overlay — real closes on shared dates only", () => {
+  // Daily bars at 20:00Z starting Mon 21 Sep 2026; `closes[i]` null = that day absent.
+  const DAYS = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-28"];
+  function dailyYahoo(symbol, closes) {
+    const rows = closes.map((c, i) => [epoch(DAYS[i] + "T20:00:00Z"), c]).filter(r => r[1] != null);
+    return { chart: { result: [{
+      meta: { symbol, currency: "USD", regularMarketPrice: rows[rows.length - 1][1], regularMarketTime: rows[rows.length - 1][0] },
+      timestamp: rows.map(r => r[0]),
+      indicators: { quote: [{ open: rows.map(r => r[1]), high: rows.map(r => r[1]), low: rows.map(r => r[1]), close: rows.map(r => r[1]) }] },
+    }] } };
+  }
+  const series = {
+    "CL=F": [100, 102, 101, 103, 104, 105],
+    "BZ=F": [50, 50, 51, null, 53, 54],          // 24 Sep missing
+    "GC=F": [2000, 2010, 2020, 2030, 2040, 2050],
+    "^TNX": [4.0, 4.1, 4.2, 4.3, 4.4, 4.5],
+  };
+  const urls = [];
+  const savedBrent = series["BZ=F"].slice();
+  // FRED daily observations on the same 6 days (HYOAS etc.), so FRED-only series can overlap.
+  const fredDaily = (url) => {
+    const id = new URL(url).searchParams.get("series_id");
+    return { status: 200, body: fredObsBody(DAYS.map((d, i) => [d, id === "T10Y2Y" && i === 0 ? -0.2 : 3 + i * 0.1])) };
+  };
+  beforeEach(() => {
+    urls.length = 0;
+    series["BZ=F"] = savedBrent.slice();
+    global.fetch = makeFetch((url) => {
+      if (url.includes("/fred/series/observations")) return fredDaily(url);
+      if (url.includes("finance.yahoo.com")) {
+        urls.push(url);
+        const sym = decodeURIComponent(url.split("/chart/")[1].split("?")[0]);
+        if (series[sym]) return { status: 200, body: dailyYahoo(sym, series[sym]) };
+      }
+      return null;
+    });
+  });
+
+  test("1y and 5y ask Yahoo for the longer DAILY window; Daily/Hourly are unchanged", async () => {
+    const markets = require("../server/markets/service");
+    await markets.getHistory("GOLD", "5y");
+    await markets.getHistory("GOLD", "1y");
+    await markets.getHistory("GOLD", "1d");
+    await markets.getHistory("GOLD", "1h");
+    const q = urls.map(u => u.split("?")[1]);
+    expect(q).toEqual(expect.arrayContaining(["interval=1d&range=5y", "interval=1d&range=1y", "interval=1d&range=6mo", "interval=60m&range=1mo"]));
+    await expect(markets.getHistory("GOLD", "10y")).resolves.toMatchObject({ tf: "1d" });   // unknown → default, as before
+  });
+
+  test("rebased: every series starts at 100 on the first shared day; a day missing from one series is dropped from all, and counted", async () => {
+    const markets = require("../server/markets/service");
+    const c = await markets.getComparison(["WTI", "BRENT"], "1y", "rebased");
+    expect(c.sharedDays).toBe(5);                                   // 24 Sep dropped
+    expect(c.from).toBe("2026-09-21");
+    expect(c.series.map(x => x.points.length)).toEqual([5, 5]);
+    expect(c.series[0].points[0].v).toBe(100);
+    expect(c.series[1].points[0].v).toBe(100);
+    expect(c.series[0].points[1].v).toBe(102);                      // 102 / 100
+    expect(c.series[1].points[3].v).toBe(106);                      // 53 / 50 on 25 Sep (23 Sep is index 2)
+    expect(c.legs.find(l => l.id === "WTI").dropped).toBe(1);       // WTI had 6 days, 5 shared
+    expect(c.legs.find(l => l.id === "BRENT").dropped).toBe(0);
+    expect(c.legs[0]).toMatchObject({ first: 100, last: 105, lastDate: "2026-09-28", source: "Yahoo Finance" });
+    expect(c.note).toMatch(/nothing is filled or interpolated/);
+  });
+
+  test("spread: WTI − Brent in USD/bbl on shared days", async () => {
+    const markets = require("../server/markets/service");
+    const c = await markets.getComparison(["WTI", "BRENT"], "1y", "spread");
+    expect(c.series).toHaveLength(1);
+    expect(c.series[0]).toMatchObject({ label: "WTI crude − Brent crude", unit: "USD/bbl" });
+    expect(c.series[0].points.map(p => p.v)).toEqual([50, 52, 50, 51, 51]);
+  });
+
+  test("refuses what would be misleading: meaningless spread, wrong count, unknown id, prediction market, bad range", async () => {
+    const markets = require("../server/markets/service");
+    await expect(markets.getComparison(["GOLD", "WTI"], "1y", "spread")).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/not a meaningful spread/) });
+    await expect(markets.getComparison(["US10Y", "GOLD"], "1y", "spread")).rejects.toMatchObject({ status: 422 });
+    await expect(markets.getComparison(["WTI"], "1y")).rejects.toMatchObject({ status: 400 });
+    await expect(markets.getComparison(["WTI", "WTI"], "1y")).rejects.toMatchObject({ status: 400 });
+    await expect(markets.getComparison(["WTI", "BRENT", "GOLD", "US10Y", "SPX"], "1y")).rejects.toMatchObject({ status: 400 });
+    await expect(markets.getComparison(["WTI", "NOPE"], "1y")).rejects.toMatchObject({ status: 404, message: expect.stringMatching(/NOPE/) });
+    await expect(markets.getComparison(["WTI", "BRENT"], "1h")).rejects.toMatchObject({ status: 400 });
+    await expect(markets.getComparison(["WTI", "BRENT"], "1y", "ratio")).rejects.toMatchObject({ status: 400 });
+  });
+
+  test("rates in the same unit may be spread; a series at or below zero cannot be rebased to 100", async () => {
+    const markets = require("../server/markets/service");
+    const ok = await markets.getComparison(["US10Y", "HYOAS"], "1y", "spread");
+    expect(ok.series[0].unit).toBe("%");
+    // T10Y2Y starts at -0.2 in the FRED mock above.
+    await expect(markets.getComparison(["T10Y2Y", "US10Y"], "1y", "rebased")).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/Can't rebase to 100: T10Y2Y/) });
+  });
+
+  test("too few shared days is refused, not padded", async () => {
+    series["BZ=F"] = [null, null, null, null, 53, 54];     // restored in beforeEach
+    const markets = require("../server/markets/service");
+    await expect(markets.getComparison(["WTI", "BRENT"], "1y")).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/Too little overlap to compare: only 2 shared days/) });
+  });
+
+  test("GET /compare: 200 with data, 4xx with a plain message", async () => {
+    jest.mock("../server/providers/anthropic", () => ({ fetchAllAnalysis: jest.fn(), fetchTickerExplain: jest.fn(), callClaude: jest.fn() }));
+    const app = require("../server/index");
+    const ok = await request(app).get("/api/markets/compare?ids=WTI,BRENT&tf=1y&mode=spread");
+    expect(ok.status).toBe(200);
+    expect(ok.body.series[0].points).toHaveLength(5);
+    const bad = await request(app).get("/api/markets/compare?ids=GOLD&tf=1y");
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/between 2 and 4/);
+    const nope = await request(app).get("/api/markets/compare?ids=GOLD,WTI&mode=spread");
+    expect(nope.status).toBe(422);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 describe("/api/markets routes", () => {
   let app;
   beforeEach(() => {

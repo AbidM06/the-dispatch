@@ -90,7 +90,8 @@ async function yahooQuote({ symbol }) {
 }
 
 async function yahooHistory({ symbol }, tf) {
-  const [range, interval] = tf === "1h" ? ["1mo", "60m"] : ["6mo", "1d"];
+  // 1y / 5y are DAILY bars over a longer window (same data, nothing resampled or filled).
+  const [range, interval] = { "1h": ["1mo", "60m"], "1y": ["1y", "1d"], "5y": ["5y", "1d"] }[tf] || ["6mo", "1d"];
   const r  = await yahooChart(symbol, range, interval);
   const q  = r.indicators?.quote?.[0] || {};
   const ts = r.timestamp || [];
@@ -184,10 +185,20 @@ async function fredQuote(src) {
 }
 
 async function fredHistory(src, tf) {
-  const years = src.transform === "yoy" ? 11 : (src.series === "M2SL" ? 5 : 1);
+  const longRange = tf === "1y" || tf === "5y";
+  const showYears = tf === "5y" ? 5 : 1;
+  // A year-on-year series needs the year before its first plotted point, so fetch 2 extra years.
+  const years = longRange ? showYears + (src.transform === "yoy" ? 2 : 0)
+                          : (src.transform === "yoy" ? 11 : (src.series === "M2SL" ? 5 : 1));
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - years);
-  const obs = applyTransform(await fredObservations(src.series, { start: start.toISOString().slice(0, 10) }), src);
+  let obs = applyTransform(await fredObservations(src.series, { start: start.toISOString().slice(0, 10) }), src);
+  if (longRange) {
+    const cutoff = new Date();
+    cutoff.setUTCFullYear(cutoff.getUTCFullYear() - showYears);
+    const cut = cutoff.toISOString().slice(0, 10);
+    obs = obs.filter(o => o.date >= cut);
+  }
   if (!obs.length) throw new Error(`FRED: empty history for ${src.series}`);
   return {
     type: "line",

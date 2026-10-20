@@ -213,7 +213,7 @@ function refresh(trigger = "manual") {
 function isRefreshing() { return !!inFlight; }
 
 async function getHistory(id, tf = "1d", { source } = {}) {
-  if (!["1d", "1h"].includes(tf)) tf = "1d";
+  if (!["1d", "1h", "1y", "5y"].includes(tf)) tf = "1d";
   const key = `${id}:${tf}`;
   const hit = historyCache.get(key);
   if (hit && hit.expires > Date.now()) return hit.value;
@@ -244,6 +244,83 @@ async function getHistory(id, tf = "1d", { source } = {}) {
   throw e;
 }
 
+// ── Compare / overlay ────────────────────────────────────────────────────────
+// Plots 2–4 of the fixed Markets instruments on shared dates. Every plotted value is a real daily
+// close from the same sources the single charts use: dates are INTERSECTED (a day missing from
+// any series is dropped and counted), never filled, interpolated or carried forward.
+const COMPARE_TFS   = ["1d", "1y", "5y"];          // 6M / 1Y / 5Y daily — no hourly (sessions don't align)
+const COMPARE_MODES = ["rebased", "spread"];
+const MIN_COMMON_DAYS = 5;
+
+function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
+const rnd = (n, dp = 4) => Math.round(n * 10 ** dp) / 10 ** dp;
+const dayKey = (t) => new Date(t * 1000).toISOString().slice(0, 10);
+const dayEpoch = (d) => Math.floor(Date.parse(d + "T00:00:00Z") / 1000);
+
+/** The unit a difference between two instruments is expressed in, or null if a spread would be meaningless. */
+function spreadUnit(inst) { return inst.spreadUnit || (inst.kind === "macro" ? inst.unit || null : null); }
+
+/** day → value (the last print of each UTC day wins) from either history shape. */
+function dailyCloses(h) {
+  const m = new Map();
+  const rows = h.type === "ohlc" ? h.bars.map(b => [b.t, b.c]) : h.points.map(p => [p.t, p.v]);
+  for (const [t, v] of rows.sort((a, b) => a[0] - b[0])) if (Number.isFinite(v)) m.set(dayKey(t), v);
+  return m;
+}
+
+async function getComparison(ids, tf = "1y", mode = "rebased") {
+  if (!COMPARE_TFS.includes(tf)) throw httpError(400, `Range must be one of ${COMPARE_TFS.join(", ")}`);
+  if (!COMPARE_MODES.includes(mode)) throw httpError(400, `Mode must be one of ${COMPARE_MODES.join(", ")}`);
+  ids = [...new Set((ids || []).map(s => String(s).trim()).filter(Boolean))];
+  if (ids.length < 2 || ids.length > 4) throw httpError(400, "Pick between 2 and 4 different instruments");
+  const insts = ids.map(id => INSTRUMENTS.find(i => i.id === id));
+  const unknown = ids.filter((_, i) => !insts[i]);
+  if (unknown.length) throw httpError(404, `Not comparable: ${unknown.join(", ")} (only the fixed Markets instruments can be compared, not prediction markets)`);
+  if (mode === "spread") {
+    if (ids.length !== 2) throw httpError(422, "A spread needs exactly 2 instruments");
+    const [ua, ub] = insts.map(spreadUnit);
+    if (!ua || ua !== ub) throw httpError(422, `${insts[0].label} − ${insts[1].label} is not a meaningful spread (different or unspecified units). Spreads are offered for rates/credit/macro series in the same unit, and WTI vs Brent.`);
+  }
+
+  const hists  = await Promise.all(ids.map(id => getHistory(id, tf)));
+  const maps   = hists.map(dailyCloses);
+  const common = [...maps[0].keys()].filter(d => maps.every(m => m.has(d))).sort();
+  if (common.length < MIN_COMMON_DAYS) {
+    throw httpError(422, `Too little overlap to compare: only ${common.length} shared day${common.length === 1 ? "" : "s"} in this range (monthly and daily series share few dates).`);
+  }
+
+  const legs = ids.map((id, i) => ({
+    id, label: insts[i].label, decimals: insts[i].decimals ?? 2, unit: insts[i].unit || null,
+    firstDate: common[0], first: rnd(maps[i].get(common[0])),
+    lastDate: common[common.length - 1], last: rnd(maps[i].get(common[common.length - 1])),
+    source: hists[i].source, sourceUrl: hists[i].sourceUrl,
+    dropped: maps[i].size - common.length,
+  }));
+
+  let series;
+  if (mode === "rebased") {
+    const bad = ids.filter((_, i) => !(maps[i].get(common[0]) > 0));
+    if (bad.length) throw httpError(422, `Can't rebase to 100: ${bad.join(", ")} is zero or negative on ${common[0]}. Use a spread, or compare a different range.`);
+    series = ids.map((id, i) => ({
+      id, label: insts[i].label,
+      points: common.map(d => ({ t: dayEpoch(d), v: rnd(maps[i].get(d) / maps[i].get(common[0]) * 100, 2) })),
+    }));
+  } else {
+    const dp = Math.max(insts[0].decimals ?? 2, insts[1].decimals ?? 2);
+    series = [{
+      id: `${ids[0]}-${ids[1]}`, label: `${insts[0].label} − ${insts[1].label}`, unit: spreadUnit(insts[0]),
+      points: common.map(d => ({ t: dayEpoch(d), v: rnd(maps[0].get(d) - maps[1].get(d), dp) })),
+    }];
+  }
+
+  return {
+    ids, tf, mode, generatedAt: new Date().toISOString(),
+    baseDate: common[0], from: common[0], to: common[common.length - 1], sharedDays: common.length,
+    series, legs,
+    note: "Only days on which every selected series has a value are plotted; nothing is filled or interpolated.",
+  };
+}
+
 function _reset() { current = null; inFlight = null; historyCache.clear(); }
 
-module.exports = { refresh, getSnapshot, getHistory, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };
+module.exports = { refresh, getSnapshot, getHistory, getComparison, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };
