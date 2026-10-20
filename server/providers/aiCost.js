@@ -213,13 +213,21 @@ const DEFAULT_ESTIMATE_USD = 0.85;
  * estimateReport — projected cost of the next run of a report type.
  * @param {string} type
  * @param {object[]} recentRecords  stored reports of that type, newest first
+ * @param {{ roleModels?: Object<string,string> }} [opts]  the model each role would use NOW. A receipt
+ *   whose recorded model for one of those roles differs (e.g. a Sonnet-only run before the red team and
+ *   chair moved to Opus, D-27) is not a fair guide to the next run, so it is left out of the average.
  */
-function estimateReport(type, recentRecords = []) {
-  const totals = recentRecords
+function estimateReport(type, recentRecords = [], { roleModels = {} } = {}) {
+  const norm = (m) => String(m || "").replace(/-\d{8}$/, "");
+  const sameMix = (c) => Object.entries(roleModels).every(([role, model]) => {
+    const used = c.byRole?.[role]?.model;
+    return !used || norm(used) === norm(model);
+  });
+  const comparable = recentRecords
     .map(r => r?.meta?.cost)
-    .filter(c => c && c.unpricedCalls === 0 && c.totalUSD > 0 && !Object.values(c.byRole || {}).some(x => x.batched))
-    .map(c => c.totalUSD)
-    .slice(0, 5);
+    .filter(c => c && c.unpricedCalls === 0 && c.totalUSD > 0 && !Object.values(c.byRole || {}).some(x => x.batched));
+  const totals = comparable.filter(sameMix).map(c => c.totalUSD).slice(0, 5);
+  const skipped = comparable.length - comparable.filter(sameMix).length;
 
   if (!totals.length) {
     return {
@@ -227,7 +235,8 @@ function estimateReport(type, recentRecords = []) {
       lowUSD: 0.40, highUSD: 1.20,
       basis: "assumption",
       // Name the model this run will actually use (SONNET_MODEL), not a fixed one.
-      basisDetail: `No measured runs of this report type yet — typical five-agent run on ${require("./models").sonnetModel()} with web search. Replaced by real receipts after the first run.`,
+      basisDetail: `No measured runs of this report type yet — typical five-agent run on ${require("./models").sonnetModel()} with web search. Replaced by real receipts after the first run.` +
+        (skipped ? ` ${skipped} earlier run${skipped > 1 ? "s" : ""} used different models for the red team / chair, so ${skipped > 1 ? "they are" : "it is"} not averaged in.` : ""),
     };
   }
   const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
@@ -236,7 +245,8 @@ function estimateReport(type, recentRecords = []) {
     lowUSD: Math.round(Math.min(...totals) * 100) / 100,
     highUSD: Math.round(Math.max(...totals) * 100) / 100,
     basis: "measured",
-    basisDetail: `Average of the last ${totals.length} ${type} run${totals.length > 1 ? "s" : ""} (synchronous rate).`,
+    basisDetail: `Average of the last ${totals.length} ${type} run${totals.length > 1 ? "s" : ""} (synchronous rate).` +
+      (skipped ? ` ${skipped} older run${skipped > 1 ? "s" : ""} on a different red-team / chair model ${skipped > 1 ? "are" : "is"} left out.` : ""),
   };
 }
 

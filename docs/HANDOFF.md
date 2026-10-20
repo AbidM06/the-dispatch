@@ -152,6 +152,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
 - Added `claude-opus-5-5` to `aiCost` ($4/$20; cache reads 0.05x — its list price is $0.20/M, not the usual 0.1x). Raised token caps (red team 8000, chair 7000) because Opus always thinks and thinking counts toward `max_tokens`. Fixed `sonnetFailure()` so an Opus failure no longer reads "Claude Sonnet (claude-opus-5-5)". Estimate assumption $0.70 → $0.85. 499 tests (3 updated, 3 new).
 - Not verified live (no Anthropic key in the cloud session). Cost is a ballpark (+~$0.10–0.20 per report), not measured — compare receipts. Rollback per role: `RESEARCH_REDTEAM_MODEL` / `RESEARCH_CHAIR_MODEL=claude-sonnet-5-5`.
+- Codex P2 on PR #5: the pre-run estimate averaged old Sonnet-only receipts. `estimateReport` now leaves out receipts whose red team / chair model differs from what the next run would use (falls back to the $0.85 assumption, and says why).
 - Next: merge PR #4 first, then this one; Codex review; restart; compare one report's receipt.
 
 ### 2026-10-20 — Claude (Haiku 5.5)

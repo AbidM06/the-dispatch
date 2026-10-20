@@ -232,6 +232,23 @@ describe("estimateReport — measured when possible, labelled when assumed", () 
     expect(e.highUSD).toBe(0.7);
   });
 
+  test("receipts from a different red-team/chair model are not averaged in (D-27)", () => {
+    const rec = (usd, model) => ({ meta: { cost: { totalUSD: usd, unpricedCalls: 0, byRole: { redteam: { model }, chair: { model } } } } });
+    const now = { redteam: "claude-opus-5-5", chair: "claude-opus-5-5" };
+    // Only old Sonnet-mix receipts → fall back to the stated assumption, and say why.
+    const old = aiCost.estimateReport("macro", [rec(0.6, "claude-sonnet-5-5"), rec(0.7, "claude-sonnet-5-5")], { roleModels: now });
+    expect(old.basis).toBe("assumption");
+    expect(old.estimateUSD).toBe(aiCost.DEFAULT_ESTIMATE_USD);
+    expect(old.basisDetail).toMatch(/2 earlier runs used different models/);
+    // A mix of new and old → only the new ones count.
+    const mixed = aiCost.estimateReport("macro", [rec(0.9, "claude-opus-5-5"), rec(0.6, "claude-sonnet-5-5"), rec(1.0, "claude-opus-5-5-20260101")], { roleModels: now });
+    expect(mixed.basis).toBe("measured");
+    expect(mixed.estimateUSD).toBe(0.95);
+    expect(mixed.basisDetail).toMatch(/1 older run on a different red-team/);
+    // No roleModels given → behaves as before.
+    expect(aiCost.estimateReport("macro", [rec(0.6, "claude-sonnet-5-5")]).estimateUSD).toBe(0.6);
+  });
+
   test("confirm threshold defaults to 0 (always ask) and is configurable", () => {
     expect(aiCost.confirmThresholdUSD()).toBe(0);
     process.env.RESEARCH_CONFIRM_ABOVE_USD = "1.5";
