@@ -29,6 +29,23 @@ const FORCED_TOOL_CHOICE_OK = new Set(["claude-haiku-4-5", "claude-sonnet-5"]);
 function supportsForcedToolChoice(model) {
   return FORCED_TOOL_CHOICE_OK.has(model);
 }
+// Haiku 5.x thinks by default (adaptive, medium effort) and thinking counts toward max_tokens, so a
+// cap sized for Haiku 4.5 (900-1,000 on several jobs) can be used up before any answer is written.
+// Every Haiku 5.x call gets this much extra room. It is a ceiling, not a charge: only tokens the
+// model actually produces are billed.
+const HAIKU_THINKING_HEADROOM = 4000;
+function maxTokensFor(model, requested) {
+  return /^claude-haiku-5/.test(String(model)) ? requested + HAIKU_THINKING_HEADROOM : requested;
+}
+
+/** Model ran out of max_tokens before writing any text (thinking can do this) — say so plainly. */
+function outOfRoomError(model, text, stopReason) {
+  if (stopReason !== "max_tokens" || String(text).trim()) return null;
+  const e = new Error(`${model} used its whole token limit thinking and wrote no answer (stop_reason max_tokens). Try again; if it repeats, the limit for this step needs raising.`);
+  e.code = "MAX_TOKENS_NO_TEXT";
+  return e;
+}
+
 const SEARCH_FIRST_INSTRUCTION =
   "\n\nUse the web_search tool before you answer: search for current figures and news rather than relying on memory.";
 
@@ -41,4 +58,4 @@ function searchRequest(model, system, tool) {
   return { system: `${system || ""}${SEARCH_FIRST_INSTRUCTION}`, tools: [tool] };
 }
 
-module.exports = { sonnetModel, DEFAULT_SONNET, HAIKU, supportsForcedToolChoice, searchRequest, SEARCH_FIRST_INSTRUCTION };
+module.exports = { sonnetModel, DEFAULT_SONNET, HAIKU, maxTokensFor, outOfRoomError, HAIKU_THINKING_HEADROOM, supportsForcedToolChoice, searchRequest, SEARCH_FIRST_INSTRUCTION };

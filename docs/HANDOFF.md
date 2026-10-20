@@ -150,7 +150,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 ### 2026-10-20 — Claude (Haiku 5.5)
 - Owner asked to move the research tab's second agent (claim extraction, the only Haiku agent there) to Haiku 5.5, and chose **every Haiku job**, reason: better extraction quality + lower cost. Thinking left at Haiku 5.5's default; draft revision stays on Sonnet (it runs under `lead`, not Haiku).
 - `models.HAIKU` → `claude-haiku-5-5`; `aiCost` prices it $0.10/$0.50 per M tokens up to 100K prompt tokens, $0.50/$2.50 above (4.5 entry kept for old receipts); 5.5 kept OFF the forced-tool_choice list and on the basic web-search tool because neither was verifiable without a live API key. 496 tests (5 updated, 4 new). D-26.
-- Not verified live (the cloud session has no Anthropic key): thinking tokens count toward extraction's 6,000-token cap — if a report ever fails at extraction with truncated JSON, raise `maxTokens` in `leadAnalyst.js` or set effort low. Rollback: `RESEARCH_EXTRACT_MODEL=claude-haiku-4-5` (extraction only) or revert the PR.
+- Codex P1 on PR #4: thinking counts toward `max_tokens`, and several Haiku caps are 900–1,000. Fixed centrally: every Haiku 5.x call gets +4,000 headroom (`models.maxTokensFor`), and an empty `max_tokens` reply fails with a plain message. Still not verified live (no Anthropic key in the cloud session). Rollback: `RESEARCH_EXTRACT_MODEL=claude-haiku-4-5` (extraction only) or revert the PR.
 - Next: Codex review, owner merge, restart, then compare one report's receipt/claim count.
 
 ### 2026-10-16 — Claude (UMUSHROOM notes section)
