@@ -54,7 +54,8 @@ describe("journal idea chart", () => {
     const r = await request(app).get(`/api/journal/${fresh.entryId}/chart`);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ entryId: fresh.entryId, tf: "1d", type: "ohlc", source: "Yahoo Finance",
-      levels: { entryLow: 99, entryHigh: 101, target: 110, stop: 95, direction: "LONG" } });
+      levels: { entryLow: 99, entryHigh: 101, target: 110, stop: 95, direction: "LONG" },
+      sourceUrl: "https://finance.yahoo.com/quote/BZ%3DF" });   // the plotted series' own source + link, shown beside the chart
     expect(getHistory).toHaveBeenCalledWith("BRENT", "1d", { source: undefined });
     expect((await request(app).get(`/api/journal/${mid.entryId}/chart`)).body.tf).toBe("1y");
     expect((await request(app).get(`/api/journal/${old.entryId}/chart`)).body.tf).toBe("5y");

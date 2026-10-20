@@ -1491,7 +1491,7 @@ function LazyMount({ height, children }) {
  * Dotted High/Low lines over the visible period, last-value tag on the axis,
  * crosshair with an O/H/L/C (or value) read-out in the top-left.
  */
-function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null }) {
+function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null, showSource = false }) {
   const boxRef    = useRef(null);
   const legendRef = useRef(null);
   const [state, setState] = useState({ loading: true, error: null, hist: null });
@@ -1586,13 +1586,22 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false, fetch
     return () => chart.remove();
   }, [state.hist, theme, interactive]);
 
-  return React.createElement('div', { className: 'mk-chart', style: { height } },
+  // The series actually plotted can differ from the instrument's primary quote source (Yahoo → FRED fallback,
+  // Polymarket), so a chart that must be checkable names the source its history really came from.
+  const rangeLabel = { '1d': '6 months', '1y': '1 year', '5y': '5 years' };
+  const sourceLine = showSource && state.hist && React.createElement('div', { className: 'mk-foot' },
+    'Plotted prices: ',
+    state.hist.sourceUrl
+      ? React.createElement('a', { href: state.hist.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, (state.hist.source || 'source') + ' ↗')
+      : (state.hist.source || 'unknown source'),
+    ' · daily' + (state.hist.type === 'ohlc' ? ' candles' : ' closes') + (rangeLabel[state.hist.tf] ? ', last ' + rangeLabel[state.hist.tf] : ''));
+  return React.createElement(React.Fragment, null, React.createElement('div', { className: 'mk-chart', style: { height } },
     React.createElement('div', { className: 'mk-chart-legend', ref: legendRef }),
     state.loading && React.createElement('div', { className: 'mk-chart-msg' }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading chart…'),
     state.error && React.createElement('div', { className: 'mk-chart-msg' }, 'Chart unavailable — ' + state.error),
     state.hist && state.hist.note && React.createElement('div', { className: 'mk-chart-note' }, state.hist.note),
     React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0, visibility: state.hist ? 'visible' : 'hidden' } })
-  );
+  ), sourceLine);
 }
 
 // ─── MARKETS · COMPARE / OVERLAY ─────────────────────────────────────────────
@@ -7262,9 +7271,9 @@ function App() {
           c.marketId && React.createElement(React.Fragment, null,
             React.createElement('div', { className: 'idc-lbl' }, 'Price and the idea\'s levels'),
             React.createElement(MarketChart, { item: (markets && markets.items || []).find(i => i.id === c.marketId) || { id: c.marketId, decimals: 2 },
-              tf: 'idea', theme: themeMode, height: 280, interactive: true, fetchUrl: '/api/journal/' + encodeURIComponent(e.entryId) + '/chart' }),
+              tf: 'idea', theme: themeMode, height: 280, interactive: true, showSource: true, fetchUrl: '/api/journal/' + encodeURIComponent(e.entryId) + '/chart' }),
             React.createElement('div', { className: 'mk-foot' },
-              'Real daily prices from the Markets sources (no AI). Lines are the idea as written: target ' + f(c.target) + ' · stop ' + f(c.stop) +
+              'No AI. Lines are the idea as written: target ' + f(c.target) + ' · stop ' + f(c.stop) +
               ' · entry zone ' + f(c.entryLow) + '–' + f(c.entryHigh) + '. The chart reads the Journal; it never changes it.')),
           React.createElement('div', { className: 'idc-lbl' }, 'The idea, exactly as generated'),
           IdeaCard(c, { open: true, readOnly: true }),
