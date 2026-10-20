@@ -155,6 +155,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 - New `GET /api/journal/:entryId/chart` (real daily prices over the shortest 6M/1Y/5Y range that covers the idea's age + a month, plus the idea's own levels) and the existing `MarketChart` draws them as labelled lines; autoscale keeps every level on screen. Sealed ideas (My pitch first) never render it. A missing level is refused (422) — a test caught `Number(null)` = 0 being drawn as a line at zero.
 - Checked in a real browser (day + night; long and short; 6M and 1Y; sealed row) against the real server code with mocked prices. Live Yahoo/FRED unverified from the cloud session.
 - Codex P1: the chart footer said only 'Markets sources', but the history can come from FRED or Polymarket, which can differ from the reference-price source. `MarketChart` (showSource) now names the source the plotted history actually came from, with its link, range and candles/closes.
+- Codex P1 (round 2): the chart said 'last 6 months' but Polymarket's 'Daily' history is the whole lifetime and FRED's a year or more. The Journal chart route now cuts every provider's history to the labelled 6M/1Y/5Y window (`markets.trimToRange`); nothing inside the window is a plain 404, not an empty chart.
 - Next: Codex review, owner merge; then PR 3 (yield curve + macro views).
 
 ### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)

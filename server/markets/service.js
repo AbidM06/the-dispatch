@@ -280,6 +280,19 @@ function dailyCloses(h, fromDay) {
   return m;
 }
 
+/**
+ * trimToRange — a history cut to the window its range label names (6M / 1Y / 5Y). Sources have their own
+ * default windows (Polymarket "max", FRED a year or more), so a chart that says "last 6 months" trims here.
+ */
+function trimToRange(hist, tf) {
+  const from = windowStartDay(tf);
+  const keep = (t) => dayKey(t) >= from;
+  const out = hist.type === "ohlc" ? { ...hist, bars: hist.bars.filter(b => keep(b.t)) }
+                                   : { ...hist, points: hist.points.filter(p => keep(p.t)) };
+  if (!(out.bars || out.points).length) throw httpError(404, `No prices in the last ${tf === "5y" ? "5 years" : tf === "1y" ? "year" : "6 months"} to chart.`);
+  return out;
+}
+
 async function getComparison(ids, tf = "1y", mode = "rebased") {
   if (!COMPARE_TFS.includes(tf)) throw httpError(400, `Range must be one of ${COMPARE_TFS.join(", ")}`);
   if (!COMPARE_MODES.includes(mode)) throw httpError(400, `Mode must be one of ${COMPARE_MODES.join(", ")}`);
@@ -338,4 +351,4 @@ async function getComparison(ids, tf = "1y", mode = "rebased") {
 
 function _reset() { current = null; inFlight = null; historyCache.clear(); }
 
-module.exports = { refresh, getSnapshot, getHistory, getComparison, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };
+module.exports = { refresh, getSnapshot, getHistory, getComparison, trimToRange, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };

@@ -18,7 +18,8 @@ function card(over = {}) {
     ...over,
   };
 }
-const HIST = { id: "BRENT", tf: "1d", type: "ohlc", bars: [{ t: 1, o: 1, h: 2, l: 0.5, c: 1.5 }], source: "Yahoo Finance", sourceUrl: "https://finance.yahoo.com/quote/BZ%3DF" };
+const nowSec = () => Math.floor(Date.now() / 1000);
+const HIST = { id: "BRENT", tf: "1d", type: "ohlc", bars: [{ t: nowSec() - 3600, o: 1, h: 2, l: 0.5, c: 1.5 }], source: "Yahoo Finance", sourceUrl: "https://finance.yahoo.com/quote/BZ%3DF" };
 
 function setup() {
   jest.resetModules();
@@ -59,6 +60,29 @@ describe("journal idea chart", () => {
     expect(getHistory).toHaveBeenCalledWith("BRENT", "1d", { source: undefined });
     expect((await request(app).get(`/api/journal/${mid.entryId}/chart`)).body.tf).toBe("1y");
     expect((await request(app).get(`/api/journal/${old.entryId}/chart`)).body.tf).toBe("5y");
+  });
+
+  test("the history is cut to the window the chart labels, whatever the source's own default (Polymarket max, FRED a year+)", async () => {
+    const { app, journal, getHistory } = setup();
+    const DAYSEC = 86400, now = nowSec();
+    // A lifetime series: one point every 30 days for 400 days.
+    const points = Array.from({ length: 14 }, (_, i) => ({ t: now - (13 - i) * 30 * DAYSEC, v: 40 + i }));
+    getHistory.mockImplementation(async (id, tf) => ({ id, tf, type: "line", points, source: "Polymarket", sourceUrl: "https://polymarket.com" }));
+    const fresh = journal.logIdea(card({ marketId: "PM:fed-oct", marketHistory: { provider: "polymarket", tokenId: "t" } }));
+    const six = await request(app).get(`/api/journal/${fresh.entryId}/chart`);
+    expect(six.body.tf).toBe("1d");
+    expect(six.body.points.length).toBeLessThan(points.length);
+    expect(Math.min(...six.body.points.map(p => p.t))).toBeGreaterThanOrEqual(now - 186 * DAYSEC);   // ≈ 6 calendar months
+    expect(six.body.points.length).toBeGreaterThan(0);
+    const mid = journal.logIdea(card({ createdAt: new Date(Date.now() - 200 * 86400000).toISOString(), marketId: "PM:fed-oct", marketHistory: { provider: "polymarket", tokenId: "t" } }));
+    const year = await request(app).get(`/api/journal/${mid.entryId}/chart`);
+    expect(year.body.tf).toBe("1y");
+    expect(Math.min(...year.body.points.map(p => p.t))).toBeGreaterThanOrEqual(now - 366 * DAYSEC);
+    // Nothing inside the window → a plain refusal, not an empty chart.
+    getHistory.mockImplementation(async (id, tf) => ({ id, tf, type: "line", points: [{ t: now - 900 * DAYSEC, v: 1 }], source: "Polymarket", sourceUrl: "x" }));
+    const none = await request(app).get(`/api/journal/${fresh.entryId}/chart`);
+    expect(none.status).toBe(404);
+    expect(none.body.error).toMatch(/No prices in the last 6 months/);
   });
 
   test("a dynamic (Polymarket) idea is priced from the history source saved on its card", async () => {

@@ -78,7 +78,8 @@ router.get("/:entryId/chart", async (req, res) => {
     }
     const tf = chartRange(idea.createdAt);
     // Dynamic markets (Polymarket) are priced from the history source saved on the card.
-    const hist = await markets.getHistory(idea.marketId, tf, { source: idea.marketHistory || undefined });
+    // Cut to the window the chart labels: Polymarket's history is "max" and FRED's a year or more.
+    const hist = markets.trimToRange(await markets.getHistory(idea.marketId, tf, { source: idea.marketHistory || undefined }), tf);
     res.json({ ...hist, entryId: e.entryId, levels });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
