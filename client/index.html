@@ -7279,7 +7279,9 @@ function App() {
             : React.createElement('div', { className: 'idc-sub' }, r.reason || 'No reference price.'),
           c.marketId && React.createElement(React.Fragment, null,
             React.createElement('div', { className: 'idc-lbl' }, 'Price and the idea\'s levels'),
-            React.createElement(MarketChart, { item: (markets && markets.items || []).find(i => i.id === c.marketId) || { id: c.marketId, decimals: 2 },
+            React.createElement(MarketChart, { item: (markets && markets.items || []).find(i => i.id === c.marketId)
+                // A market that has left the live list is formatted from what the idea saved: Polymarket history is 0-100 (a probability).
+                || (c.marketHistory && c.marketHistory.provider === 'polymarket' ? { id: c.marketId, decimals: 1, unit: '%', kind: 'prob' } : { id: c.marketId, decimals: 2 }),
               tf: 'idea', theme: themeMode, height: 280, interactive: true, showSource: true, fetchUrl: '/api/journal/' + encodeURIComponent(e.entryId) + '/chart' }),
             React.createElement('div', { className: 'mk-foot' },
               'No AI. Lines are the idea as written: target ' + f(c.target) + ' · stop ' + f(c.stop) +

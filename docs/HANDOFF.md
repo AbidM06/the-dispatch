@@ -158,6 +158,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Codex P1 (round 2): the chart said 'last 6 months' but Polymarket's 'Daily' history is the whole lifetime and FRED's a year or more. The Journal chart route now cuts every provider's history to the labelled 6M/1Y/5Y window (`markets.trimToRange`); nothing inside the window is a plain 404, not an empty chart.
 - Codex P2 (round 3): the footer called every line series 'daily closes', wrong for monthly FRED (CPI, M2). The wording now comes from the series' own point spacing (`mkSeriesCadence`: daily / weekly / monthly / quarterly / periodic) and says 'observations'; OHLC stays 'daily candles'.
 - Codex P2 (round 4): a Polymarket idea's chart linked to polymarket.com, not its market. The chart route now uses the card's saved market URL (`priceAtIdea.url`) when it is a polymarket.com link.
+- Codex P2 (round 5): an archived Polymarket idea (market left the live list) was formatted as bare numbers. The fallback now matches the live Polymarket formatting (probability, %, 1 decimal) when the idea saved a Polymarket history source.
 - Next: Codex review, owner merge; then PR 3 (yield curve + macro views).
 
 ### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
