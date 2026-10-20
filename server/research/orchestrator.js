@@ -387,7 +387,8 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
 
   const version  = store.nextVersion(type);
   const reportId = store.makeReportId(type, version);
-  const dataAsOf = new Date().toISOString().slice(0, 10);
+  // Date of the OLDEST verified figure the report was given (null if none) — not the generation date.
+  const dataAsOf = macroCtx ? macroContext.oldestFigureDate(macroContext.toMarketDataRows(macroCtx)) : null;
 
   const report = {
     reportId,

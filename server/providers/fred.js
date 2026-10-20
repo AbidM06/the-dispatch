@@ -39,8 +39,10 @@ async function getLatestObservation(seriesId) {
   url.searchParams.set("api_key",     apiKey());
   url.searchParams.set("file_type",   "json");
   url.searchParams.set("sort_order",  "desc");
-  url.searchParams.set("limit",       "1");
-  // Exclude observations with missing values (period before series starts, etc.)
+  // Newest-first, a few rows deep: FRED publishes "." (no value) rows — a holiday, or a
+  // day not yet filled in — and with limit=1 that single row made the whole series fail
+  // although the previous day had a valid value.
+  url.searchParams.set("limit",       "10");
   url.searchParams.set("observation_start", "2020-01-01");
 
   const json = await withRetry(
@@ -59,7 +61,7 @@ async function getLatestObservation(seriesId) {
   const obs = json.observations;
   if (!obs || obs.length === 0) throw new Error(`No observations for ${seriesId}`);
 
-  // FRED uses "." for missing values
+  // FRED uses "." for missing values; rows are newest-first, so this is the latest real one.
   const latest = obs.find(o => o.value !== ".");
   if (!latest) throw new Error(`Only missing values for ${seriesId}`);
 

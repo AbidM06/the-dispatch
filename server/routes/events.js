@@ -17,6 +17,7 @@
 
 const { Router } = require("express");
 const cache    = require("../cache");
+const markets  = require("../markets/service");
 const { fetchAllAnalysis }                        = require("../providers/anthropic");
 const { isApiFallback, clearApiFallback,
         setApiFallback, getApiFallbackInfo }      = require("../providers/budget");
@@ -65,7 +66,7 @@ function buildResponse(events, econ, source, fetchedAt, stale, analysisMode) {
  * Reads real cached snapshot data only — never seed rates (they would be narrated as current).
  */
 function getContext() {
-  const snapData      = cache.get("snapshot:data");
+  const snapData      = markets.narrativeContext();   // straight from the snapshot, stale flags intact
   const portfolioData = cache.get("portfolio:data");
   return {
     // Real fetched rates only. Seed rates (Mar 2026) must never be narrated as

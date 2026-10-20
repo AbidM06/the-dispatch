@@ -16,6 +16,7 @@
 "use strict";
 
 const cache              = require("../cache");
+const markets            = require("../markets/service");
 const seeds              = require("../../seeds/fallback");
 const { fetchAllAnalysis } = require("../providers/anthropic");
 const { isApiFallback }  = require("../providers/budget");
@@ -136,7 +137,7 @@ async function runRefresh() {
 
     if (!hasLiveEvents || !hasLiveEcon || !hasLiveRisk) {
       try {
-        const snapData      = cache.get("snapshot:data");
+        const snapData      = markets.narrativeContext();
         const portfolioData = cache.get("portfolio:data");
         const ctx = {
           rates:     snapData?.rates     ?? {},   // never narrate seed rates as current

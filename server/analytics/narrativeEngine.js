@@ -37,9 +37,9 @@ function score(value, lo, hi) {
   return Math.round(Math.max(0, Math.min(100, ((value - lo) / (hi - lo)) * 100)));
 }
 
-/** A fetched observation as { value, asOf } — or null. Accepts a Fact, { value, date } or a number. */
+/** A fetched observation as { value, asOf, source, stale } — or null. Accepts a Fact or { value, date }. */
 function obs(o) {
-  if (o && num(o.value) !== null) return { value: o.value, asOf: o.asOf || o.date || null };
+  if (o && num(o.value) !== null) return { value: o.value, asOf: o.asOf || o.date || null, source: o.source || null, stale: !!o.stale };
   return null;
 }
 
@@ -54,7 +54,10 @@ function extract(ctx) {
   };
 }
 
-const SRC = (id, o) => `FRED ${id}${o.asOf ? `, as of ${o.asOf}` : ""}`;
+// Names where the figure really came from (Markets can serve the 10Y from Yahoo, not FRED) and
+// flags a value Markets could not refresh, so the card never reads as current.
+const SRC = (id, o) => `${!o.source || /fred/i.test(o.source) ? `FRED ${id}` : o.source}${o.asOf ? `, as of ${o.asOf}` : ""}` +
+  (o.stale ? " — STALE: last known value, not today's" : "");
 
 // ── Events: observations only ─────────────────────────────────────────────────
 function generateEvents(s) {

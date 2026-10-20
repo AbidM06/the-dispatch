@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/opus-reviewers`
+**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/audit-data-integrity`
 
 ---
 
@@ -40,7 +40,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
-| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
+| Data-accuracy audit items 2–6 (D-29): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-28, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
@@ -87,7 +87,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 - **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
   [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
-  Confirmed with mocked checks; no fixes implemented yet:
+  Confirmed with mocked checks. Items 2–6 are fixed on `claude/audit-data-integrity` (D-29, PR pending); item 1 (Brief) on `claude/brief-no-seed` (D-28):
   1. **P1 Brief** (`server/routes/brief.js`) manufactures missing values: March-2026
      `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
      reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
@@ -147,6 +147,14 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-20 — Claude (audit items 2–6, D-29)
+- Owner: 'next task should be the audit bugs'. Questioned first; owner chose one PR for all five, the bulletin reusing the research data block, both date labels on reports, and stale rates read directly from Markets and labelled (not dropped).
+- Verified each audit item against the code before fixing. Codex was right on all five. One detail it missed: `fred.getAllRates()` returns observation objects, so the bulletin's `.toFixed` threw and the whole block vanished; the tweet cross-check had the same shape bug (always 'contradicted'/threw). Fixed both by using `macroContext` facts.
+- FRED `limit` 1 → 10. Bulletin: `getMacroContext()` + `toPromptBlock()`. Schemas: `.passthrough()` on event/risk items. Markets: `narrativeContext()` (Events/Risk/AI refresh), `ageFreshness()` on `GET /api/markets` (exchange prints only), narrative cards name the true source and say STALE. Research: `dataAsOf` = oldest figure's date, `dataFetchedAt`, client footer 'Fetched … · Oldest figure …'.
+- Tests: 17 new (`tests/auditFixes.test.js`, +4 in `bulletin.test.js`, +2 in `researchPipeline.test.js`); they fail on `main`'s code. Full suite green. Checked the client in headless Chromium against a fixture (loads, no page errors, aged labels served). Not verified against live Yahoo/FRED/Anthropic (sandbox).
+- Not done: aging DAILY/monthly FRED rows in Markets (they carry no age in their label; the research layer's 2-trading-day STALE rule covers reports) and the real economic calendar. `writeCompatCache` is kept only because `brief.js` on `main` still reads `snapshot:rates`; delete it after PR #7 (D-28) merges.
+- Next: Codex review, owner merge, `git pull`, restart. Then: the real economic calendar (§3.4).
 
 ### 2026-10-20 — Claude (Opus 5.5 reviewers)
 - Owner asked where Opus 5.5 could raise quality without a big price rise; chose the red team + IC chair (goal: reports missing flaws / no specific problem) as the **code default** (D-27). Draft, auditor, PM, revision, chat stay on Sonnet; extraction on Haiku 5.5.
