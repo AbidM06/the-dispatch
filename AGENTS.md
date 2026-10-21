@@ -164,7 +164,7 @@ server/routes/
                            GET /api/glossary/category/:cat
                            GET /api/glossary/search?q=
                            GET /api/glossary/:slug
-seeds/fallback.js          Legacy seed data — still read by brief.js / aiRefreshJob / scenario (see "Known seed usage")
+seeds/fallback.js          Legacy seed data — still read by aiRefreshJob / scenario (see "Known seed usage")
 data/                      portfolio_snapshot.json lives here (gitignored)
 ```
 
@@ -180,7 +180,7 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 - `service.js` — `refresh(trigger)` (dedupes concurrent calls), persists
   `data/markets_snapshot.json`, carries forward the last value **flagged `stale`** if every
   source fails, and still writes the legacy `snapshot:rates` / `snapshot:data` cache keys
-  (only the Daily Brief reads them now). Events, Risk and the AI-refresh fallback read
+  (nothing reads them now that the Daily Brief reads the snapshot directly, D-29; they stay only until `writeCompatCache` is deleted). Events, Risk and the AI-refresh fallback read
   `markets.narrativeContext()` — straight from the snapshot, so a carried-forward rate keeps
   `stale` / `staleSince` and the no-AI cards say STALE (D-30). Freshness is **measured** from the
   print time (≤2 min Real-time, ≤30 min Delayed ~N, else Last trade; FRED = Daily close / Monthly)
@@ -195,6 +195,18 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   (manual; ignored if <60 s since last), `GET /api/markets/history/:id?tf=1d|1h`, `GET /api/markets/status`.
 - UI: MARKETS tab (table ↔ chart grid, click a row for its chart; TradingView Lightweight
   Charts 4.2.3 from jsDelivr, Apache-2.0 — keep the attribution logo).
+
+## Daily Brief (`routes/brief.js`, Desk tab) — D-29
+- Read-only, no AI, never fetches. Reads `markets.getSnapshot()` directly for US10Y, REAL10, BEI10,
+  HYOAS and T10Y2Y (not the legacy `snapshot:rates` key — it drops `stale`).
+- Each row: current, previous value, delta in bps (against the quote's own previous close/observation),
+  signal, `asOf`, source, link, `stale`. A series Markets lacks is `available: false` — never back-filled.
+  Regime, drivers and prose use only the series that exist: each `whyItMatters` sentence is built from
+  figures that were fetched, and it is `null` when none applies AND a series is missing — so it never
+  says "no stress signals" on partial data.
+- No snapshot (or none of the five series) → 503 `available: false` + reason; the Desk tab shows it.
+- `nextEvent` is `{available: false, reason}` until the FRED release-dates calendar exists. There is no
+  "actionable setup" and no holdings talk. `tests/brief.test.js` guards all of this.
 
 ## Trade idea cards (`server/ideas/`, `routes/ideas.js`)
 - On-demand only: `POST /api/ideas/news {headlineId?}`, `POST /api/ideas/research {reportId|type}`;
@@ -312,10 +324,8 @@ guards all of this, plus the bulletin notification (execFile + argv — AI text 
 becomes shell or AppleScript source).
 
 ### Known seed usage (not yet compliant with D-02 — being audited)
-- `server/routes/brief.js` — falls back to `RATES_SEED` (Mar 2026) when no snapshot is
-  cached, compares "what changed" against hardcoded `PREV_RATES`, and builds "next event"
-  from the hand-typed `MACRO_CAL` / `EARNINGS_CAL` (year-less dates, year guessed). Loaded
-  on every page open.
+- (`server/routes/brief.js` was fixed in D-29 — it reads only the Markets snapshot; see
+  "Daily Brief" below. A test fails if it imports seeds again.)
 - `server/jobs/aiRefreshJob.js` — `WATCHLIST_SEED` when no snapshot (opt-in job only).
 - `server/routes/scenario.js` — seeded positions when no T212 snapshot (labelled; key decision
   15 at the end of this file).

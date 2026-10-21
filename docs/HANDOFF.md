@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/audit-data-integrity`
+**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/audit-data-integrity`
 
 ---
 
@@ -29,9 +29,11 @@ Working and merged (PR #4, 2026-09-28):
   Caps: monthly **$20, warn-only** (banner + confirm warning); daily **hard stop**.
   No AI runs on a schedule (research batch, bulletin, events/risk refresh are opt-in flags).
 - **No-fabrication policy (D-02)** — research, Sales/Macro, events/risk and the News
-  calendar return "unavailable" rather than invented content. **Coverage is not yet
-  complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
-  audit tracks where the code does not meet it yet.
+  calendar return "unavailable" rather than invented content. The Daily Brief now follows
+  it too (D-29, PR pending). **Coverage is not yet complete:** `aiRefreshJob` and the
+  scenario engine still use seeds (see AGENTS.md "Known seed usage") and the audit's FRED /
+  bulletin / freshness items (§4) are open — the policy is the rule, the audit tracks where
+  the code does not meet it yet.
 - **Journal stage 1** merged (PR #6, 2026-09-28): every idea logged immutably, JOURNAL tab, pitch-first drill.
 - Tests on `main` after PR #6: `npm test` → 373 passing. PR #7 (Sonnet 5.5 setting) adds 4.
 
@@ -40,6 +42,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
+| Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | Merged (PR #7, 2026-10-21). Owner to `git pull` + restart the Mac, then check the Desk tab shows previous-close changes and 'unavailable' for Next event |
 | Data-accuracy audit items 2–6 (D-30): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-29, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
@@ -88,8 +91,9 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 - **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
   [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
-  Confirmed with mocked checks. Items 2–6 are fixed on `claude/audit-data-integrity` (D-30, PR pending); item 1 (Brief) on `claude/brief-no-seed` (D-29):
-  1. **P1 Brief** (`server/routes/brief.js`) manufactures missing values: March-2026
+  Confirmed with mocked checks. Item 1 (Brief) is fixed and merged (D-29, PR #7); items 2–6 are fixed on
+  `claude/audit-data-integrity` (D-30, PR #9, pending):
+  1. **P1 Brief — FIXED (D-29, PR #7 merged)** (`server/routes/brief.js`) manufactured missing values: March-2026
      `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
      reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
      hand-typed calendars with the current year guessed; fixed catalysts and instrument
@@ -154,8 +158,16 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Verified each audit item against the code before fixing. Codex was right on all five. One detail it missed: `fred.getAllRates()` returns observation objects, so the bulletin's `.toFixed` threw and the whole block vanished; the tweet cross-check had the same shape bug (always 'contradicted'/threw). Fixed both by using `macroContext` facts.
 - FRED `limit` 1 → 10. Bulletin: `getMacroContext()` + `toPromptBlock()`. Schemas: `.passthrough()` on event/risk items. Markets: `narrativeContext()` (Events/Risk/AI refresh), `ageFreshness()` on `GET /api/markets` (exchange prints only), narrative cards name the true source and say STALE. Research: `dataAsOf` = oldest figure's date, `dataFetchedAt`, client footer 'Fetched … · Oldest figure …'.
 - Tests: 17 new (`tests/auditFixes.test.js`, +4 in `bulletin.test.js`, +2 in `researchPipeline.test.js`); they fail on `main`'s code. Full suite green. Checked the client in headless Chromium against a fixture (loads, no page errors, aged labels served). Not verified against live Yahoo/FRED/Anthropic (sandbox).
-- Not done: aging DAILY/monthly FRED rows in Markets (they carry no age in their label; the research layer's 2-trading-day STALE rule covers reports) and the real economic calendar. `writeCompatCache` is kept only because `brief.js` on `main` still reads `snapshot:rates`; delete it after PR #7 (D-29) merges.
+- Not done: aging DAILY/monthly FRED rows in Markets (they carry no age in their label; the research layer's 2-trading-day STALE rule covers reports) and the real economic calendar. `writeCompatCache` (service.js) now has NO reader — `brief.js` reads the snapshot directly since PR #7 (D-29); delete it and its `markets.test.js` assertion in a small follow-up.
 - Next: Codex review, owner merge, `git pull`, restart. Then: the real economic calendar (§3.4).
+
+### 2026-10-20 — Claude (Daily Brief: no seed data)
+- Owner asked to fix the Brief seed data first (it loads on every page open). Questioned first; owner chose: 'What changed' compares against the **previous close from Markets**; **Actionable setup removed** (hardcoded HOLD/TRIM advice on old holdings AMD/SGLN/HBKS/HIES plus fixed claims like 'Q1 earnings Apr 22'); **Next event shows 'unavailable'** until a real calendar exists; **Brief only**, Claude owns it (D-29).
+- `server/routes/brief.js` rewritten: reads `markets.getSnapshot()` directly (not the compat cache, which dropped `stale`). Each of the 5 rows carries current, previous, delta in bps (HY OAS is a % figure, so 3.17 vs 3.00 = +17bps), signal, `asOf`, source, link, stale flag. A series Markets lacks is `available: false` and is never back-filled; regime/drivers/prose only use series that exist. No snapshot (or none of the 5 series) → 503 `available: false` + reason. `whyItMatters` is built only from fetched figures (the old text named AMD and 'portfolio P&L').
+- Client: Desk tab shows the unavailable reason, per-row STALE badge, 'N/A' for missing rows, a provenance line (fetched time, oldest figure's date, stale/missing series), card renamed WHY IT MATTERS, and a Next-event 'unavailable' box. Checked in headless Chromium with a stale + missing-series fixture and with no snapshot.
+- Tests: `tests/brief.test.js` rewritten (12) incl. a guard that `brief.js` has no seeds, baselines, calendars or ticker advice; schema updated. Full suite green.
+- Not touched (still open): audit items 2–6 (FRED `limit=1`, bulletin HY OAS %→bps, freshness aging, research `dataAsOf`), `aiRefreshJob`/`scenario` seeds, the real economic calendar (FRED release dates, §3.4). The pre-existing regime rule labels any curve ≥ 0.3 'Bear steepener' (a level, not a move) — left as is; owner may want it revisited.
+- Next: Codex review, owner merge, `git pull`, restart; then pick the next audit item.
 
 ### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
 - Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).

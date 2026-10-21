@@ -148,33 +148,33 @@ const PitchResponse = Envelope.extend({
 
 // ── /api/brief ────────────────────────────────────────────────────────────────
 const WhatChangedItem = z.object({
-  series:   z.string(),
-  label:    z.string(),
-  current:  z.number(),
-  prev:     z.number(),
-  deltaBps: z.number(),
-  signal:   z.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
-});
-
-const ActionableSetupItem = z.object({
-  ticker:    z.string(),
-  direction: z.string(),
-  rationale: z.string(),
+  series:    z.string(),
+  label:     z.string(),
+  available: z.boolean(),
+  current:   z.number().nullable(),
+  prev:      z.number().nullable(),
+  deltaBps:  z.number().nullable(),
+  signal:    z.enum(["BULLISH", "BEARISH", "NEUTRAL"]).nullable(),
+  asOf:       z.string().nullable().optional(),
+  source:     z.string().nullable().optional(),
+  sourceUrl:  z.string().nullable().optional(),
+  stale:      z.boolean().optional(),
+  staleSince: z.string().nullable().optional(),
+  freshness:  z.string().nullable().optional(),
 });
 
 const BriefPayload = z.object({
-  date:            z.string(),
-  regime:          z.string(),
-  regimeDrivers:   z.array(z.string()),
-  whatChanged:     z.array(WhatChangedItem),
-  whyItMatters:    z.string(),
-  actionableSetup: z.array(ActionableSetupItem),
+  date:          z.string(),
+  oldestAsOf:    z.string().nullable(),
+  regime:        z.string().nullable(),
+  regimeDrivers: z.array(z.string()),
+  whatChanged:   z.array(WhatChangedItem),
+  missing:       z.array(z.string()),
+  whyItMatters:  z.string().nullable(),
   nextEvent: z.object({
-    date:       z.string(),
-    event:      z.string(),
-    ticker:     z.string(),
-    importance: z.string(),
-  }).nullable(),
+    available: z.literal(false),
+    reason:    z.string(),
+  }),
 });
 
 const BriefResponse = Envelope.extend({ data: BriefPayload });

@@ -1805,6 +1805,7 @@ function App() {
   // ── Phase 1 — DESK state ───────────────────────────────────────────────────
   const [brief, setBrief]               = useState(null);
   const [briefMeta, setBriefMeta]       = useState(null);
+  const [briefUnavailable, setBriefUnavailable] = useState(null);
   const [briefLoading, setBriefLoading] = useState(true);
   // ── SALES tab state ────────────────────────────────────────────────────────
   const [macroView, setMacroView]           = useState(null);
@@ -2125,8 +2126,12 @@ function App() {
       const resp = await apiFetch('/api/brief');
       setBrief(resp.data);
       setBriefMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale });
+      setBriefUnavailable(null);
     } catch (err) {
-      showToast('Brief error: ' + err.message, 'error');
+      setBrief(null);
+      // 503 available:false is the honest "no data" answer (D-02) — show the reason, not a toast.
+      if (err.payload && err.payload.available === false) setBriefUnavailable(err.payload.reason || 'Brief unavailable.');
+      else showToast('Brief error: ' + err.message, 'error');
     }
     setBriefLoading(false);
   }
@@ -3087,6 +3092,9 @@ function App() {
   // ── DESK TAB ───────────────────────────────────────────────────────────────
   function renderDesk() {
     const b         = brief;
+    const briefUnavailableBox = (text) => React.createElement('div', {
+      style:{ fontSize:12,lineHeight:1.6,color:'var(--red)',padding:'10px 12px',background:'rgba(192,57,43,.06)',border:'1px solid rgba(192,57,43,.25)' },
+    }, 'Unavailable — ' + text);
 
     return React.createElement('div', null,
 
@@ -3102,8 +3110,9 @@ function App() {
                 React.createElement('div', { className:'skeleton' }),
                 React.createElement('div', { className:'skeleton', style:{ width:'70%' } })
               )
+            : briefUnavailable ? briefUnavailableBox(briefUnavailable)
             : React.createElement(React.Fragment, null,
-                React.createElement('div', { className:'brief-regime' }, b?.regime || '—'),
+                React.createElement('div', { className:'brief-regime' }, b?.regime || 'Regime unavailable'),
                 b?.regimeDrivers?.length > 0 && React.createElement('div', { style:{ marginBottom:14 } },
                   b.regimeDrivers.map((d, i) => React.createElement('span', { key:i, className:'brief-driver' }, d))
                 ),
@@ -3118,59 +3127,48 @@ function App() {
                   (b?.whatChanged || []).map((w, i) =>
                     React.createElement('div', { key:i, className:'wc-row' },
                       React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10.5,color:'var(--blue)',fontWeight:500 } }, w.series),
-                      React.createElement('span', { style:{ color:'var(--steel)',fontSize:10.5 } }, w.label),
-                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:11,textAlign:'right',fontWeight:500 } }, (w.current != null ? w.current.toFixed(2) : '—') + '%'),
+                      React.createElement('span', { style:{ color:'var(--steel)',fontSize:10.5 }, title: w.available ? (w.source || '') + (w.asOf ? ' · as of ' + w.asOf : '') : '' },
+                        w.label, w.stale ? ' ⚠ STALE' : ''),
+                      React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:11,textAlign:'right',fontWeight:500 } }, w.current != null ? w.current.toFixed(2) + '%' : '—'),
                       React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10,textAlign:'right',color: w.deltaBps > 5 ? 'var(--red)' : w.deltaBps < -5 ? 'var(--green)' : 'var(--steel)' } },
-                        (w.deltaBps > 0 ? '+' : '') + w.deltaBps
+                        w.deltaBps != null ? (w.deltaBps > 0 ? '+' : '') + w.deltaBps : '—'
                       ),
                       React.createElement('span', {
                         style:{ textAlign:'right' },
                         className: w.signal === 'BULLISH' ? 'sig-bull' : w.signal === 'BEARISH' ? 'sig-bear' : 'sig-neu',
-                      }, w.signal)
+                      }, w.signal || (w.available ? '—' : 'N/A'))
                     )
                   )
+                ),
+                React.createElement('div', { style:{ marginTop:10,fontFamily:'var(--mono)',fontSize:9,letterSpacing:'0.06em',color:'var(--steel)',lineHeight:1.6 } },
+                  'Δ vs previous close · Markets snapshot' +
+                  (briefMeta?.fetchedAt ? ' fetched ' + new Date(briefMeta.fetchedAt).toLocaleString([], { month:'short',day:'numeric',hour:'2-digit',minute:'2-digit' }) : '') +
+                  (b?.oldestAsOf ? ' · oldest figure as of ' + String(b.oldestAsOf).slice(0, 10) : '') +
+                  (briefMeta?.stale ? ' · ⚠ includes STALE figures' : '') +
+                  (b?.missing?.length ? ' · unavailable: ' + b.missing.join(', ') : '')
                 )
               )
         ),
 
-        // Right: portfolio implications + actionable setup + next event
+        // Right: why it matters + next event
         React.createElement('div', { className:'card' },
-          React.createElement('div', { className:'card-title' }, 'PORTFOLIO IMPLICATIONS'),
+          React.createElement('div', { className:'card-title' }, 'WHY IT MATTERS'),
           briefLoading
             ? React.createElement('div', null,
                 React.createElement('div', { className:'skeleton', style:{ height:14,marginBottom:6 } }),
                 React.createElement('div', { className:'skeleton', style:{ height:14,marginBottom:6 } }),
                 React.createElement('div', { className:'skeleton', style:{ height:14,width:'70%' } })
               )
+            : briefUnavailable ? briefUnavailableBox(briefUnavailable)
             : React.createElement(React.Fragment, null,
-                React.createElement('p', { style:{ fontSize:12,lineHeight:1.75,color:'var(--ink)',marginBottom:16 } }, b?.whyItMatters || ''),
-                b?.actionableSetup?.length > 0 && React.createElement(React.Fragment, null,
-                  React.createElement('div', { className:'card-title', style:{ marginBottom:8,marginTop:4 } }, 'ACTIONABLE SETUP'),
-                  b.actionableSetup.map((s, i) =>
-                    React.createElement('div', { key:i, style:{ display:'flex',gap:10,padding:'8px 0',borderBottom:'1px solid var(--rule)',alignItems:'flex-start' } },
-                      React.createElement('span', { style:{ fontFamily:'var(--mono)',color:'var(--blue)',fontWeight:500,fontSize:12,minWidth:42,letterSpacing:'0.05em' } }, s.ticker),
-                      React.createElement('span', {
-                        style:{
-                          fontFamily:'var(--mono)',fontSize:9,padding:'2px 7px',letterSpacing:'0.1em',whiteSpace:'nowrap',
-                          background: s.direction === 'TRIM' ? 'rgba(192,57,43,.08)' : s.direction === 'ACCUMULATE' ? 'rgba(26,122,74,.08)' : 'rgba(28,58,94,.08)',
-                          color:      s.direction === 'TRIM' ? 'var(--red)'           : s.direction === 'ACCUMULATE' ? 'var(--green)'         : 'var(--blue)',
-                          border:     s.direction === 'TRIM' ? '1px solid rgba(192,57,43,.25)' : s.direction === 'ACCUMULATE' ? '1px solid rgba(26,122,74,.25)' : '1px solid rgba(28,58,94,.2)',
-                        },
-                      }, s.direction),
-                      React.createElement('span', { style:{ fontSize:11.5,color:'var(--steel)',lineHeight:1.55,flex:1 } }, s.rationale)
-                    )
-                  )
-                ),
-                b?.nextEvent && React.createElement('div', {
+                React.createElement('p', { style:{ fontSize:12,lineHeight:1.75,color:'var(--ink)',marginBottom:16 } },
+                  b?.whyItMatters || 'Unavailable — some of the rate figures it needs are missing.'),
+                React.createElement('div', {
                   style:{ marginTop:14,padding:'10px 12px',background:'rgba(200,151,42,0.06)',border:'1px solid rgba(200,151,42,0.2)' },
                 },
                   React.createElement('div', { style:{ fontFamily:'var(--mono)',fontSize:8.5,letterSpacing:'0.15em',color:'#7d5a00',marginBottom:5 } }, '⏰ NEXT EVENT'),
-                  React.createElement('div', { style:{ display:'flex',gap:12,alignItems:'center',flexWrap:'wrap' } },
-                    React.createElement('span', { style:{ fontFamily:'var(--mono)',color:'var(--blue)',fontSize:11,fontWeight:500 } }, b.nextEvent.date),
-                    React.createElement('span', { style:{ fontWeight:500,fontSize:12 } }, b.nextEvent.event),
-                    React.createElement('span', { style:{ fontFamily:'var(--mono)',fontSize:10,color:'var(--steel)' } }, b.nextEvent.ticker),
-                    React.createElement('span', { className: b.nextEvent.importance === 'HIGH' ? 'imp-high' : 'imp-med' }, b.nextEvent.importance)
-                  )
+                  React.createElement('div', { style:{ fontSize:11.5,color:'var(--steel)',lineHeight:1.55 } },
+                    'Unavailable — ' + (b?.nextEvent?.reason || 'no calendar source.'))
                 )
               )
         )
