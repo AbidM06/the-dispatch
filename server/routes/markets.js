@@ -27,7 +27,8 @@ router.get("/", async (req, res, next) => {
   try {
     let snap = markets.getSnapshot();
     if (!snap) snap = await refreshMarkets("first-load");
-    res.json({ ...snap, refreshing: markets.isRefreshing(), schedule: scheduler.getStatus() });
+    // Freshness labels are re-graded against now: a print fetched at 14:45 is not "Real-time" at 17:00.
+    res.json({ ...markets.ageFreshness(snap), refreshing: markets.isRefreshing(), schedule: scheduler.getStatus() });
   } catch (err) { next(err); }
 });
 

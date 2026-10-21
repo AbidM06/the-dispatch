@@ -65,6 +65,20 @@ function classifyFreshness(quote, fetchedAt) {
   }
 }
 
+/**
+ * ageFreshness — re-grade exchange prints against NOW. `freshness` is computed at fetch
+ * time, so a 14:45 "Real-time" print was still labelled Real-time at 17:00. Daily,
+ * monthly and reference series carry no age in their label and are left alone. Pure:
+ * returns a copy; the stored snapshot is not touched.
+ */
+function ageFreshness(snap, now = Date.now()) {
+  if (!snap || !Array.isArray(snap.items)) return snap;
+  const nowIso = new Date(now).toISOString();
+  const PRINT = new Set(["realtime", "delayed", "closed"]);   // the only grades that depend on age
+  return { ...snap, items: snap.items.map(it =>
+    it && it.ok && it.quote && PRINT.has(it.freshness?.code) ? { ...it, freshness: classifyFreshness(it.quote, nowIso) } : it) };
+}
+
 async function fetchInstrument(inst, fetchedAt) {
   const attempted = [];
   for (let i = 0; i < inst.sources.length; i++) {
@@ -108,21 +122,46 @@ function saveToDisk(snap) {
   }
 }
 
-// ── legacy cache keys used by Events / Risk / Brief / AI refresh ─────────────
-function writeCompatCache(snap) {
-  const by = Object.fromEntries((snap.items || []).filter(i => i.ok).map(i => [i.id, i]));
-  const rate = (id) => by[id] ? { value: by[id].quote.value, date: (by[id].quote.asOfDate || by[id].quote.asOf || "").slice(0, 10), source: by[id].quote.source } : null;
+// ── rates / fx / watchlist in the shape Events, Risk and the AI refresh read ──
+// Built from the snapshot at call time. A value Markets carried forward after a failed
+// refresh keeps `stale` + `staleSince`, so a reader can label it instead of narrating it
+// as current (the old cached copy dropped those flags and reset its own age).
+function compatFrom(snap) {
+  const by = Object.fromEntries((snap?.items || []).filter(i => i.ok).map(i => [i.id, i]));
+  const rate = (id) => by[id] ? {
+    value: by[id].quote.value,
+    date: (by[id].quote.asOfDate || by[id].quote.asOf || "").slice(0, 10),
+    source: by[id].quote.source,
+    stale: !!by[id].stale, staleSince: by[id].staleSince || null,
+  } : null;
   const rates = {
     dgs10: rate("US10Y"), dfii10: rate("REAL10"), t10yie: rate("BEI10"),
     hy_spread: rate("HYOAS"), t10y2y: rate("T10Y2Y"),
   };
-  const haveRates = Object.values(rates).every(Boolean);
   const gbp = by.GBPUSD;
-  const fx  = gbp ? { value: +(1 / gbp.quote.value).toFixed(6), pair: "USDGBP", date: gbp.quote.asOf, source: gbp.quote.source } : null;
+  const fx  = gbp ? { value: +(1 / gbp.quote.value).toFixed(6), pair: "USDGBP", date: gbp.quote.asOf, source: gbp.quote.source,
+                      stale: !!gbp.stale, staleSince: gbp.staleSince || null } : null;
   const watchlist = ["AMD", "NVDA", "MSFT", "TSLA", "MU", "AMAT", "LRCX"].filter(s => by[s]).map(s => ({
     sym: s, price: by[s].quote.value, chg: by[s].quote.changePct != null ? +by[s].quote.changePct.toFixed(2) : 0,
     note: by[s].freshness.label, source: by[s].quote.source, date: by[s].quote.asOf.slice(0, 10),
+    stale: !!by[s].stale,
   }));
+  return { rates, fx, watchlist };
+}
+
+/** Events / Risk / AI-refresh context straight from the current snapshot — never a cached copy. */
+function narrativeContext(snap = getSnapshot()) {
+  const { rates, fx, watchlist } = compatFrom(snap);
+  return {
+    rates: Object.fromEntries(Object.entries(rates).filter(([, v]) => v)),
+    fx, watchlist: watchlist.length ? watchlist : undefined,
+  };
+}
+
+// ── legacy cache keys (still read by the Daily Brief until D-28 lands) ───────
+function writeCompatCache(snap) {
+  const { rates, fx, watchlist } = compatFrom(snap);
+  const haveRates = Object.values(rates).every(Boolean);
   if (haveRates) cache.set("snapshot:rates", rates, COMPAT_TTL);
   cache.set("snapshot:data", {
     rates: haveRates ? rates : (cache.get("snapshot:rates") || undefined),
@@ -352,4 +391,4 @@ async function getComparison(ids, tf = "1y", mode = "rebased") {
 
 function _reset() { current = null; inFlight = null; historyCache.clear(); }
 
-module.exports = { refresh, getSnapshot, getHistory, getComparison, trimToRange, windowStartDay, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };
+module.exports = { refresh, getSnapshot, getHistory, getComparison, trimToRange, windowStartDay, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, ageFreshness, narrativeContext, _reset, DATA_PATH };

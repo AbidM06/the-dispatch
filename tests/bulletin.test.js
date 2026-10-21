@@ -25,20 +25,21 @@ const GOOD = {
   analysis: { economistView: { macroRegime: "Patience" }, tradingView: { opportunities: [] }, risks: ["Hot CPI"] },
 };
 
-let logFile, callClaude, app, budget;
+let logFile, callClaude, app, budget, verifyTweets;
 
-function load({ claude, env = {} } = {}) {
+function load({ claude, env = {}, fred, tweets } = {}) {
   jest.resetModules();
   Object.assign(process.env, { FINNHUB_API_KEY: "x", ANTHROPIC_API_KEY: "y", BULLETIN_LOG_PATH: logFile }, env);
   delete process.env.LOW_COST_MODE;
   if (env.LOW_COST_MODE) process.env.LOW_COST_MODE = env.LOW_COST_MODE;
   callClaude = jest.fn(claude || (async () => JSON.stringify(GOOD)));
   jest.doMock("../server/providers/finnhub", () => ({ getMarketNews: jest.fn(async () => ARTICLES) }));
-  jest.doMock("../server/providers/fred", () => ({ getAllRates: jest.fn(async () => null) }));
+  jest.doMock("../server/providers/fred", () => fred || ({ getAllRates: jest.fn(async () => null) }));
   jest.doMock("../server/providers/eia", () => ({ getLatestPrices: jest.fn(async () => null) }));
   jest.doMock("../server/providers/yahoo", () => ({ getQuote: jest.fn(async () => { throw new Error("no"); }) }));
-  jest.doMock("../server/providers/twitter", () => ({ searchTweets: jest.fn(async () => []) }));
-  jest.doMock("../server/providers/twitterVerify", () => ({ verifyTweets: jest.fn(async () => []) }));
+  jest.doMock("../server/providers/twitter", () => ({ searchTweets: jest.fn(async () => tweets || []) }));
+  verifyTweets = jest.fn(async () => []);
+  jest.doMock("../server/providers/twitterVerify", () => ({ verifyTweets }));
   jest.doMock("../server/providers/anthropic", () => ({ callClaude, MODEL_SONNET: "claude-sonnet-5-5" }));
   budget = require("../server/providers/budget");
   app = express();
@@ -133,6 +134,52 @@ describe("bulletin — success path", () => {
     expect(prompt).toMatch(/what to look out for/);
     expect(prompt).not.toMatch(/pitchScript|read aloud/i);
     expect(callClaude.mock.calls[0][0]).not.toMatch(/JPMorgan|Spring Week/i);
+  });
+});
+
+// ── D-30: the bulletin's macro block is the verified, dated research layer ─────
+describe("bulletin — verified market data block (D-30)", () => {
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const VALUES = { DGS10: 4.37, DFII10: 1.91, T10YIE: 2.46, T10Y2Y: 0.41, DGS2: 4.0, DFF: 3.9, BAMLH0A0HYM2: 3.17,
+                   DCOILBRENTEU: 99.5, DCOILWTICO: 95.1, VIXCLS: 17.2, DEXUSEU: 1.09 };
+  const fredMock = () => ({
+    getAllRates: jest.fn(async () => null),
+    // the real provider: one observation object per series, dated by its observation
+    getLatestObservation: jest.fn(async id => ({ seriesId: id, value: VALUES[id], date: TODAY, source: "FRED" })),
+  });
+  const promptSent = () => callClaude.mock.calls[0][1];
+
+  test("figures reach the prompt with their own source and observation date; HY OAS is a percent, never 'bps'", async () => {
+    load({ fred: fredMock() });
+    const res = await request(app).post("/api/bulletin/refresh?force=true");
+    expect(res.status).toBe(200);
+    const p = promptSent();
+    expect(p).toMatch(/VERIFIED MARKET DATA/);
+    expect(p).toContain(`US HY OAS: 3.17% [FRED BAMLH0A0HYM2, as of ${TODAY}]`);
+    expect(p).toContain(`10Y UST Nominal: 4.37% [FRED DGS10, as of ${TODAY}]`);
+    expect(p).not.toMatch(/\d\s*bps/);                 // the old block printed 3.17 as "3bps"
+    expect(p).not.toMatch(/LIVE MACRO DATA/);           // and dated every line "as of today"
+  });
+
+  test("a figure FRED published long ago is marked STALE in the prompt, not presented as current", async () => {
+    const f = fredMock();
+    f.getLatestObservation = jest.fn(async id => ({ seriesId: id, value: VALUES[id], date: "2026-01-05", source: "FRED" }));
+    load({ fred: f });
+    await request(app).post("/api/bulletin/refresh?force=true");
+    expect(promptSent()).toMatch(/US HY OAS: 3\.17% \[FRED BAMLH0A0HYM2, as of 2026-01-05\] — STALE/);
+  });
+
+  test("no macro data fetched → no block (nothing invented)", async () => {
+    load({ fred: { getAllRates: jest.fn(async () => null), getLatestObservation: jest.fn(async () => { throw new Error("down"); }) } });
+    await request(app).post("/api/bulletin/refresh?force=true");
+    expect(promptSent()).not.toMatch(/VERIFIED MARKET DATA/);
+  });
+
+  test("tweet cross-checking gets the 10Y as a plain number (it used to get an object and always failed)", async () => {
+    load({ fred: fredMock(), tweets: [{ text: "10Y at 4.4%", author: "x" }] });
+    await request(app).post("/api/bulletin/refresh?force=true");
+    expect(verifyTweets).toHaveBeenCalled();
+    expect(verifyTweets.mock.calls[0][1].marketData.fredRates).toEqual({ dgs10: 4.37 });
   });
 });
 

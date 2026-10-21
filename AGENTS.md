@@ -179,9 +179,13 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 - Every quote: `value, change, changePct, asOf, releasedAt, cadence, source, sourceDetail, sourceUrl`.
 - `service.js` — `refresh(trigger)` (dedupes concurrent calls), persists
   `data/markets_snapshot.json`, carries forward the last value **flagged `stale`** if every
-  source fails, and writes the legacy `snapshot:rates` / `snapshot:data` cache keys that
-  Events/Risk/AI-refresh read. Freshness is **measured** from the print time
-  (≤2 min Real-time, ≤30 min Delayed ~N, else Last trade; FRED = Daily close / Monthly).
+  source fails, and still writes the legacy `snapshot:rates` / `snapshot:data` cache keys
+  (nothing reads them now that the Daily Brief reads the snapshot directly, D-29; they stay only until `writeCompatCache` is deleted). Events, Risk and the AI-refresh fallback read
+  `markets.narrativeContext()` — straight from the snapshot, so a carried-forward rate keeps
+  `stale` / `staleSince` and the no-AI cards say STALE (D-30). Freshness is **measured** from the
+  print time (≤2 min Real-time, ≤30 min Delayed ~N, else Last trade; FRED = Daily close / Monthly)
+  and `GET /api/markets` **re-grades exchange prints against now** (`ageFreshness`, pure) —
+  a 14:45 print is not "Real-time" at 17:00.
 - `jobs/marketsScheduler.js` — in-process weekday slots at 07:45 (pre-LSE) and 14:45
   (post-NYSE-open) London, DST-safe via Intl. Each slot runs once, keyed `YYYY-MM-DD@HH:MM`
   in `lastScheduledDate`; asleep through several slots → ONE catch-up for the latest.
@@ -526,6 +530,12 @@ agents/                leadAnalyst (draft reuses fetchResearchReport + extractio
 - `RESEARCH_MULTI_AGENT=false` → one draft call per report (`singleCallReport`), still priced,
   versioned and stored; QA honestly NOT_RUN.
 - Chair's `REVISION_REQUIRED` stands even if the numeric score passes the threshold (gate never overrides adjudication upward).
+- **`dataAsOf` (D-30)** is the date of the report's OLDEST verified figure (`macroContext.oldestFigureDate`),
+  `null` when it was given none — never the generation date. `research.dataFetchedAt` is when the data was
+  retrieved; `generatedAt` is when the report was made. The client shows all of them.
+- **The Morning Bulletin uses the same verified block** (`macroContext.getMacroContext()` + `toPromptBlock()`):
+  dated per figure, STALE-flagged, Markets-overlaid. Do not rebuild a second FRED block from
+  `fred.getAllRates()` — it returns observation objects `{value, date, source}`, not numbers.
 - Interrogation conversations are pinned to their reportId — a newer report sets `newerReportAvailable: true` but never swaps context.
 - Corrections: `store.addCorrection()` appends `COR-xxx` entries + marks claims `CORRECTED` — history is never silently mutated.
 

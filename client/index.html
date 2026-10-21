@@ -4563,7 +4563,7 @@ function App() {
   //   ESTIMATED — the model's own forecast. RpEstimates makes those explicit.
   // Anything that cannot be placed in a bucket is the thing that used to go wrong.
 
-  function RpVerifiedData(rows, asOf) {
+  function RpVerifiedData(rows, fetchedAt, oldestFigure) {
     if (!rows || !rows.length) return null;
     return React.createElement('div', { className:'rp-verified' },
       React.createElement('div', { className:'rp-verified-hd' },
@@ -4582,8 +4582,11 @@ function App() {
           )
         )
       ),
-      asOf && React.createElement('div', { className:'rp-verified-foot' },
-        'Snapshot taken ' + new Date(asOf).toLocaleString() + '. Figures below that do not appear here are model-generated.'
+      (fetchedAt || oldestFigure) && React.createElement('div', { className:'rp-verified-foot' },
+        (fetchedAt ? 'Fetched ' + new Date(fetchedAt).toLocaleString() : '') +
+        (fetchedAt && oldestFigure ? ' · ' : '') +
+        (oldestFigure ? 'Oldest figure: ' + oldestFigure : '') +
+        '. Figures below that do not appear here are model-generated.'
       )
     );
   }
@@ -5780,7 +5783,7 @@ function App() {
       RpCostReceipt(r.costReceipt),
       IdeasPanel('research', r),
       renderQAPanel(r),
-      RpVerifiedData(r.marketData, r.dataAsOf),
+      RpVerifiedData(r.marketData, r.dataFetchedAt || r.dataAsOf, r.oldestFigureAsOf),
       RpPolicyProxy(r.policyPath),
       body,
       RpEstimates(r.estimates),

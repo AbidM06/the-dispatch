@@ -78,7 +78,7 @@ const RiskItem = z.object({
   detail:  z.string(),
   affects: z.string(),
   date:    z.string().optional(),
-});
+}).passthrough();   // keep server-added provenance such as `basis` (validate() used to strip it)
 
 const RiskPayload = z.object({
   risks: z.array(RiskItem).length(7),
@@ -95,7 +95,7 @@ const EventItem = z.object({
   ticker:   z.string(),
   detail:   z.string(),
   date:     z.string().optional(),
-});
+}).passthrough();   // keep server-added provenance such as `basis` (validate() used to strip it)
 
 const EventsPayload = z.object({
   events: z.array(EventItem),
