@@ -1910,7 +1910,18 @@ function mcPeriod(def, t) {
 
 const mcPer = (def, dateStr) => mcPeriod(def, Date.parse(dateStr + 'T00:00:00Z') / 1000);
 
-function MacroCard({ def, range, theme }) {
+// The latest print that had been PUBLISHED on or before a report's day — what the report could have seen. Macro points
+// sit on their period end, not on the day the figure came out, so the report marker goes here rather than on the date.
+// null when no print has a known publication date (release calendar down, or a daily series).
+function mcReportPoint(points, reportIso) {
+  const day = reportIso ? String(reportIso).slice(0, 10) : null;
+  if (!day || !points) return null;
+  let hit = null;
+  for (const p of points) if (p.published && p.published <= day) hit = p;
+  return hit;
+}
+
+function MacroCard({ def, range, theme, reportDate = null }) {
   const boxRef = useRef(null);
   const readRef = useRef(null);
   const [state, setState] = useState({ loading: true, error: null, data: null });
@@ -1949,8 +1960,11 @@ function MacroCard({ def, range, theme }) {
     }
     series.createPriceLine({ price: 0, color: mkCssVar('--ink-low'), lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: false, title: '' });
     // Dots on the last 12 prints (the ones listed in the table below).
-    if (d.freq !== 'D') {
-      series.setMarkers(d.points.slice(-12).map(p => ({ time: p.t, position: d.style === 'bars' ? (p.v >= 0 ? 'aboveBar' : 'belowBar') : 'inBar', color: ink, shape: 'circle', size: 0.6 })));
+    const rp = mcReportPoint(d.points, reportDate);
+    if (d.freq !== 'D' || rp) {
+      const dots = d.freq !== 'D' ? d.points.slice(-12).filter(p => !rp || p.t !== rp.t).map(p => ({ time: p.t, position: d.style === 'bars' ? (p.v >= 0 ? 'aboveBar' : 'belowBar') : 'inBar', color: ink, shape: 'circle', size: 0.6 })) : [];
+      if (rp) dots.push({ time: rp.t, position: 'aboveBar', color: ink, shape: 'arrowDown', text: 'Report' });
+      series.setMarkers(dots.sort((a, b) => a.time - b.time));
     }
     chart.timeScale().fitContent();
     const byTime = new Map(d.points.map(p => [p.t, p]));
@@ -1962,7 +1976,7 @@ function MacroCard({ def, range, theme }) {
       if (readRef.current) readRef.current.textContent = text(p || last);
     });
     return () => chart.remove();
-  }, [state.data, theme]);
+  }, [state.data, theme, reportDate]);
 
   const header = React.createElement('div', { className: 'mc-head' },
     React.createElement('div', { className: 'mc-title' }, def.label),
@@ -1977,6 +1991,11 @@ function MacroCard({ def, range, theme }) {
       d.previous ? ' · previous ' + mcFmt(d, d.previous.value) + ' (' + mcPer(d, d.previous.date) + ')' + (chg != null ? ', change ' + (chg > 0 ? '+' : chg < 0 ? '−' : '') + Math.abs(chg).toFixed(d.unit === 'k' ? 0 : d.decimals + 1) + (d.unit === 'k' ? 'k' : d.unit === '%' ? ' pts' : '') : '') : ''),
     React.createElement('div', { className: 'mk-chart', style: { height: 200 } }, React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0 } })),
     React.createElement('div', { className: 'mc-readout', ref: readRef }),
+    reportDate && React.createElement('div', { className: 'mk-foot' }, (() => {
+      const rp = mcReportPoint(d.points, reportDate);
+      return rp ? '▼ Report: the latest figure published by the report date was ' + mcPeriod(d, rp.t) + ' (' + mcFmt(d, rp.v) + ', published ' + cvDate(rp.published) + '). Later points came out after the report was written.'
+        : 'No report marker: no print on this chart has a publication date on or before the report date.';
+    })()),
     d.prints.length > 0 && d.freq !== 'D' && React.createElement('details', { className: 'mc-details' },
       React.createElement('summary', null, 'Last ' + d.prints.length + ' prints and publication dates'),
       React.createElement('table', { className: 'mk-cmp-table' },
@@ -4613,7 +4632,7 @@ function App() {
         chart = React.createElement(CurvePanel, { theme: themeMode });
       } else if (e.kind === 'macro') {
         title = e.label;
-        chart = React.createElement(MacroCard, { def: { id: e.id, label: e.label }, range: '5y', theme: themeMode });
+        chart = React.createElement(MacroCard, { def: { id: e.id, label: e.label }, range: '5y', theme: themeMode, reportDate: reportIso });
       } else return null;
       return React.createElement('div', { key: i + ':' + e.kind + (e.id || (e.ids || []).join('')), className: 'rp-exhibit rp-exh' },
         React.createElement('div', { className: 'rp-exhibit-label' }, 'Market chart ' + String.fromCharCode(65 + i)),
@@ -4625,7 +4644,7 @@ function App() {
     return React.createElement('div', { className: 'rp-exhibits' },
       React.createElement('div', { className: 'rp-section-head' }, 'LIVE MARKET CHARTS'),
       React.createElement('div', { className: 'rp-exh-note' },
-        'Free Yahoo / FRED data, drawn at its latest' + (written ? ' — not frozen at the report date. ▼ marks ' + written + ', when this report was written' : '') +
+        'Free Yahoo / FRED data, drawn at its latest' + (written ? ' — not frozen at the report date. ▼ marks ' + written + ', when this report was written (on a macro chart, the latest figure published by then)' : '') +
         ' (no marker if that day is outside the window). Chart set is fixed per report type; no AI chooses it.'),
       blocks);
   }
