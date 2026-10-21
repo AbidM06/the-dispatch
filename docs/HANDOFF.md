@@ -29,9 +29,11 @@ Working and merged (PR #4, 2026-09-28):
   Caps: monthly **$20, warn-only** (banner + confirm warning); daily **hard stop**.
   No AI runs on a schedule (research batch, bulletin, events/risk refresh are opt-in flags).
 - **No-fabrication policy (D-02)** — research, Sales/Macro, events/risk and the News
-  calendar return "unavailable" rather than invented content. **Coverage is not yet
-  complete:** the Brief still serves seed data (see §4) — the policy is the rule, the
-  audit tracks where the code does not meet it yet.
+  calendar return "unavailable" rather than invented content. The Daily Brief now follows
+  it too (D-29, PR pending). **Coverage is not yet complete:** `aiRefreshJob` and the
+  scenario engine still use seeds (see AGENTS.md "Known seed usage") and the audit's FRED /
+  bulletin / freshness items (§4) are open — the policy is the rule, the audit tracks where
+  the code does not meet it yet.
 - **Journal stage 1** merged (PR #6, 2026-09-28): every idea logged immutably, JOURNAL tab, pitch-first drill.
 - Tests on `main` after PR #6: `npm test` → 373 passing. PR #7 (Sonnet 5.5 setting) adds 4.
 
@@ -40,7 +42,8 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
-| Data-accuracy audit: PR #3 leftovers + Brief seed fallbacks (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Runtime fixes **proposed, not implemented**: (1) Brief integrity on `codex/brief-data-integrity`, (2) FRED + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
+| Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Takes audit item 1 (Brief) from Codex's list — Codex did not start `codex/brief-data-integrity`. |
+| Data-accuracy audit: PR #3 leftovers (§4) | Codex | read-only on `main` 14780c6 | **Read-only audit complete** ([report on PR #5](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)). Brief item is now Claude's (row above). Still **proposed, not implemented**: (2) FRED `limit=1` + bulletin observation handling, (3) freshness/provenance + research dates. Claude cross-reviews. |
 | Journal stage 2: outcome tracking & scoring (D-18) | Claude | `claude/journal-tracking` | Merged (PR #8, 2026-09-28) |
 | Sonnet only, no silent Haiku (D-19) + default Sonnet 5.5 (D-17) | Claude | `claude/sonnet-only` | Merged (PR #10, 2026-09-30) |
 | Fix: Sonnet 5.5 rejected every research report (forced `tool_choice` → 400) | Claude | `claude/sonnet55-tool-choice` | Merged (PR #13, 2026-09-30) |
@@ -89,8 +92,9 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 - **Data-integrity audit findings** (Codex, 2026-09-28, on `main` 14780c6 —
   [full report](https://github.com/AbidM06/the-dispatch/pull/5#issuecomment-5876158200)).
-  Confirmed with mocked checks; no fixes implemented yet:
-  1. **P1 Brief** (`server/routes/brief.js`) manufactures missing values: March-2026
+  Confirmed with mocked checks. Item 1 is fixed on `claude/brief-no-seed` (D-29, PR pending);
+  items 2–6 have no fix yet:
+  1. **P1 Brief — FIXED in PR (D-29)** (`server/routes/brief.js`) manufactured missing values: March-2026
      `RATES_SEED` on an empty cache; per-series seed back-fill inside a partial cache while
      reporting `source: "cache"`, `stale: false`; "what changed" against fixed `PREV_RATES`;
      hand-typed calendars with the current year guessed; fixed catalysts and instrument
@@ -160,6 +164,13 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Codex P2 (round 4): a Polymarket idea's chart linked to polymarket.com, not its market. The chart route now uses the card's saved market URL (`priceAtIdea.url`) when it is a polymarket.com link.
 - Codex P2 (round 5): an archived Polymarket idea (market left the live list) was formatted as bare numbers. The fallback now matches the live Polymarket formatting (probability, %, 1 decimal) when the idea saved a Polymarket history source.
 - Next: Codex review, owner merge; then PR 3 (yield curve + macro views).
+### 2026-10-20 — Claude (Daily Brief: no seed data)
+- Owner asked to fix the Brief seed data first (it loads on every page open). Questioned first; owner chose: 'What changed' compares against the **previous close from Markets**; **Actionable setup removed** (hardcoded HOLD/TRIM advice on old holdings AMD/SGLN/HBKS/HIES plus fixed claims like 'Q1 earnings Apr 22'); **Next event shows 'unavailable'** until a real calendar exists; **Brief only**, Claude owns it (D-29).
+- `server/routes/brief.js` rewritten: reads `markets.getSnapshot()` directly (not the compat cache, which dropped `stale`). Each of the 5 rows carries current, previous, delta in bps (HY OAS is a % figure, so 3.17 vs 3.00 = +17bps), signal, `asOf`, source, link, stale flag. A series Markets lacks is `available: false` and is never back-filled; regime/drivers/prose only use series that exist. No snapshot (or none of the 5 series) → 503 `available: false` + reason. `whyItMatters` is built only from fetched figures (the old text named AMD and 'portfolio P&L').
+- Client: Desk tab shows the unavailable reason, per-row STALE badge, 'N/A' for missing rows, a provenance line (fetched time, oldest figure's date, stale/missing series), card renamed WHY IT MATTERS, and a Next-event 'unavailable' box. Checked in headless Chromium with a stale + missing-series fixture and with no snapshot.
+- Tests: `tests/brief.test.js` rewritten (12) incl. a guard that `brief.js` has no seeds, baselines, calendars or ticker advice; schema updated. Full suite green.
+- Not touched (still open): audit items 2–6 (FRED `limit=1`, bulletin HY OAS %→bps, freshness aging, research `dataAsOf`), `aiRefreshJob`/`scenario` seeds, the real economic calendar (FRED release dates, §3.4). The pre-existing regime rule labels any curve ≥ 0.3 'Bear steepener' (a level, not a move) — left as is; owner may want it revisited.
+- Next: Codex review, owner merge, `git pull`, restart; then pick the next audit item.
 
 ### 2026-10-20 — Claude (Markets compare charts, PR 1 of 4)
 - Owner asked for more interactive charts using only real, verified data; chose all four ideas (idea-card price charts, compare/overlay, charts in reports, yield curve/macro) for looks and polish, built one PR at a time in that order (D-28).
