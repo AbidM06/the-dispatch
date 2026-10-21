@@ -102,6 +102,57 @@ describe("POST /api/ideas/news", () => {
   });
 });
 
+describe("the stored FRED calendar feeds idea generation as C# citations (Codex review of PR #11)", () => {
+  const EVENT = {
+    key: "cpi", date: "2026-10-24", event: "CPI (consumer prices)", release: "Consumer Price Index",
+    previous: [{ label: "CPI inflation (YoY)", value: 2.9, period: "2026-09", text: "CPI inflation (YoY) 2.9% (2026-09)", sourceUrl: "https://fred.stlouisfed.org/series/CPIAUCSL" }],
+    source: "FRED", sourceUrl: "https://www.bls.gov/cpi/",
+  };
+  const store = (events) => jest.spyOn(require("../server/markets/calendar"), "getCalendar")
+    .mockReturnValue(events ? { available: true, source: "FRED", generatedAt: "2026-10-21T07:45:00Z", stale: false, events, missing: [] }
+                            : { available: false, reason: "Economic calendar unavailable - not fetched yet." });
+
+  test("news idea: the prompt carries the upcoming release, and a C1 citation resolves to FRED with its link", async () => {
+    const app = setup(goodIdea({ basedOn: ["N1", "C1"] }));
+    store([EVENT]);
+    const res = await request(app).post("/api/ideas/news").send({});
+    expect(res.status).toBe(200);
+    const [, , user] = callAgent.mock.calls[0];
+    expect(user).toContain("[C1] 2026-10-24 CPI (consumer prices) prev CPI inflation (YoY) 2.9% (2026-09)");
+    expect(user).not.toContain("[object Object]");
+    const c1 = res.body.idea.basedOn.find(b => b.ref === "C1");
+    expect(c1).toMatchObject({ publisher: "FRED release calendar", url: "https://www.bls.gov/cpi/" });
+    expect(c1.label).toBe("CPI (consumer prices) 2026-10-24");
+  });
+
+  test("research idea gets the same calendar", async () => {
+    const app = setup(goodIdea({ basedOn: ["REPORT", "C1"] }));
+    store([EVENT]);
+    require("../server/research/reportStore").save({ reportId: "RPT-macro-x-v1", version: 1, reportType: "macro", generatedAt: "2026-09-28T08:00:00Z",
+      research: { title: "Macro" }, thesisFrame: { thesis: "t" }, sources: [] });
+    const res = await request(app).post("/api/ideas/research").send({ reportId: "RPT-macro-x-v1" });
+    expect(res.status).toBe(200);
+    expect(callAgent.mock.calls[0][2]).toContain("[C1] 2026-10-24 CPI (consumer prices)");
+    expect(res.body.idea.basedOn.map(b => b.ref)).toContain("C1");
+  });
+
+  test("no stored calendar → no C# lines and generation still works (nothing invented)", async () => {
+    const app = setup(goodIdea());
+    store(null);
+    const res = await request(app).post("/api/ideas/news").send({});
+    expect(res.status).toBe(200);
+    expect(callAgent.mock.calls[0][2]).not.toMatch(/\[C\d+\]/);
+  });
+
+  test("the old Finnhub-shaped events (plain previous, country) still render", async () => {
+    const app = setup(goodIdea({ basedOn: ["N1", "C1"] }));
+    store([{ event: "CPI", country: "US", date: "2026-10-24", estimate: "3.1", previous: "3.0" }]);
+    const res = await request(app).post("/api/ideas/news").send({});
+    expect(callAgent.mock.calls[0][2]).toContain("[C1] 2026-10-24 US CPI est 3.1 prev 3.0");
+    expect(res.body.idea.basedOn.find(b => b.ref === "C1")).toMatchObject({ publisher: "Finnhub", url: null });
+  });
+});
+
 describe("POST /api/ideas/research + history", () => {
   test("404 when no report exists", async () => {
     const app = setup(goodIdea());

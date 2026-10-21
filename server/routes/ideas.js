@@ -13,6 +13,7 @@
 const { Router } = require("express");
 const cache      = require("../cache");
 const finnhub    = require("../providers/finnhub");
+const econCalendar = require("../markets/calendar");
 const reportStore = require("../research/reportStore");
 const { generate } = require("../ideas/generator");
 const store      = require("../ideas/store");
@@ -37,8 +38,10 @@ async function currentHeadlines() {
   return fresh;
 }
 
+/** The upcoming releases the generator may cite as C1..: the stored FRED calendar (D-31). Never fetches; [] when none is stored. */
 function currentCalendar() {
-  return cache.get("news:economic-calendar") || [];
+  const cal = econCalendar.getCalendar({ daysAhead: 45 });
+  return cal.available ? cal.events : [];
 }
 
 router.get("/", (req, res) => {

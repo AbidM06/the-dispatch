@@ -76,12 +76,24 @@ function marketContext() {
   return { registry, text: lines.join("\n"), generatedAt: snap?.generatedAt || null };
 }
 
+/** `previous` is a plain value on Finnhub-shaped events and a list of { text } readings on FRED calendar events (D-31). */
+function previousText(p) {
+  return Array.isArray(p) ? p.map(r => r && r.text).filter(Boolean).join("; ") : (p == null ? "" : String(p));
+}
+
 function calendarContext(events = []) {
   const registry = {}, lines = [];
   events.slice(0, 12).forEach((e, i) => {
     const ref = `C${i + 1}`;
-    registry[ref] = { kind: "calendar", ref, label: `${e.event} (${e.country || ""}) ${e.date || e.time || ""}`.trim(), url: null, publisher: e.seeded ? "Dispatch calendar (seeded)" : "Finnhub", publishedAt: null };
-    lines.push(`[${ref}] ${e.date || e.time || ""} ${e.country || ""} ${e.event}${e.estimate ? ` est ${e.estimate}` : ""}${e.previous ? ` prev ${e.previous}` : ""}`);
+    const when = e.date || e.time || "";
+    const prev = previousText(e.previous);
+    registry[ref] = {
+      kind: "calendar", ref, label: `${e.event}${e.country ? ` (${e.country})` : ""} ${when}`.trim(),
+      url: e.sourceUrl || null,
+      publisher: e.source ? `${e.source} release calendar` : e.seeded ? "Dispatch calendar (seeded)" : "Finnhub",
+      publishedAt: null,
+    };
+    lines.push(`[${ref}] ${[when, e.country, e.event].filter(Boolean).join(" ")}${e.estimate ? ` est ${e.estimate}` : ""}${prev ? ` prev ${prev}` : ""}`);
   });
   return { registry, text: lines.join("\n") };
 }
