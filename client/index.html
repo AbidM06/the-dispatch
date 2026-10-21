@@ -787,6 +787,10 @@ tbody tr:hover td { background: var(--bg-alt); }
 .rp-exhibit-sub     { font-size: 9px; color: var(--ink-low); margin-top: 3px; }
 .rp-exhibit-source  { font-size: 8.5px; color: var(--ink-low); }
 .rp-exhibit-chart   { height: 200px; }
+.rp-exhibits { margin-bottom: 8px; }
+.rp-exh-title { font-size: 12px; font-weight: 600; margin: 2px 0 8px; }
+.rp-exh-note  { font-size: 9.5px; color: var(--ink-low); margin: -4px 0 10px; line-height: 1.5; }
+.rp-exh-fact  { font-size: 10px; color: var(--ink-mid); margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--rule); font-family: var(--mono); }
 .rp-targets-table   { width: 100%; border-collapse: collapse; }
 .rp-tgt-bull { color: var(--green); font-weight: 600; } .rp-tgt-base { color: var(--gold); font-weight: 600; } .rp-tgt-bear { color: var(--red); font-weight: 600; }
 .rp-scenario-strip  { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 12px; }
@@ -1515,7 +1519,7 @@ function mkSeriesCadence(points) {
   return med <= 4 ? 'daily' : med <= 10 ? 'weekly' : med <= 40 ? 'monthly' : med <= 120 ? 'quarterly' : 'periodic';
 }
 
-function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null, showSource = false }) {
+function MarketChart({ item, tf, theme, height = 190, interactive = false, fetchUrl = null, showSource = false, reportDate = null }) {
   const boxRef    = useRef(null);
   const legendRef = useRef(null);
   const [state, setState] = useState({ loading: true, error: null, hist: null });
@@ -1592,6 +1596,8 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false, fetch
       series.createPriceLine({ price: hi, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'High' });
       series.createPriceLine({ price: lo, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'Low' });
     }
+    const reportMk = mkReportMarker(h.type === 'ohlc' ? clean(h.bars).map(b => b.t) : clean(h.points).map(p => p.t), reportDate, ink);
+    if (reportMk) series.setMarkers([reportMk]);
     chart.timeScale().fitContent();
 
     const setLegend = (d, t) => {
@@ -1608,7 +1614,7 @@ function MarketChart({ item, tf, theme, height = 190, interactive = false, fetch
       if (d) setLegend(d, param.time); else setLegend(lastData, lastVal.t);
     });
     return () => chart.remove();
-  }, [state.hist, theme, interactive]);
+  }, [state.hist, theme, interactive, reportDate]);
 
   // The series actually plotted can differ from the instrument's primary quote source (Yahoo → FRED fallback,
   // Polymarket), so a chart that must be checkable names the source its history really came from.
@@ -1652,7 +1658,19 @@ function mkCmpDay(t) {
   return new Date(t * 1000).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: '2-digit' });
 }
 
-function CompareChart({ ids, slots, tf, mode, theme, height = 340 }) {
+// A marker on the day a research report was written, for charts drawn inside a report. It sits on the last real
+// bar on or before that day; none is drawn when the report predates the window or is newer than the data by more
+// than a few days (a marker on a stale last bar would point at the wrong day).
+function mkReportMarker(times, reportIso, color) {
+  if (!reportIso || !times || !times.length) return null;
+  const ts = Date.parse(reportIso) / 1000;
+  if (!isFinite(ts) || ts < times[0] || ts > times[times.length - 1] + 5 * 86400) return null;
+  let t = times[0];
+  for (const x of times) { if (x <= ts) t = x; else break; }
+  return { time: t, position: 'aboveBar', color, shape: 'arrowDown', text: 'Report' };
+}
+
+function CompareChart({ ids, slots, tf, mode, theme, height = 340, reportDate = null }) {
   const boxRef = useRef(null);
   const readRef = useRef(null);
   const [state, setState] = useState({ loading: true, error: null, data: null });
@@ -1696,6 +1714,8 @@ function CompareChart({ ids, slots, tf, mode, theme, height = 340 }) {
       ser.setData(s.points.map(p => ({ time: p.t, value: p.v })));
       return ser;
     });
+    const reportMk = mkReportMarker(d.series[0].points.map(p => p.t), reportDate, ink);
+    if (reportMk) made[0].setMarkers([reportMk]);
     made[0].createPriceLine({ price: spread ? 0 : 100, color: low, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: spread ? 'zero' : 'base 100' });
     chart.timeScale().fitContent();
 
@@ -1709,7 +1729,7 @@ function CompareChart({ ids, slots, tf, mode, theme, height = 340 }) {
       else setRead(last(d.series[0]).t, d.series.map(s => last(s).v));
     });
     return () => chart.remove();
-  }, [state.data, theme]);
+  }, [state.data, theme, reportDate]);
 
   const legendItems = d ? d.series.map((s, i) => {
     const lastP = s.points[s.points.length - 1], firstP = s.points[0];
@@ -4563,6 +4583,53 @@ function App() {
   //   ESTIMATED — the model's own forecast. RpEstimates makes those explicit.
   // Anything that cannot be placed in a bucket is the thing that used to go wrong.
 
+  // ── LIVE MARKET CHARTS (D-28, PR 4) ──────────────────────────────────────
+  // A fixed set per report type, chosen server-side (server/research/exhibits.js) — never by the model. Each chart is
+  // drawn from the same free Yahoo/FRED data as the Markets tab, always at its LATEST data, with a marker on the day
+  // the report was written. Beside each one, the report's own verified figure for the same series (when it has one),
+  // so a claim in the text can be checked against the picture.
+  function RpExhibits(r) {
+    const list = r.exhibits;
+    if (!list || !list.length) return null;
+    const reportIso = r.generatedAt || null;
+    const written = reportIso ? new Date(reportIso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+    const factLine = (keys) => {
+      const rows = (r.marketData || []).filter(x => x.key && (keys || []).includes(x.key));
+      if (!rows.length) return null;
+      return React.createElement('div', { className: 'rp-exh-fact' }, 'In this report\'s verified data: ' +
+        rows.map(x => x.label + ' ' + x.value + ' (' + [x.source, x.asOf && String(x.asOf).slice(0, 10)].filter(Boolean).join(' · ') + (x.stale ? ', stale' : '') + ')').join(' · '));
+    };
+    const blocks = list.map((e, i) => {
+      let title, chart;
+      if (e.kind === 'compare') {
+        title = e.title;
+        chart = React.createElement(CompareChart, { ids: e.ids, tf: e.tf, mode: e.mode, theme: themeMode, height: 240, reportDate: reportIso });
+      } else if (e.kind === 'chart') {
+        if (!e.item) return null;
+        title = e.item.label + ' — last ' + ({ '1d': '6 months', '1y': '1 year', '5y': '5 years' }[e.tf] || 'window');
+        chart = React.createElement(MarketChart, { item: e.item, tf: e.tf, theme: themeMode, height: 220, showSource: true, reportDate: reportIso });
+      } else if (e.kind === 'curve') {
+        title = 'US Treasury yield curve — latest and earlier';
+        chart = React.createElement(CurvePanel, { theme: themeMode });
+      } else if (e.kind === 'macro') {
+        title = e.label;
+        chart = React.createElement(MacroCard, { def: { id: e.id, label: e.label }, range: '5y', theme: themeMode });
+      } else return null;
+      return React.createElement('div', { key: i + ':' + e.kind + (e.id || (e.ids || []).join('')), className: 'rp-exhibit rp-exh' },
+        React.createElement('div', { className: 'rp-exhibit-label' }, 'Market chart ' + String.fromCharCode(65 + i)),
+        React.createElement('div', { className: 'rp-exh-title' }, title),
+        chart,
+        factLine(e.factKeys));
+    }).filter(Boolean);
+    if (!blocks.length) return null;
+    return React.createElement('div', { className: 'rp-exhibits' },
+      React.createElement('div', { className: 'rp-section-head' }, 'LIVE MARKET CHARTS'),
+      React.createElement('div', { className: 'rp-exh-note' },
+        'Free Yahoo / FRED data, drawn at its latest' + (written ? ' — not frozen at the report date. ▼ marks ' + written + ', when this report was written' : '') +
+        ' (no marker if that day is outside the window). Chart set is fixed per report type; no AI chooses it.'),
+      blocks);
+  }
+
   function RpVerifiedData(rows, fetchedAt, oldestFigure) {
     if (!rows || !rows.length) return null;
     return React.createElement('div', { className:'rp-verified' },
@@ -5785,6 +5852,7 @@ function App() {
       renderQAPanel(r),
       RpVerifiedData(r.marketData, r.dataFetchedAt || r.dataAsOf, r.oldestFigureAsOf),
       RpPolicyProxy(r.policyPath),
+      RpExhibits(r),
       body,
       RpEstimates(r.estimates),
       RpUnverified(r.unverified),

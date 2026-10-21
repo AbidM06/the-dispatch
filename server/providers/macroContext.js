@@ -373,6 +373,7 @@ function toMarketDataRows(ctx) {
   return Object.values(ctx.facts)
     .sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group))
     .map(f => ({
+      key:    f.key,                  // lets a chart exhibit show "at report time: <this figure>"
       label:  f.label,
       value:  f.formatted,
       source: f.source,

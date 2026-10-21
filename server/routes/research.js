@@ -43,6 +43,7 @@ const transport    = require("../providers/claudeTransport");
 
 const router    = Router();
 const TTL_24H   = 24 * 60 * 60 * 1000;
+const { exhibitsFor } = require("../research/exhibits");
 const VALID_TYPES = new Set(["macro", "fx", "rates", "thematic", "equity", "commodities", "sector"]);
 
 
@@ -170,6 +171,8 @@ function attachQA(research, record) {
     claimsCount:     record ? (record.claims || []).length : 0,
     sourcesCount:    record ? (record.sources || []).length : 0,
     costReceipt:     record?.meta?.cost || null,
+    // Fixed live-chart set for this report type (D-28, PR 4) — specs only; the client fetches the data.
+    exhibits:        exhibitsFor(record?.reportType),
   };
 }
 
