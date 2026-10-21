@@ -384,5 +384,15 @@ function toMarketDataRows(ctx) {
     }));
 }
 
-module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, derivePolicyPath, SERIES,
+/**
+ * oldestFigureDate — the earliest observation date (YYYY-MM-DD) among the report's data
+ * rows, or null with none. This is what a report's "data as of" means: how old its
+ * stalest verified figure is — not the day it was generated or fetched.
+ */
+function oldestFigureDate(rows) {
+  const dates = (rows || []).map(r => String(r.asOf || "").slice(0, 10)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  return dates.length ? dates.sort()[0] : null;
+}
+
+module.exports = { getMacroContext, toPromptBlock, toMarketDataRows, oldestFigureDate, derivePolicyPath, SERIES,
   withMarkets, tradingDaysSince, isUsHoliday, STALE_AFTER_TRADING_DAYS, MARKETS_EQUIVALENT };

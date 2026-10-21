@@ -195,7 +195,8 @@ function decorate(research, type, { macroCtx, chartData }) {
   injectChartData(research, type, chartData || {});
   research.marketData    = macroContext.toMarketDataRows(macroCtx);
   research.policyPath    = macroCtx?.policyPath || null;
-  research.dataAsOf      = macroCtx?.fetchedAt || null;
+  research.dataFetchedAt    = macroCtx?.fetchedAt || null;               // when the data was retrieved
+  research.oldestFigureAsOf = macroContext.oldestFigureDate(research.marketData);   // how old its stalest figure is
   research.missingSeries = macroCtx?.missing || [];
   return research;
 }
@@ -205,7 +206,7 @@ function decorate(research, type, { macroCtx, chartData }) {
  * Cheaper (~1 call instead of 6-8); QA is honestly labelled NOT_RUN. Still
  * priced, versioned and stored so interrogation and idea cards work.
  */
-async function singleCallReport(type, topic, contextStr, batch) {
+async function singleCallReport(type, topic, contextStr, batch, macroCtx = null) {
   const receipt  = cost.newReceipt();
   const research = await transport.runWithContext({ receipt, batch, role: "draft" },
     () => anthropic.fetchResearchReport(contextStr, topic, type));
@@ -214,7 +215,7 @@ async function singleCallReport(type, topic, contextStr, batch) {
     reportId: reportStore.makeReportId(type, version),
     version, reportType: type,
     generatedAt: research.generatedAt || new Date().toISOString(),
-    dataAsOf: new Date().toISOString().slice(0, 10),
+    dataAsOf: macroCtx ? macroContext.oldestFigureDate(macroContext.toMarketDataRows(macroCtx)) : null,
     topic: topic || null, research, thesisFrame: null,
     institutionalQA: orchestrator.notRunQA("Multi-agent QA disabled via RESEARCH_MULTI_AGENT=false"),
     claims: [], sources: [], corrections: [],
@@ -251,7 +252,7 @@ async function generateReport(type, topic = "", { batch = false } = {}) {
   try {
     record = orchestrator.multiAgentEnabled()
       ? await orchestrator.runPipeline({ type, topic, ratesContext: ctx.contextStr, macroCtx: ctx.macroCtx, batch })
-      : await singleCallReport(type, topic, ctx.contextStr, batch);
+      : await singleCallReport(type, topic, ctx.contextStr, batch, ctx.macroCtx);
   } catch (err) {
     console.warn(`[research:${type}] generation failed:`, err.message);
     orchestrator.setStage(type, "failed", err.message);

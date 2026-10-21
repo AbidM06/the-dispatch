@@ -18,7 +18,7 @@
 
 const { Router }       = require("express");
 const finnhub          = require("../providers/finnhub");
-const fred             = require("../providers/fred");
+const macro            = require("../providers/macroContext");
 const eia              = require("../providers/eia");
 const yahoo            = require("../providers/yahoo");
 const twitter          = require("../providers/twitter");
@@ -57,19 +57,18 @@ function fixOpportunitiesNesting(analysis) {
   return analysis;
 }
 
-// ── Live macro context from FRED ──────────────────────────────────────────────
-/** Fetch current FRED rates and format as a grounding data block for the prompt. */
+// ── Verified macro facts (D-30) ───────────────────────────────────────────────
+// The same dated, stale-flagged layer every research report uses (providers/macroContext):
+// each figure carries its own source and observation date, newer Markets prices are
+// overlaid, and a figure older than 2 trading days is marked STALE. The bulletin used to
+// build its own block from fred.getAllRates() — which returns observation objects, not
+// numbers — so `.toFixed` threw and the whole block was silently dropped; it also printed
+// the HY spread (a percent figure) as "3bps" and dated every line "as of today".
+/** Fetch the verified macro context, or null if no figure could be fetched. */
 async function fetchMacroContext() {
   try {
-    const rates = await fred.getAllRates();
-    if (!rates) return null;
-    const lines = [];
-    if (rates.dgs10      != null) lines.push(`10Y UST Nominal Yield (DGS10):     ${rates.dgs10.toFixed(2)}%`);
-    if (rates.dfii10     != null) lines.push(`10Y Real Yield (DFII10):           ${rates.dfii10.toFixed(2)}%`);
-    if (rates.t10yie     != null) lines.push(`10Y Breakeven Inflation (T10YIE):  ${rates.t10yie.toFixed(2)}%`);
-    if (rates.hy_spread  != null) lines.push(`US HY OAS Spread (BAML):           ${Math.round(rates.hy_spread)}bps`);
-    if (rates.t10y2y     != null) lines.push(`Yield Curve 10Y-2Y (T10Y2Y):       ${rates.t10y2y.toFixed(2)}%`);
-    return lines.length ? lines.join("\n") : null;
+    const ctx = await macro.getMacroContext();
+    return ctx && ctx.facts && Object.keys(ctx.facts).length ? ctx : null;
   } catch {
     return null;
   }
@@ -116,13 +115,14 @@ async function fetchMarketMovers() {
  * browser session, or Anthropic call failure all result in the bulletin
  * proceeding exactly as before.
  */
-async function fetchTwitterContext(headline) {
+async function fetchTwitterContext(headline, macroCtx) {
   if (!headline) return null;
   try {
-    const [fredRates, eiaPrices] = await Promise.all([
-      fred.getAllRates().catch(() => null),
-      eia.getLatestPrices().catch(() => null),
-    ]);
+    // crossReference() compares a claimed 10Y yield with a plain number. A STALE figure
+    // is never used to corroborate or contradict a post.
+    const dgs10     = macroCtx?.facts?.dgs10;
+    const fredRates = dgs10 && !dgs10.stale ? { dgs10: dgs10.value } : {};
+    const eiaPrices = await eia.getLatestPrices().catch(() => null);
 
     const query  = headline.length > 80 ? headline.slice(0, 80) : headline;
     const tweets = await twitter.searchTweets(query, { limit: 15, filter: "live" });
@@ -152,16 +152,14 @@ async function fetchTwitterContext(headline) {
 const SYSTEM_PROMPT = `You are a dual-role expert: (1) a senior macro economist at a major research house, and (2) a senior sales & trading professional briefing buy-side clients before market open. You produce morning bulletins combining rigorous economic analysis with immediately actionable cross-asset trading ideas. Your reader is a student learning how markets work: explain plainly, and say why each point matters.
 
 ACCURACY RULES — NON-NEGOTIABLE:
-- Only cite specific figures (yields, spreads, price levels, bps moves, % changes) that appear in the source article or in the LIVE MACRO DATA block below. Never invent statistics.
+- Only cite specific figures (yields, spreads, price levels, bps moves, % changes) that appear in the source article or in the VERIFIED MARKET DATA block below. Never invent statistics.
 - For historical parallels: you may reference well-established episodes by name (e.g. 2013 Taper Tantrum, 2022 Fed hiking cycle, 2015 CNY devaluation) but do not fabricate specific bps moves or percentage drawdowns unless they are universally established facts.
 - If the source article lacks a specific number, describe direction and mechanism — never substitute an invented figure.
 - Trade rationales must follow a direct, mechanistic causal chain from the article to the asset. No speculative leaps without a stated transmission mechanism.
 - Every sentence must carry information. No filler phrases, no hedging language that adds no meaning.`;
 
-function buildUserPrompt(articleList, macroContext, xContext, moversContext, prevBulletin) {
-  const macroBlock = macroContext
-    ? `LIVE MACRO DATA (FRED, as of ${todayStr()}):\n${macroContext}\n\n`
-    : "";
+function buildUserPrompt(articleList, macroCtx, xContext, moversContext, prevBulletin) {
+  const macroBlock = macroCtx ? `${macro.toPromptBlock(macroCtx)}\n\n` : "";
 
   const moversBlock = moversContext
     ? `TODAY'S CROSS-ASSET PRICE ACTION (Yahoo Finance, live, % = change from prior close):\n${moversContext}\n\n`
@@ -172,7 +170,7 @@ function buildUserPrompt(articleList, macroContext, xContext, moversContext, pre
     : "";
 
   const xBlock = xContext
-    ? `X / SOCIAL CONTEXT (verified live posts related to today's top story — each tagged with a reliability verdict):\n${xContext}\n\nUse this only as supplementary color for clientExposure/clientConcerns or sentiment framing. Treat "plausible-unverified" as opinion, not fact. Never use this block as the source of any specific figure — figures must come from the article or the live macro data above.\n\n`
+    ? `X / SOCIAL CONTEXT (verified live posts related to today's top story — each tagged with a reliability verdict):\n${xContext}\n\nUse this only as supplementary color for clientExposure/clientConcerns or sentiment framing. Treat "plausible-unverified" as opinion, not fact. Never use this block as the source of any specific figure — figures must come from the article or the verified market data above.\n\n`
     : "";
 
   return `Today is ${todayStr()}.
@@ -185,7 +183,7 @@ Your tasks:
    - A dramatic-sounding headline (e.g. an ongoing geopolitical conflict) that is NOT producing measurable price action today should be DEPRIORITIZED in favor of a quieter story that better explains today's actual moves (a data release, central bank comment, credit event, etc.).
    - You may use web_search to sanity-check "what is driving markets today" for additional confirmation of your selection — but every figure in your output must still come from the article or the live data blocks above, never invented from a search result.
    - Respect the PREVIOUS BULLETIN note above if present.
-2. Generate a complete morning bulletin grounded strictly in the article content and the live macro data above.
+2. Generate a complete morning bulletin grounded strictly in the article content and the verified market data above.
 
 Return ONLY a valid JSON object — no markdown, no text outside the JSON:
 
@@ -364,10 +362,10 @@ function extractBulletinJson(raw) {
 
 /** One Sonnet call → a validated bulletin object. Throws a plain-English Error on any failure. */
 async function generateWithClaude(articles, articleList) {
-  const macroContext  = await fetchMacroContext();
+  const macroCtx      = await fetchMacroContext();
   const moversContext = await fetchMarketMovers();
-  const xContext      = await fetchTwitterContext(articles[0]?.headline);
-  const userPrompt    = buildUserPrompt(articleList, macroContext, xContext, moversContext, getLatest());
+  const xContext      = await fetchTwitterContext(articles[0]?.headline, macroCtx);
+  const userPrompt    = buildUserPrompt(articleList, macroCtx, xContext, moversContext, getLatest());
 
   const raw    = await callClaude(SYSTEM_PROMPT, userPrompt, 8000, MODEL_SONNET);
   const parsed = extractBulletinJson(raw);

@@ -87,6 +87,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  if (ratesSpy) { ratesSpy.mockRestore(); ratesSpy = null; }
   cache.clear();
   jest.clearAllMocks();
   budget._reset();                             // reset AI call counters
@@ -108,7 +109,11 @@ const LIVE_RATES = {
   hy_spread: { value: 3.05, date: "2026-09-25", source: "FRED" },
   t10y2y:    { value: 0.41, date: "2026-09-25", source: "FRED" },
 };
-function seedLiveRates() { cache.set("snapshot:data", { rates: LIVE_RATES }, 3600_000); }
+// Events/Risk read the Markets snapshot directly (D-30), so the fixture stands in for it.
+let ratesSpy = null;
+function seedLiveRates() {
+  ratesSpy = jest.spyOn(require("../server/markets/service"), "narrativeContext").mockReturnValue({ rates: LIVE_RATES });
+}
 
 /** Build a complete fetchAllAnalysis mock response and register it. */
 function mockAllAnalysis(overrides = {}) {
