@@ -1,10 +1,11 @@
 /**
  * server/markets/calendar.js - the economic calendar (D-31). Free FRED data, no AI, no typed-in dates (D-02).
  *
- * What it knows: the dates FRED lists for a few data releases (CPI, the jobs report, PCE, GDP) and for the
- * FOMC press release IF FRED carries one. Each release is found by its NAME in FRED's release list at run
- * time, so nothing here is a remembered id or date; a release FRED does not have is reported as missing,
- * never filled in. For the SOONEST date of each event it adds the previous reading (real FRED figures, with
+ * What it knows: the dates FRED lists for a few data releases (CPI, the jobs report, PCE, GDP). Each release is
+ * found by its NAME in FRED's release list at run time, so nothing here is a remembered id or date; a release
+ * FRED does not have is reported as missing, never filled in. FOMC meeting dates are NOT available: FRED's
+ * "FOMC Press Release" is daily policy-rate data whose calendar lists ordinary days, so mapping it would label
+ * them "FOMC decision". It is always reported as missing, with that reason. For the SOONEST date of each event it adds the previous reading (real FRED figures, with
  * their period). It does not know release times or consensus forecasts - FRED has neither - and says nothing
  * about them.
  *
@@ -27,15 +28,16 @@ const KEEP_DAYS      = 120;                       // how far ahead a refresh sto
 
 /**
  * The events. `match` is tested against FRED's own release names; `readings` are ids from views.MACRO whose latest
- * value is shown as the previous reading. FOMC is the one FRED may not carry - it is still listed so its absence is
- * said out loud on screen.
+ * value is shown as the previous reading. `unavailable` marks an event that is deliberately never fetched: it is still
+ * listed so its absence is said out loud on screen.
  */
 const EVENTS = [
   { key: "cpi",  label: "CPI (consumer prices)",                         match: /^Consumer Price Index$/i,        readings: ["cpi", "corecpi"] },
   { key: "jobs", label: "Jobs report (payrolls, unemployment)",          match: /^Employment Situation$/i,        readings: ["payrolls", "unrate"] },
   { key: "pce",  label: "PCE inflation (Personal Income and Outlays)",   match: /^Personal Income and Outlays$/i, readings: ["pce"] },
   { key: "gdp",  label: "GDP",                                           match: /^Gross Domestic Product$/i,      readings: ["gdp"] },
-  { key: "fomc", label: "FOMC decision",                                 match: /^FOMC Press Release$/i,          readings: [] },
+  { key: "fomc", label: "FOMC decision", readings: [],
+    unavailable: "FRED's FOMC release is daily policy-rate data, not a meeting schedule" },
 ];
 
 let current = null;        // { version, generatedAt, source, events, missing }
@@ -117,6 +119,7 @@ async function refresh({ now = new Date() } = {}) {
   const events = [], missing = [];
 
   for (const def of EVENTS) {
+    if (def.unavailable) { missing.push({ key: def.key, label: def.label, reason: def.unavailable }); continue; }
     const rel = releases.find(r => def.match.test(String(r.name).trim()));
     if (!rel) { missing.push({ key: def.key, label: def.label, reason: "FRED has no release with this name" }); continue; }
     let dates;

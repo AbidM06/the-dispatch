@@ -69,7 +69,7 @@ beforeEach(() => {
 });
 
 describe("refresh: dates come from FRED, found by release NAME", () => {
-  test("stores every FRED date for the named releases, sorted, and says FOMC is missing when FRED has none", async () => {
+  test("stores every FRED date for the named releases, sorted, and reports the FOMC decision as not available", async () => {
     mockFred();
     const r = await cal.refresh({ now: NOW });
     expect(r.ok).toBe(true);
@@ -80,7 +80,7 @@ describe("refresh: dates come from FRED, found by release NAME", () => {
       "2026-10-24 cpi", "2026-10-29 gdp", "2026-10-30 pce", "2026-11-06 jobs",
       "2026-11-13 cpi", "2026-11-25 pce", "2026-12-04 jobs", "2026-12-10 cpi",
     ]);
-    expect(c.missing).toEqual([expect.objectContaining({ key: "fomc", reason: expect.stringMatching(/no release with this name/) })]);
+    expect(c.missing).toEqual([expect.objectContaining({ key: "fomc", reason: expect.stringMatching(/daily policy-rate data, not a meeting schedule/) })]);
     expect(c.events.every(e => e.source === "FRED" && /^https:\/\//.test(e.sourceUrl))).toBe(true);
   });
 
@@ -95,12 +95,18 @@ describe("refresh: dates come from FRED, found by release NAME", () => {
     }
   });
 
-  test("FOMC appears when FRED carries a release with that name", async () => {
-    mockFred({ releases: [...RELEASES, { id: 101, name: "FOMC Press Release" }] });
+  test("FOMC is never mapped from FRED's 'FOMC Press Release' (daily rate data), even when FRED lists it (Codex review of PR #11)", async () => {
+    // FRED's release 101 carries daily target-range series, so its calendar lists ordinary days; each would be
+    // labelled "FOMC decision". It must be reported as missing and its dates never requested or shown.
+    const daily = ["2026-10-22", "2026-10-23", "2026-10-26", "2026-10-27", "2026-10-28"];
+    const calls = mockFred({ releases: [...RELEASES, { id: 101, name: "FOMC Press Release" }], dates: { ...DATES, 101: daily } });
     await cal.refresh({ now: NOW });
     const c = cal.getCalendar({ daysAhead: 90, now: NOW });
-    expect(c.events.find(e => e.key === "fomc")).toMatchObject({ date: "2026-12-09", event: "FOMC decision" });
-    expect(c.missing).toEqual([]);
+    expect(c.events.some(e => e.key === "fomc")).toBe(false);
+    expect(c.events.some(e => /FOMC/.test(e.event))).toBe(false);
+    expect(c.missing.map(m => m.key)).toEqual(["fomc"]);
+    expect(calls.some(u => u.searchParams.get("release_id") === "101")).toBe(false);   // not even asked for
+    expect(c.events[0].key).toBe("cpi");                                                // the next real release leads
   });
 
   test("a release with no upcoming date is named as missing, not filled", async () => {

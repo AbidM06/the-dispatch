@@ -212,10 +212,12 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 
 ## Economic calendar (`server/markets/calendar.js`) — D-31
 - **Free FRED data, no AI, no typed-in dates (D-02).** Each release is found by its **name** in FRED's release list
-  (`Consumer Price Index`, `Employment Situation`, `Personal Income and Outlays`, `Gross Domestic Product`, `FOMC Press Release`),
+  (`Consumer Price Index`, `Employment Situation`, `Personal Income and Outlays`, `Gross Domestic Product`),
   then `release/dates` is asked for dates from today onward **including dates with no data yet** (that is what makes them
-  upcoming). A release FRED does not have is listed in `missing` and said on screen ("not listed by FRED: FOMC decision") —
-  never filled in. FRED has no release times or consensus, so none are shown.
+  upcoming). A release FRED does not have is listed in `missing` and said on screen ("not listed by FRED: ...") — never filled in.
+  **FOMC decisions are deliberately NOT mapped:** FRED's `FOMC Press Release` is daily policy-rate data whose calendar lists ordinary
+  days, so it would label them "FOMC decision" (Codex review of PR #11); it is always reported as missing and never requested. Revisit
+  only with a decision-specific schedule. FRED has no release times or consensus, so none are shown.
 - The SOONEST date of each event carries the **previous reading** (real FRED figures with their period, e.g.
   `CPI inflation (YoY) 2.9% (2026-09)`); later dates carry none (they will follow newer data). It is read **as FRED knew it the
   day before that release** (`fredObservations(..., { realtime })`, i.e. `realtime_start=realtime_end=` that day, or today if the
