@@ -125,7 +125,11 @@ function parseFredTimestamp(s) {
   return isNaN(d) ? null : d.toISOString();
 }
 
-async function fredObservations(series, { start, limit, sort = "asc" } = {}) {
+/**
+ * `realtime` (YYYY-MM-DD) asks FRED for the data AS IT WAS KNOWN on that day (its real-time vintage): figures
+ * published after it are absent and later revisions are not applied.
+ */
+async function fredObservations(series, { start, limit, sort = "asc", realtime } = {}) {
   const url = new URL(`${FRED}/series/observations`);
   url.searchParams.set("series_id", series);
   url.searchParams.set("api_key", fredKey());
@@ -133,6 +137,7 @@ async function fredObservations(series, { start, limit, sort = "asc" } = {}) {
   url.searchParams.set("sort_order", sort);
   if (start) url.searchParams.set("observation_start", start);
   if (limit) url.searchParams.set("limit", String(limit));
+  if (realtime) { url.searchParams.set("realtime_start", realtime); url.searchParams.set("realtime_end", realtime); }
   const json = await getJson(url.toString());
   return (json.observations || [])
     .filter(o => o.value !== "." && o.value !== "")

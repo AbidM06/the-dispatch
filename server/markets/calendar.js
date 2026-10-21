@@ -75,14 +75,19 @@ function fmtReading(def, v) {
   return def.unit === "%" ? `${n}%` : def.unit === "k" ? `${n}k` : n;
 }
 
-/** The latest published reading for each id, as { label, value, text, period, sourceUrl }. A reading that cannot be fetched is left out. */
-async function previousReadings(ids) {
+/**
+ * The latest reading PUBLISHED BEFORE the release, for each id: { label, value, text, period, sourceUrl }. `asOf` is the day
+ * to read FRED's data as of (its real-time vintage), so a refresh that runs after the release has landed - the afternoon
+ * refresh on release day - still reports the previous print, never the one just published. A reading that cannot be
+ * fetched is left out.
+ */
+async function previousReadings(ids, asOf) {
   const out = [];
   for (const id of ids) {
     const def = views.MACRO.find(m => m.id === id);
     if (!def) continue;
     try {
-      const raw = await fredObservations(def.series, { sort: "desc", limit: def.transform === "yoy" ? 26 : def.transform === "diff" ? 3 : 5 });
+      const raw = await fredObservations(def.series, { sort: "desc", realtime: asOf, limit: def.transform === "yoy" ? 26 : def.transform === "diff" ? 3 : 5 });
       const last = applyTransform(raw, def).slice(-1)[0];
       if (!last) continue;
       const period = views.periodLabel(last.date, def.freq);
@@ -120,7 +125,10 @@ async function refresh({ now = new Date() } = {}) {
     if (!dates.length) { missing.push({ key: def.key, label: def.label, reason: "FRED lists no upcoming date for it yet" }); continue; }
 
     // The previous reading is only true of the NEXT release; later dates will follow newer data, so they carry none.
-    const previous = def.readings.length ? await previousReadings(def.readings) : [];
+    // It is read as FRED knew it the day before that release (or today, if the release is further off), so it is
+    // the print BEFORE the release even when this refresh runs after the release has been published.
+    const dayBefore = addDays(dates[0], -1);
+    const previous = def.readings.length ? await previousReadings(def.readings, dayBefore < from ? dayBefore : from) : [];
     dates.forEach((date, i) => events.push({
       key: def.key, date, event: def.label, release: rel.name,
       previous: i === 0 ? previous : [],

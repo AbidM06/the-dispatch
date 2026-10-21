@@ -217,7 +217,10 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   upcoming). A release FRED does not have is listed in `missing` and said on screen ("not listed by FRED: FOMC decision") —
   never filled in. FRED has no release times or consensus, so none are shown.
 - The SOONEST date of each event carries the **previous reading** (real FRED figures with their period, e.g.
-  `CPI inflation (YoY) 2.9% (2026-09)`); later dates carry none (they will follow newer data).
+  `CPI inflation (YoY) 2.9% (2026-09)`); later dates carry none (they will follow newer data). It is read **as FRED knew it the
+  day before that release** (`fredObservations(..., { realtime })`, i.e. `realtime_start=realtime_end=` that day, or today if the
+  release is further off), so a refresh that runs after the release has landed (the afternoon refresh on release day) still shows
+  the print BEFORE it, never the one just published.
 - **Refreshed with every Markets refresh** (`jobs/refreshMarkets.js`, free) and stored in `data/economic_calendar.json`
   (gitignored; memory-only in tests unless `CALENDAR_PATH`). Page loads only READ it (D-09). A failed refresh keeps the last
   good copy; a copy older than 3 days is shown flagged stale. Needs `FRED_API_KEY`.

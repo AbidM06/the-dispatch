@@ -50,7 +50,11 @@ function mockFred({ releases = RELEASES, dates = DATES, failDates = [], failAll 
       if (failDates.includes(id)) return { ok: false, status: 500, json: async () => ({}) };
       return ok({ release_dates: (dates[id] || []).map(date => ({ release_id: id, date })) });
     }
-    if (u.pathname.endsWith("/fred/series/observations")) return ok({ observations: monthlyObs() });
+    if (u.pathname.endsWith("/fred/series/observations")) {
+      // Real-time vintage: a request "as known" on or before 2026-10-20 does not yet have the print published on release day.
+      const asKnown = u.searchParams.get("realtime_start");
+      return ok({ observations: asKnown && asKnown <= "2026-10-20" ? monthlyObs().slice(1) : monthlyObs() });
+    }
     return { ok: false, status: 404, json: async () => ({}) };
   });
   return calls;
@@ -130,10 +134,36 @@ describe("previous reading", () => {
     await cal.refresh({ now: NOW });
     const next = cal.getCalendar({ daysAhead: 90, now: NOW }).events.find(e => e.key === "cpi");
     const cpiYoy = next.previous.find(p => /^CPI inflation/.test(p.label));
-    // last 106.25 vs 12 months earlier 103.25  ->  (106.25 / 103.25 - 1) * 100 = 2.9%
+    // release 24 Oct, read today (21 Oct): last print 106.25 vs 12 months earlier 103.25  ->  (106.25 / 103.25 - 1) * 100 = 2.9%
     expect(cpiYoy.text).toBe("CPI inflation (YoY) 2.9% (2026-09)");
     expect(cpiYoy.sourceUrl).toMatch(/fred\.stlouisfed\.org\/series\/CPIAUCSL/);
     expect(next.previous.length).toBe(2);                           // CPI and core CPI
+  });
+
+  test("RELEASE DAY: a refresh after the release was published still shows the print BEFORE it (Codex review of PR #11)", async () => {
+    // Today (21 Oct) is the CPI release day and the new print (2026-09) is already out. The previous reading must be
+    // 2026-08, read as FRED knew it on 20 Oct - not the figure that was just released.
+    const calls = mockFred({ dates: { ...DATES, 10: ["2026-10-21", "2026-11-13"] } });
+    await cal.refresh({ now: NOW });
+    const next = cal.getCalendar({ daysAhead: 90, now: NOW }).events.find(e => e.key === "cpi");
+    expect(next.date).toBe("2026-10-21");
+    const cpiYoy = next.previous.find(p => /^CPI inflation/.test(p.label));
+    expect(cpiYoy.period).toBe("2026-08");
+    expect(cpiYoy.text).toBe("CPI inflation (YoY) 2.9% (2026-08)");          // 106.00 vs 103.00 twelve months earlier
+    const cpiObs = calls.filter(u => u.pathname.endsWith("/series/observations") && /CPI/.test(u.searchParams.get("series_id")));
+    expect(cpiObs.length).toBeGreaterThan(0);
+    for (const u of cpiObs) {
+      expect(u.searchParams.get("realtime_start")).toBe("2026-10-20");
+      expect(u.searchParams.get("realtime_end")).toBe("2026-10-20");
+    }
+  });
+
+  test("a release further off is read as of today, never a future date", async () => {
+    const calls = mockFred();
+    await cal.refresh({ now: NOW });                      // CPI is on 24 Oct, today is 21 Oct
+    const cpiObs = calls.filter(u => u.pathname.endsWith("/series/observations") && /CPI/.test(u.searchParams.get("series_id")));
+    expect(cpiObs.length).toBeGreaterThan(0);
+    for (const u of cpiObs) expect(u.searchParams.get("realtime_start")).toBe("2026-10-21");
   });
 
   test("a reading that cannot be fetched is left out; the event stays", async () => {
