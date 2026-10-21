@@ -261,12 +261,13 @@ const dayEpoch = (d) => Math.floor(Date.parse(d + "T00:00:00Z") / 1000);
 function spreadUnit(inst) { return inst.spreadUnit || (inst.kind === "macro" ? inst.unit || null : null); }
 
 /** First UTC day (YYYY-MM-DD) inside the range: 6 months, 1 year or 5 years back from today. */
-function windowStartDay(tf) {
-  const d = new Date();
-  if (tf === "5y") d.setUTCFullYear(d.getUTCFullYear() - 5);
-  else if (tf === "1y") d.setUTCFullYear(d.getUTCFullYear() - 1);
-  else d.setUTCMonth(d.getUTCMonth() - 6);
-  return d.toISOString().slice(0, 10);
+function windowStartDay(tf, now = new Date()) {
+  const months = tf === "5y" ? 60 : tf === "1y" ? 12 : 6;
+  // Day clamped to the end of the earlier month (setUTCMonth would roll 31 Aug minus 6 months forward to 3 Mar).
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, 1));
+  const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  first.setUTCDate(Math.min(now.getUTCDate(), lastDay));
+  return first.toISOString().slice(0, 10);
 }
 
 /** day → value (the last print of each UTC day wins) from either history shape, limited to the range. */
@@ -351,4 +352,4 @@ async function getComparison(ids, tf = "1y", mode = "rebased") {
 
 function _reset() { current = null; inFlight = null; historyCache.clear(); }
 
-module.exports = { refresh, getSnapshot, getHistory, getComparison, trimToRange, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };
+module.exports = { refresh, getSnapshot, getHistory, getComparison, trimToRange, windowStartDay, spreadUnit, isRefreshing, markScheduledRun, classifyFreshness, _reset, DATA_PATH };

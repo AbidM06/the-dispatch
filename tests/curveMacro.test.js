@@ -22,14 +22,14 @@ const obsBody = (rows) => ({ observations: rows.map(([date, v]) => ({ date, valu
 
 // ── curve fixtures ───────────────────────────────────────────────────────────
 const BASE = { DGS1MO: 4.30, DGS3MO: 4.25, DGS6MO: 4.15, DGS1: 4.00, DGS2: 4.00, DGS3: 4.05, DGS5: 4.15, DGS7: 4.30, DGS10: 4.50, DGS20: 4.80, DGS30: 4.90 };
-function curveFetch({ failSeries = [], skipDates = [] } = {}) {
+function curveFetch({ failSeries = [], skipDates = [], end = "2026-10-19" } = {}) {
   return jest.fn(async (url) => {
     const u = new URL(url);
     if (u.pathname.endsWith("/series/observations")) {
       const id = u.searchParams.get("series_id");
       if (failSeries.includes(id)) return { ok: false, status: 500, json: async () => ({}) };
       // DGS2 was 25bp higher before 20 Sep 2026, so the 2s10s spread changed over the last month.
-      const rows = weekdays("2025-09-01", "2026-10-19", skipDates).map(d => [d, id === "DGS2" && d < "2026-09-20" ? BASE[id] + 0.25 : BASE[id]]);
+      const rows = weekdays("2024-01-01", end, skipDates).map(d => [d, id === "DGS2" && d < "2026-09-20" ? BASE[id] + 0.25 : BASE[id]]);
       return { ok: true, status: 200, json: async () => obsBody(rows) };
     }
     return { ok: false, status: 404, json: async () => ({}) };
@@ -66,6 +66,24 @@ describe("yield curve", () => {
     expect(s210.computed).toMatch(/computed from FRED DGS10 and DGS2/);
     expect(c.spreads.find(s => s.key === "3m10y").values.today).toBe(25);         // 4.50 - 4.25
     expect(c.spreads.find(s => s.key === "5s30s").values.today).toBe(75);         // 4.90 - 4.15
+  });
+
+  test("month arithmetic clamps to the end of the shorter month (31 Mar - 1 month is 28 Feb, not 3 Mar)", () => {
+    const { monthsBefore } = require("../server/markets/views");
+    expect(monthsBefore("2026-03-31", 1)).toBe("2026-02-28");
+    expect(monthsBefore("2026-05-31", 1)).toBe("2026-04-30");
+    expect(monthsBefore("2024-03-31", 1)).toBe("2024-02-29");       // leap year
+    expect(monthsBefore("2024-02-29", 12)).toBe("2023-02-28");      // a year before a leap day
+    expect(monthsBefore("2026-10-19", 1)).toBe("2026-09-19");       // ordinary days unchanged
+    expect(monthsBefore("2026-01-31", 2)).toBe("2025-11-30");
+  });
+
+  test("the 1-month-earlier curve for a 31 March latest date is the end of February, not 3 March", async () => {
+    global.fetch = curveFetch({ end: "2026-03-31" });
+    const c = await require("../server/markets/views").buildYieldCurve(new Date("2026-04-01T10:00:00Z"));
+    expect(c.latestDate).toBe("2026-03-31");
+    expect(c.curves.find(x => x.key === "1m").date).toBe("2026-02-27");   // 28 Feb 2026 is a Saturday -> Friday 27th
+    expect(c.curves.find(x => x.key === "1y").date).toBe("2025-03-31");
   });
 
   test("a market holiday (no print) falls back to the previous real date, never an invented one", async () => {

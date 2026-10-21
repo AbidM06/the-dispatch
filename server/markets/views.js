@@ -35,7 +35,17 @@ const CURVE = [
   ["5Y", "DGS5", 5], ["7Y", "DGS7", 7], ["10Y", "DGS10", 10], ["20Y", "DGS20", 20], ["30Y", "DGS30", 30],
 ].map(([label, series, years]) => ({ label, series, years }));
 
-function monthsBefore(dateStr, n) { const d = ymd(dateStr); d.setUTCMonth(d.getUTCMonth() - n); return iso(d); }
+/**
+ * A date `n` months earlier, with the day clamped to the end of that month. (Date.setUTCMonth rolls forward instead:
+ * 31 Mar minus one month would land on 3 Mar, not on the last day of February.)
+ */
+function shiftMonths(date, n) {
+  const first = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - n, 1));
+  const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  first.setUTCDate(Math.min(date.getUTCDate(), lastDay));
+  return first;
+}
+function monthsBefore(dateStr, n) { return iso(shiftMonths(ymd(dateStr), n)); }
 function daysBefore(dateStr, n) { return iso(new Date(ymd(dateStr).getTime() - n * 86_400_000)); }
 
 /** Latest date on or before `target` on which EVERY maturity has a value (looks back at most 7 days: weekends, holidays). */
@@ -46,7 +56,7 @@ function curveDateOnOrBefore(target, byDate, mats) {
 }
 
 async function buildYieldCurve(now = new Date()) {
-  const start = new Date(now); start.setUTCMonth(start.getUTCMonth() - 13);
+  const start = shiftMonths(now, 13);
   const settled = await Promise.allSettled(CURVE.map(m => fredObservations(m.series, { start: iso(start) })));
   const mats = [], missing = [];
   const byDate = new Map();                                   // date -> Map(series -> value)
@@ -133,15 +143,13 @@ function pairReleaseDates(obs, releaseDates, freq) {
 
 async function buildMacro(def, range, now = new Date()) {
   const years = RANGES[range];
-  const start = new Date(now);
-  start.setUTCFullYear(start.getUTCFullYear() - years - (def.transform === "yoy" ? 1 : 0));
-  start.setUTCMonth(start.getUTCMonth() - (def.transform === "diff" ? 1 : 0));
+  const start = shiftMonths(now, 12 * (years + (def.transform === "yoy" ? 1 : 0)) + (def.transform === "diff" ? 1 : 0));
   const [raw, info, rel] = await Promise.all([
     fredObservations(def.series, { start: iso(start) }),
     fredSeriesInfo(def.series).catch(() => ({})),
     def.freq === "D" ? Promise.resolve(null) : fredReleaseDates(def.series).catch(e => ({ error: e.message })),
   ]);
-  const cutoff = new Date(now); cutoff.setUTCFullYear(cutoff.getUTCFullYear() - years);
+  const cutoff = shiftMonths(now, 12 * years);
   const obs = applyTransform(raw, def).filter(o => o.date >= iso(cutoff));
   if (!obs.length) throw httpError(404, `No ${def.label} observations in the last ${years === 1 ? "year" : years + " years"}.`);
 
@@ -186,5 +194,5 @@ function getMacroSeries(id, range = "5y") {
 function _reset() { cache.clear(); }
 
 module.exports = {
-  getYieldCurve, buildYieldCurve, getMacroSeries, buildMacro, listMacro, pairReleaseDates, periodEnd, periodLabel, CURVE, MACRO, _reset,
+  getYieldCurve, buildYieldCurve, getMacroSeries, buildMacro, listMacro, pairReleaseDates, periodEnd, periodLabel, shiftMonths, monthsBefore, CURVE, MACRO, _reset,
 };

@@ -159,6 +159,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Owner chose: curve = latest + 1 week / 1 month / 1 year earlier; macro = inflation (CPI, core CPI, PCE), labour (unemployment, payrolls), growth (real GDP), policy rate (fed funds); release dates marked.
 - New `server/markets/views.js` + routes `/api/markets/curve`, `/api/markets/macro[/:id]`; `sources.js` gained `fredReleaseDates` and a `diff` transform; client gained CURVE (Recharts, toggleable lines, table, computed spreads) and MACRO (Lightweight Charts per series, publication date on hover and in a last-12-prints table).
 - "Published" = first FRED release date after the period ended — an inference, said on screen and in the response. Release calendar down → series still plots, gap stated. 15 new tests; checked in a real browser (day + night) against the real server code with a mock FRED. Live FRED unverified from the cloud session (the FRED release-dates endpoints in particular).
+- Codex P2: `setUTCMonth` rolls forward (31 Mar - 1 month = 3 Mar). The curve's '1 month earlier' (and the 13-month fetch start, macro windows, and the compare/trim window start in `service.windowStartDay`) now clamp the day to the end of the earlier month (`shiftMonths`).
 - Next: Codex review, owner merge; then PR 4 (charts inside research reports).
 
 ### 2026-10-20 — Claude (Journal idea chart, PR 2 of 4)
