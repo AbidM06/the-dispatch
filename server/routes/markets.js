@@ -5,6 +5,8 @@
  *                                   except the very first time when none exists)
  * POST /api/markets/refresh       — manual "Refresh now" (write-auth guarded)
  * GET  /api/markets/history/:id   — chart history, ?tf=1d (6 months daily) | 1h (1 month hourly) | 1y | 5y (daily)
+ * GET  /api/markets/curve         — US Treasury yield curve: latest + 1w / 1m / 1y earlier (FRED; free)
+ * GET  /api/markets/macro         — the macro series catalogue; GET /macro/:id?range=1y|5y|10y — one series with release dates
  * GET  /api/markets/compare       — ?ids=A,B[,C,D]&tf=1d|1y|5y&mode=rebased|spread — overlay / spread of 2–4
  *                                   instruments on shared dates (real closes only, nothing filled)
  * GET  /api/markets/status        — scheduler status (next/last run)
@@ -51,6 +53,15 @@ router.get("/history/:id", async (req, res) => {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+const views = require("../markets/views");
+const sendView = (fn) => async (req, res) => {
+  try { res.json(await fn(req)); }
+  catch (err) { res.status(err.status || 502).json({ error: err.message }); }
+};
+router.get("/curve", sendView(() => views.getYieldCurve()));
+router.get("/macro", (req, res) => res.json(views.listMacro()));
+router.get("/macro/:id", sendView((req) => views.getMacroSeries(req.params.id, req.query.range || "5y")));
 
 router.get("/compare", async (req, res) => {
   try {

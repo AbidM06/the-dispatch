@@ -358,6 +358,14 @@ describe("longer ranges + compare/overlay — real closes on shared dates only",
     expect(c.series[0].points.map(p => p.v)).toEqual([50, 52, 50, 51, 51]);
   });
 
+  test("the compare / trim window start clamps the day (31 Aug - 6 months is 28 Feb, not 3 Mar)", () => {
+    const { windowStartDay } = require("../server/markets/service");
+    expect(windowStartDay("1d", new Date("2026-08-31T10:00:00Z"))).toBe("2026-02-28");
+    expect(windowStartDay("1d", new Date("2026-10-20T10:00:00Z"))).toBe("2026-04-20");
+    expect(windowStartDay("1y", new Date("2024-02-29T10:00:00Z"))).toBe("2023-02-28");
+    expect(windowStartDay("5y", new Date("2026-10-20T10:00:00Z"))).toBe("2021-10-20");
+  });
+
   test("refuses what would be misleading: meaningless spread, wrong count, unknown id, prediction market, bad range", async () => {
     const markets = require("../server/markets/service");
     await expect(markets.getComparison(["GOLD", "WTI"], "1y", "spread")).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/not a meaningful spread/) });

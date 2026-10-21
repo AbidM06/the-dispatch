@@ -156,8 +156,39 @@ function applyTransform(obs, { transform, scale }) {
       return prior ? { date: o.date, v: (o.v / prior - 1) * 100 } : null;
     }).filter(Boolean);
   }
+  if (transform === "diff") {
+    // Change from the previous observation (e.g. monthly payrolls). A gap of more than ~35 days is not "the
+    // previous month", so no change is asserted across it.
+    out = out.map((o, i) => {
+      if (!i) return null;
+      const gapDays = (Date.parse(o.date) - Date.parse(out[i - 1].date)) / 86_400_000;
+      return gapDays <= 35 ? { date: o.date, v: o.v - out[i - 1].v } : null;
+    }).filter(Boolean);
+  }
   if (scale) out = out.map(o => ({ date: o.date, v: o.v * scale }));
   return out;
+}
+
+/**
+ * fredReleaseDates - every date FRED's release calendar says new data were published for this series.
+ * (series -> its release -> that release's dates; dates on which no data were released are excluded.)
+ */
+async function fredReleaseDates(series) {
+  const rel = await getJson(`${FRED}/series/release?series_id=${series}&api_key=${fredKey()}&file_type=json`);
+  const release = rel && rel.releases && rel.releases[0];
+  if (!release) throw new Error(`FRED: no release found for ${series}`);
+  const u = new URL(`${FRED}/release/dates`);
+  u.searchParams.set("release_id", release.id);
+  u.searchParams.set("api_key", fredKey());
+  u.searchParams.set("file_type", "json");
+  u.searchParams.set("realtime_start", "2000-01-01");
+  u.searchParams.set("realtime_end", "9999-12-31");
+  u.searchParams.set("include_release_dates_with_no_data", "false");
+  u.searchParams.set("sort_order", "asc");
+  u.searchParams.set("limit", "10000");
+  const d = await getJson(u.toString());
+  const dates = (d.release_dates || []).map(x => x.date).filter(Boolean).sort();
+  return { releaseId: release.id, name: release.name, link: release.link || `https://fred.stlouisfed.org/release?rid=${release.id}`, dates };
 }
 
 async function fredQuote(src) {
@@ -329,5 +360,6 @@ const HISTORY = { yahoo: yahooHistory, fred: fredHistory, polymarket: polymarket
 module.exports = {
   QUOTE, HISTORY, polymarketTop,
   // exported for tests
+  FRED_HELPERS: { fredObservations, fredSeriesInfo, fredReleaseDates, applyTransform },
   _internal: { parseFredTimestamp, applyTransform, withChange, yahooQuote, fredQuote, frankfurterQuote, finnhubQuote, polymarketHistory, yahooHistory },
 };

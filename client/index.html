@@ -1139,6 +1139,21 @@ tbody tr:hover td { background: var(--bg-alt); }
 .mk-cmp-table th { text-align: left; font-weight: 500; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-low); padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .mk-cmp-table td { padding: 5px 8px; border-bottom: 1px solid var(--rule); color: var(--ink); }
 .mk-cmp-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cv-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 6px 0 8px; }
+.cv-toggle { display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--ink); font-family: var(--font); font-size: 10.5px; cursor: pointer; }
+.cv-toggle[aria-pressed="false"] { opacity: .45; }
+.cv-toggle:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.cv-swatch { width: 26px; height: 0; border-top-width: 3px; border-top-color: currentColor; flex: none; }
+.cv-note { font-size: 10px; color: var(--ink-mid); margin-top: 6px; line-height: 1.5; }
+.cv-warn { font-size: 10.5px; color: var(--ink); border-left: 2px solid var(--gold); padding: 4px 10px; margin: 6px 0; background: var(--bg-card); }
+.mc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
+.mc-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); padding: 12px 12px 10px; }
+.mc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.mc-title { font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--ink); }
+.mc-val { font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.mc-sub { font-size: 10px; color: var(--ink-mid); margin: 2px 0 6px; line-height: 1.5; }
+.mc-readout { font-size: 9.5px; color: var(--ink-mid); min-height: 14px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-details summary { cursor: pointer; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-mid); margin-top: 8px; }
 .mk-tile { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .mk-tile.stale { border-color: var(--neg); }
 .mk-tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
@@ -1775,6 +1790,207 @@ function ComparePanel({ items, groups, theme }) {
     chosen.length < 2
       ? React.createElement('div', { className: 'mk-chart-msg', style: { position: 'static', height: 120 } }, 'Pick at least two instruments to compare.')
       : React.createElement(CompareChart, { ids: chosen.map(c => c.id), slots: chosen.map(c => c.slot), tf: cfg.tf, mode: cfg.mode, theme }));
+}
+
+// ─── MARKETS · YIELD CURVE ───────────────────────────────────────────────────
+// US Treasury constant-maturity curve (FRED): the latest curve and the curve 1 week / 1 month / 1 year earlier,
+// each on the date it is really from. Maturities are evenly spaced on the axis (a category axis), so the short end is
+// readable. Spreads are computed server-side from the same observations (bp) and labelled as computed.
+const CV_STYLE = {
+  today: { color: 'var(--cmp-1)', width: 3,   dash: undefined,  swatch: 'solid' },
+  '1w':  { color: 'var(--cmp-2)', width: 2.2, dash: '7 4',      swatch: 'dashed' },
+  '1m':  { color: 'var(--cmp-3)', width: 2.2, dash: '2 4',      swatch: 'dotted' },
+  '1y':  { color: 'var(--cmp-4)', width: 2.2, dash: '9 3 2 3',  swatch: 'dashed' },
+};
+function cvDate(iso) { return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' }); }
+const cvPct = (v) => (v == null ? '—' : Number(v).toFixed(2) + '%');
+const cvBp = (v) => (v == null ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v) + ' bp');
+
+function CurvePanel({ theme }) {
+  const [state, setState] = useState({ loading: true, error: null, data: null });
+  const [off, setOff] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/markets/curve')
+      .then(data => { if (!cancelled) setState({ loading: false, error: null, data }); })
+      .catch(err => { if (!cancelled) setState({ loading: false, error: err.message, data: null }); });
+    return () => { cancelled = true; };
+  }, []);
+  const d = state.data;
+  if (state.loading) return React.createElement('div', { className: 'card mk-card', style: { padding: 30, textAlign: 'center', color: 'var(--ink-low)' } }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading the yield curve…');
+  if (state.error) return React.createElement('div', { className: 'card mk-card', role: 'alert', style: { padding: 30, textAlign: 'center', color: 'var(--ink-mid)' } }, 'Yield curve unavailable — ' + state.error);
+
+  const rows = d.maturities.map(m => {
+    const row = { maturity: m.label };
+    d.curves.forEach(c => { const p = c.points.find(x => x.maturity === m.label); row[c.key] = p ? p.v : null; });
+    return row;
+  });
+  const keys = d.curves.map(c => c.key);
+  const toggle = (k) => setOff(o => ({ ...o, [k]: !o[k] }));
+  const fmtTip = (value, name) => [cvPct(value), name];
+
+  return React.createElement('div', { className: 'card mk-card' },
+    React.createElement('div', { className: 'card-title' }, 'US Treasury yield curve', React.createElement('span', { className: 'mk-count' }, 'FRED · latest ' + cvDate(d.latestDate))),
+    d.stale && React.createElement('div', { className: 'cv-warn', role: 'status' }, 'STALE: the newest complete curve is from ' + cvDate(d.latestDate) + '.'),
+    d.missing.length > 0 && React.createElement('div', { className: 'cv-warn', role: 'status' }, 'Not plotted (FRED did not return them): ' + d.missing.map(m => m.label).join(', ') + '.'),
+    d.notes.map((n, i) => React.createElement('div', { key: i, className: 'cv-warn', role: 'status' }, n)),
+    React.createElement('div', { className: 'cv-legend', role: 'group', 'aria-label': 'Curve dates' },
+      d.curves.map(c => React.createElement('button', { key: c.key, className: 'cv-toggle', 'aria-pressed': !off[c.key], onClick: () => toggle(c.key),
+          title: 'Show or hide this curve' },
+        React.createElement('span', { className: 'cv-swatch', style: { color: CV_STYLE[c.key].color, borderTopStyle: CV_STYLE[c.key].swatch } }),
+        React.createElement('strong', null, c.label), React.createElement('span', { style: { color: 'var(--ink-mid)' } }, cvDate(c.date))))),
+    React.createElement('div', { style: { width: '100%', height: 340 } },
+      React.createElement(Recharts.ResponsiveContainer, { width: '100%', height: '100%' },
+        React.createElement(Recharts.LineChart, { data: rows, margin: { top: 8, right: 16, bottom: 4, left: 0 } },
+          React.createElement(Recharts.CartesianGrid, { strokeDasharray: '3 3', stroke: 'var(--rule)' }),
+          React.createElement(Recharts.XAxis, { dataKey: 'maturity', tick: { fontSize: 10, fontFamily: 'monospace', fill: 'var(--ink-mid)' }, stroke: 'var(--border)' }),
+          React.createElement(Recharts.YAxis, { tick: { fontSize: 10, fontFamily: 'monospace', fill: 'var(--ink-mid)' }, domain: ['auto', 'auto'], tickFormatter: v => v.toFixed(2) + '%', width: 56, stroke: 'var(--border)' }),
+          React.createElement(Recharts.Tooltip, { formatter: fmtTip, contentStyle: { background: 'var(--bg)', border: '1px solid var(--border-med)', fontSize: 11, fontFamily: 'monospace' }, labelStyle: { color: 'var(--ink)' }, itemStyle: { color: 'var(--ink)' } }),
+          keys.map(k => React.createElement(Recharts.Line, {
+            key: k, type: 'linear', dataKey: k, name: d.curves.find(c => c.key === k).label + ' (' + cvDate(d.curves.find(c => c.key === k).date) + ')',
+            stroke: CV_STYLE[k].color, strokeWidth: CV_STYLE[k].width, strokeDasharray: CV_STYLE[k].dash, dot: { r: k === 'today' ? 3 : 2 }, activeDot: { r: 5 },
+            hide: !!off[k], isAnimationActive: false, connectNulls: false })))),
+    ),
+    React.createElement('table', { className: 'mk-cmp-table' },
+      React.createElement('thead', null, React.createElement('tr', null,
+        ['Maturity'].concat(d.curves.map(c => c.label + ' · ' + cvDate(c.date))).concat(['Change vs 1m earlier', 'Source']).map((h, i) => React.createElement('th', { key: h, className: i >= 1 && i <= d.curves.length + 1 ? 'num' : '' }, h)))),
+      React.createElement('tbody', null, d.maturities.map(m => {
+        const v = (k) => { const c = d.curves.find(x => x.key === k); const p = c && c.points.find(x => x.maturity === m.label); return p ? p.v : null; };
+        const t = v('today'), mo = v('1m');
+        return React.createElement('tr', { key: m.label },
+          React.createElement('td', null, React.createElement('strong', null, m.label)),
+          d.curves.map(c => React.createElement('td', { key: c.key, className: 'num' }, cvPct(v(c.key)))),
+          React.createElement('td', { className: 'num' }, t != null && mo != null ? cvBp(Math.round((t - mo) * 100)) : '—'),
+          React.createElement('td', null, React.createElement('a', { className: 'mk-src', href: m.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'FRED ' + m.sourceUrl.split('/').pop() + ' ↗')));
+      }))),
+    d.spreads.length > 0 && React.createElement('table', { className: 'mk-cmp-table', style: { marginTop: 14 } },
+      React.createElement('thead', null, React.createElement('tr', null,
+        ['Spread (computed)'].concat(d.curves.map(c => c.label)).map((h, i) => React.createElement('th', { key: h, className: i ? 'num' : '' }, h)))),
+      React.createElement('tbody', null, d.spreads.map(sp => React.createElement('tr', { key: sp.key, title: sp.computed },
+        React.createElement('td', null, React.createElement('strong', null, sp.key.toUpperCase()), ' ', React.createElement('span', { style: { color: 'var(--ink-mid)' } }, sp.label)),
+        d.curves.map(c => React.createElement('td', { key: c.key, className: 'num' }, cvBp(sp.values[c.key]))))))),
+    React.createElement('div', { className: 'cv-note' }, d.note + ' Maturities are evenly spaced on the axis. Each date is the latest day on or before the target on which every plotted maturity has a value.'));
+}
+
+// ─── MARKETS · MACRO SERIES ──────────────────────────────────────────────────
+// Inflation / labour / growth / policy rate from FRED. Each point sits on the period it refers to; the date it was
+// PUBLISHED (first FRED release date after the period ended) shows on hover and in the table of the last 12 prints.
+function mcFmt(def, v) {
+  if (v == null || !isFinite(v)) return '—';
+  if (def.unit === '%') return Number(v).toFixed(def.decimals) + '%';
+  if (def.unit === 'k') return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(Math.round(v)).toLocaleString('en-GB') + 'k';
+  return Number(v).toFixed(def.decimals);
+}
+function mcPeriod(def, t) {
+  const d = new Date(t * 1000);
+  if (def.freq === 'Q') return 'Q' + (Math.floor(d.getUTCMonth() / 3) + 1) + ' ' + d.getUTCFullYear();
+  if (def.freq === 'M') return d.toLocaleDateString('en-GB', { timeZone: 'UTC', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+const mcPer = (def, dateStr) => mcPeriod(def, Date.parse(dateStr + 'T00:00:00Z') / 1000);
+
+function MacroCard({ def, range, theme }) {
+  const boxRef = useRef(null);
+  const readRef = useRef(null);
+  const [state, setState] = useState({ loading: true, error: null, data: null });
+  useEffect(() => {
+    let cancelled = false;
+    setState({ loading: true, error: null, data: null });
+    apiFetch('/api/markets/macro/' + encodeURIComponent(def.id) + '?range=' + range)
+      .then(data => { if (!cancelled) setState({ loading: false, error: null, data }); })
+      .catch(err => { if (!cancelled) setState({ loading: false, error: err.message, data: null }); });
+    return () => { cancelled = true; };
+  }, [def.id, range]);
+  const d = state.data;
+
+  useEffect(() => {
+    if (!d || !boxRef.current || !window.LightweightCharts) return;
+    const LWC = window.LightweightCharts;
+    const ink = mkCssVar('--ink-mid'), rule = mkCssVar('--rule'), border = mkCssVar('--border');
+    const line = mkCssVar('--cmp-1'), pos = mkCssVar('--pos'), neg = mkCssVar('--neg');
+    const chart = LWC.createChart(boxRef.current, {
+      autoSize: true,
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: ink, fontFamily: 'IBM Plex Mono, monospace', fontSize: 10 },
+      grid: { vertLines: { color: rule }, horzLines: { color: rule } },
+      rightPriceScale: { borderColor: border, scaleMargins: { top: 0.12, bottom: 0.08 } },
+      timeScale: { borderColor: border, fixLeftEdge: true, fixRightEdge: true },
+      crosshair: { mode: LWC.CrosshairMode.Normal },
+      localization: { timeFormatter: (t) => mcPeriod(d, t), priceFormatter: (v) => mcFmt(d, v) },
+    });
+    const priceFormat = { type: 'custom', minMove: Math.pow(10, -d.decimals), formatter: (v) => mcFmt(d, v) };
+    let series;
+    if (d.style === 'bars') {
+      series = chart.addHistogramSeries({ priceFormat, priceLineVisible: false });
+      series.setData(d.points.map(p => ({ time: p.t, value: p.v, color: p.v >= 0 ? pos : neg })));
+    } else {
+      series = chart.addAreaSeries({ lineColor: line, lineWidth: 2, topColor: mkAlpha(line, 0.22), bottomColor: mkAlpha(line, 0.02), priceFormat, priceLineVisible: false, crosshairMarkerRadius: 4 });
+      series.setData(d.points.map(p => ({ time: p.t, value: p.v })));
+    }
+    series.createPriceLine({ price: 0, color: mkCssVar('--ink-low'), lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: false, title: '' });
+    // Dots on the last 12 prints (the ones listed in the table below).
+    if (d.freq !== 'D') {
+      series.setMarkers(d.points.slice(-12).map(p => ({ time: p.t, position: d.style === 'bars' ? (p.v >= 0 ? 'aboveBar' : 'belowBar') : 'inBar', color: ink, shape: 'circle', size: 0.6 })));
+    }
+    chart.timeScale().fitContent();
+    const byTime = new Map(d.points.map(p => [p.t, p]));
+    const text = (p) => mcPeriod(d, p.t) + '   ' + mcFmt(d, p.v) + (p.published ? '   published ' + cvDate(p.published) : d.freq === 'D' ? '' : '   publication date not in the release calendar yet');
+    const last = d.points[d.points.length - 1];
+    if (readRef.current) readRef.current.textContent = text(last);
+    chart.subscribeCrosshairMove(param => {
+      const p = param && param.time ? byTime.get(param.time) : null;
+      if (readRef.current) readRef.current.textContent = text(p || last);
+    });
+    return () => chart.remove();
+  }, [state.data, theme]);
+
+  const header = React.createElement('div', { className: 'mc-head' },
+    React.createElement('div', { className: 'mc-title' }, def.label),
+    d && React.createElement('div', { className: 'mc-val' }, mcFmt(d, d.latest.value)));
+  if (state.loading) return React.createElement('div', { className: 'mc-card' }, header, React.createElement('div', { className: 'mk-chart-msg', style: { position: 'static', height: 180 } }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading…'));
+  if (state.error) return React.createElement('div', { className: 'mc-card' }, header, React.createElement('div', { className: 'mk-chart-msg', role: 'alert', style: { position: 'static', height: 120, textAlign: 'center', padding: '0 16px', color: 'var(--ink-mid)' } }, 'Unavailable — ' + state.error));
+
+  const chg = d.previous ? d.latest.value - d.previous.value : null;
+  return React.createElement('div', { className: 'mc-card' }, header,
+    React.createElement('div', { className: 'mc-sub' },
+      mcPer(d, d.latest.date) + (d.latest.published ? ' · published ' + cvDate(d.latest.published) : d.freq === 'D' ? ' · daily' : ' · publication date not yet in the release calendar'),
+      d.previous ? ' · previous ' + mcFmt(d, d.previous.value) + ' (' + mcPer(d, d.previous.date) + ')' + (chg != null ? ', change ' + (chg > 0 ? '+' : chg < 0 ? '−' : '') + Math.abs(chg).toFixed(d.unit === 'k' ? 0 : d.decimals + 1) + (d.unit === 'k' ? 'k' : d.unit === '%' ? ' pts' : '') : '') : ''),
+    React.createElement('div', { className: 'mk-chart', style: { height: 200 } }, React.createElement('div', { ref: boxRef, style: { position: 'absolute', inset: 0 } })),
+    React.createElement('div', { className: 'mc-readout', ref: readRef }),
+    d.prints.length > 0 && d.freq !== 'D' && React.createElement('details', { className: 'mc-details' },
+      React.createElement('summary', null, 'Last ' + d.prints.length + ' prints and publication dates'),
+      React.createElement('table', { className: 'mk-cmp-table' },
+        React.createElement('thead', null, React.createElement('tr', null, ['Period', 'Value', 'Published'].map((h, i) => React.createElement('th', { key: h, className: i === 1 ? 'num' : '' }, h)))),
+        React.createElement('tbody', null, d.prints.map(p => React.createElement('tr', { key: p.date },
+          React.createElement('td', null, mcPer(d, p.date)), React.createElement('td', { className: 'num' }, mcFmt(d, p.value)),
+          React.createElement('td', null, p.published ? cvDate(p.published) : 'not yet in the calendar')))))),
+    React.createElement('div', { className: 'cv-note' },
+      React.createElement('a', { className: 'mk-src', href: d.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'FRED ' + d.series + ' ↗'),
+      d.release && d.release.available ? [' · release: ', React.createElement('a', { key: 'r', className: 'mk-src', href: d.release.link, target: '_blank', rel: 'noopener noreferrer' }, d.release.name + ' ↗')] : '',
+      ' · ' + d.note + (d.freq !== 'D' ? ' Dots mark the last 12 prints.' : '')));
+}
+
+function MacroPanel({ theme }) {
+  const [cat, setCat] = useState(null);
+  const [catErr, setCatErr] = useState(null);
+  const [group, setGroup] = useState('inflation');
+  const [range, setRange] = useState('5y');
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/markets/macro').then(c => { if (!cancelled) setCat(c); }).catch(e => { if (!cancelled) setCatErr(e.message); });
+    return () => { cancelled = true; };
+  }, []);
+  if (catErr) return React.createElement('div', { className: 'card mk-card', role: 'alert', style: { padding: 30, textAlign: 'center', color: 'var(--ink-mid)' } }, 'Macro series unavailable — ' + catErr);
+  if (!cat) return React.createElement('div', { className: 'card mk-card', style: { padding: 30, textAlign: 'center', color: 'var(--ink-low)' } }, React.createElement('span', { className: 'spin' }, '↻'), ' Loading…');
+  const seg = (value, set, opts) => React.createElement('div', { className: 'mk-seg', role: 'group' },
+    opts.map(([v, label]) => React.createElement('button', { key: v, className: 'mk-seg-btn' + (value === v ? ' on' : ''), 'aria-pressed': value === v, onClick: () => set(v) }, label)));
+  const list = cat.series.filter(s => s.group === group);
+  return React.createElement('div', { className: 'card mk-card' },
+    React.createElement('div', { className: 'card-title' }, 'Macro series', React.createElement('span', { className: 'mk-count' }, 'FRED · release dates')),
+    React.createElement('div', { style: { display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 } },
+      seg(group, setGroup, cat.groups.map(g => [g.id, g.label])),
+      seg(range, setRange, [['1y', '1Y'], ['5y', '5Y'], ['10y', '10Y']])),
+    React.createElement('div', { className: 'mc-grid' }, list.map(s => React.createElement(MacroCard, { key: s.id + ':' + range, def: s, range, theme }))));
 }
 
 function App() {
@@ -2969,8 +3185,8 @@ function App() {
           ' · All times UK')
       ),
       React.createElement('div', { className:'mk-controls' },
-        seg(mkView, setMkView, [['table','Table'], ['charts','Charts'], ['compare','Compare']]),
-        mkView !== 'compare' && (mkView === 'charts' || mkExpanded) && seg(mkTf, setMkTf, [['1d','Daily'], ['1h','Hourly'], ['1y','1Y'], ['5y','5Y']]),
+        seg(mkView, setMkView, [['table','Table'], ['charts','Charts'], ['compare','Compare'], ['curve','Curve'], ['macro','Macro']]),
+        !['compare','curve','macro'].includes(mkView) && (mkView === 'charts' || mkExpanded) && seg(mkTf, setMkTf, [['1d','Daily'], ['1h','Hourly'], ['1y','1Y'], ['5y','5Y']]),
         React.createElement('button', { className:'btn btn-primary mk-refresh', onClick: refreshMarkets, disabled: marketsRefreshing, title:'Fetch fresh prices now (free sources, ~50 requests, no cost)' },
           marketsRefreshing ? React.createElement(React.Fragment, null, React.createElement('span', { className:'spin' }, '↻'), ' Refreshing…') : '↻ Refresh now')
       )
@@ -3061,6 +3277,10 @@ function App() {
 
     const body = mkView === 'compare'
       ? React.createElement(ComparePanel, { items, groups, theme: themeMode })
+      : mkView === 'curve'
+      ? React.createElement(CurvePanel, { theme: themeMode })
+      : mkView === 'macro'
+      ? React.createElement(MacroPanel, { theme: themeMode })
       : mkView === 'table'
       ? visible.map(groupTable)
       : visible.map(g => {
@@ -3073,7 +3293,7 @@ function App() {
 
     return React.createElement('div', { className:'mk-panel' },
       header,
-      mkView !== 'compare' && chips,
+      !['compare','curve','macro'].includes(mkView) && chips,
       body,
       failed.length > 0 && React.createElement('div', { className:'card mk-card mk-failed' },
         React.createElement('div', { className:'card-title' }, 'Unavailable at last refresh'),
