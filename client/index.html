@@ -4629,7 +4629,9 @@ function App() {
         chart = React.createElement(MarketChart, { item: e.item, tf: e.tf, theme: themeMode, height: 220, showSource: true, reportDate: reportIso });
       } else if (e.kind === 'curve') {
         title = 'US Treasury yield curve — latest and earlier';
-        chart = React.createElement(CurvePanel, { theme: themeMode });
+        chart = React.createElement(React.Fragment, null, React.createElement(CurvePanel, { theme: themeMode }),
+          React.createElement('div', { className: 'rp-exh-note', style: { margin: '8px 0 0' } },
+            'No report-date marker on the curve: it has no time axis. Its lines are the latest curve and earlier ones, not the curve on the day this report was written — for that, see the report\'s own figures below.'));
       } else if (e.kind === 'macro') {
         title = e.label;
         chart = React.createElement(MacroCard, { def: { id: e.id, label: e.label }, range: '5y', theme: themeMode, reportDate: reportIso });
@@ -4644,7 +4646,7 @@ function App() {
     return React.createElement('div', { className: 'rp-exhibits' },
       React.createElement('div', { className: 'rp-section-head' }, 'LIVE MARKET CHARTS'),
       React.createElement('div', { className: 'rp-exh-note' },
-        'Free Yahoo / FRED data, drawn at its latest' + (written ? ' — not frozen at the report date. ▼ marks ' + written + ', when this report was written (on a macro chart, the latest figure published by then)' : '') +
+        'Free Yahoo / FRED data, drawn at its latest' + (written ? ' — not frozen at the report date. On the time-series charts ▼ marks ' + written + ', when this report was written (on a macro chart, the latest figure published by then)' : '') +
         ' (no marker if that day is outside the window). Chart set is fixed per report type; no AI chooses it.'),
       blocks);
   }
