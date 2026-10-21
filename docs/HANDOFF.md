@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/curve-macro-charts`
+**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/economic-calendar`
 
 ---
 
@@ -54,6 +54,7 @@ Working and merged (PR #4, 2026-09-28):
 | More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | Merged (PR #6, 2026-10-20) |
 | More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | Merged (PR #8, 2026-10-21) |
 | More interactive charts (D-28) — PR 3 of 4: yield curve (latest + 1w/1m/1y) and macro views with release dates | Claude | `claude/curve-macro-charts` | PR open (draft); needs Codex review. Then PR 4 (charts in research reports) |
+| Economic calendar (D-31): FRED release dates for CPI/jobs/PCE/GDP (+FOMC if listed), previous readings, Desk 'Next event' + News calendar | Claude | `claude/economic-calendar` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. **Not verified against live FRED** (sandbox cannot reach it): after merging, press Refresh on the Markets tab and check the News tab calendar fills in |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -83,8 +84,8 @@ In the owner's order of interest. **Propose and confirm before building each one
    Instruments: **ETFs and FX pairs**. Shorts allowed (no Shariah gating any more).
 3. **Prediction-market charts for Fed decisions, CPI and PCE** — Kalshi has these series;
    exact market IDs still need verifying (the cloud sandbox could not reach Kalshi).
-4. **Real economic calendar** — FRED's free release-dates API covers CPI, jobs, PCE, GDP
-   (Finnhub's calendar needs a paid plan, so the calendar currently shows "unavailable").
+4. ~~**Real economic calendar**~~ — built on `claude/economic-calendar` (D-31, PR pending): FRED release dates for
+   CPI, jobs, PCE, GDP (+ FOMC if FRED has it), shown on the Desk 'Next event' and the News calendar.
 5. Suggested, **not yet approved**: cross-asset "what moved and why" strip; data surprise
    tracker (consensus vs actual + first-hour reaction); moves in standard deviations;
    3-line morning note.
@@ -154,6 +155,14 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-21 — Claude (economic calendar, D-31)
+- Owner said 'begin from biggest priority'; the economic calendar was the biggest remaining gap ('Next event' and the News calendar both said unavailable). Questioned first; owner chose: data releases with FOMC if FRED has it; shown on both the Desk 'Next event' and the News calendar; entry = date + name + previous reading; dates only (no release time).
+- New `markets/calendar.js`: finds each release by NAME in FRED's release list (nothing typed in), asks `release/dates` for upcoming dates (`include_release_dates_with_no_data=true`), attaches the previous reading to each event's next date only, stores `data/economic_calendar.json`. Refreshed inside `jobs/refreshMarkets.js` (failure never fails the refresh); page loads only read it. A release FRED lacks is named as missing on screen.
+- Wiring: `/api/news/calendar` + `/api/news` serve it (Finnhub's paid economic calendar is no longer called), the Brief's `nextEvent` is the soonest event, client shows 'Last reading', 'FRED release calendar · dates only', stale and missing notes. The old News importance badge (defaulted to LOW) is gone for these entries.
+- Tests: `tests/economicCalendar.test.js` (+ Brief tests) with FRED mocked by URL; guard that `calendar.js` has no date literal, month name, release time or consensus. Checked in headless Chromium against a fixture (Desk card, News panel, footer).
+- **Not verified live (sandbox cannot reach FRED).** Assumptions to confirm on the Mac: FRED's release names are exactly `Consumer Price Index`, `Employment Situation`, `Personal Income and Outlays`, `Gross Domestic Product`, `FOMC Press Release`; and `release/dates` with `include_release_dates_with_no_data=true` lists FUTURE scheduled dates. If a name differs, that event shows under 'not listed by FRED' (honest, easy to fix); if future dates are not listed the calendar is empty and says so.
+- Next: Codex review, owner merge, `git pull`, restart, check the News calendar. Then chart PR 4 (charts in reports) or the small cleanups (delete dead `writeCompatCache`).
 
 ### 2026-10-21 — Claude (yield curve + macro views, PR 3 of 4)
 - Owner chose: curve = latest + 1 week / 1 month / 1 year earlier; macro = inflation (CPI, core CPI, PCE), labour (unemployment, payrolls), growth (real GDP), policy rate (fed funds); release dates marked.

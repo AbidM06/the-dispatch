@@ -154,7 +154,7 @@ describe("4. no hand-typed economic calendar", () => {
   const request = require("supertest");
   const express = require("express");
 
-  test("when Finnhub has no calendar, the route says unavailable — no typed-in dates", async () => {
+  test("when there is no stored calendar, the route says unavailable — no typed-in dates", async () => {
     jest.resetModules();
     jest.doMock("../server/providers/finnhub", () => ({
       getMarketNews: jest.fn().mockResolvedValue([]),
