@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/brief-no-seed`
+**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/journal-idea-chart`
 
 ---
 
@@ -51,7 +51,8 @@ Working and merged (PR #4, 2026-09-28):
 | UMUSHROOM notes section blank since the 12 Oct plan-update note (D-25) | Claude | `claude/umushroom-notes-index` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart (`launchctl kickstart -k gui/$(id -u)/com.thedispatch.server`). Verified against the live repo: 6 notes load, none skipped |
 | Red team + IC chair on Opus 5.5 (D-27) | Claude | `claude/opus-reviewers` | Merged (PR #5, 2026-10-20). Owner to restart the Mac, generate one report and compare its receipt with an earlier one |
 | Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
-| More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | PR open (draft); needs Codex review. Then PR 2 (Journal idea charts), 3 (yield curve/macro), 4 (charts in reports), one at a time |
+| More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | Merged (PR #6, 2026-10-20) |
+| More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | PR open (draft); needs Codex review. Then PR 3 (yield curve/macro), PR 4 (charts in reports) |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -153,6 +154,16 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## Session log (newest first)
 
+### 2026-10-20 — Claude (Journal idea chart, PR 2 of 4)
+- Owner chose: chart inside the Journal entry only; mark only the entry zone, target and stop (no idea-date, fill/exit or horizon markers — can be added later).
+- New `GET /api/journal/:entryId/chart` (real daily prices over the shortest 6M/1Y/5Y range that covers the idea's age + a month, plus the idea's own levels) and the existing `MarketChart` draws them as labelled lines; autoscale keeps every level on screen. Sealed ideas (My pitch first) never render it. A missing level is refused (422) — a test caught `Number(null)` = 0 being drawn as a line at zero.
+- Checked in a real browser (day + night; long and short; 6M and 1Y; sealed row) against the real server code with mocked prices. Live Yahoo/FRED unverified from the cloud session.
+- Codex P1: the chart footer said only 'Markets sources', but the history can come from FRED or Polymarket, which can differ from the reference-price source. `MarketChart` (showSource) now names the source the plotted history actually came from, with its link, range and candles/closes.
+- Codex P1 (round 2): the chart said 'last 6 months' but Polymarket's 'Daily' history is the whole lifetime and FRED's a year or more. The Journal chart route now cuts every provider's history to the labelled 6M/1Y/5Y window (`markets.trimToRange`); nothing inside the window is a plain 404, not an empty chart.
+- Codex P2 (round 3): the footer called every line series 'daily closes', wrong for monthly FRED (CPI, M2). The wording now comes from the series' own point spacing (`mkSeriesCadence`: daily / weekly / monthly / quarterly / periodic) and says 'observations'; OHLC stays 'daily candles'.
+- Codex P2 (round 4): a Polymarket idea's chart linked to polymarket.com, not its market. The chart route now uses the card's saved market URL (`priceAtIdea.url`) when it is a polymarket.com link.
+- Codex P2 (round 5): an archived Polymarket idea (market left the live list) was formatted as bare numbers. The fallback now matches the live Polymarket formatting (probability, %, 1 decimal) when the idea saved a Polymarket history source.
+- Next: Codex review, owner merge; then PR 3 (yield curve + macro views).
 ### 2026-10-20 — Claude (Daily Brief: no seed data)
 - Owner asked to fix the Brief seed data first (it loads on every page open). Questioned first; owner chose: 'What changed' compares against the **previous close from Markets**; **Actionable setup removed** (hardcoded HOLD/TRIM advice on old holdings AMD/SGLN/HBKS/HIES plus fixed claims like 'Q1 earnings Apr 22'); **Next event shows 'unavailable'** until a real calendar exists; **Brief only**, Claude owns it (D-29).
 - `server/routes/brief.js` rewritten: reads `markets.getSnapshot()` directly (not the compat cache, which dropped `stale`). Each of the 5 rows carries current, previous, delta in bps (HY OAS is a % figure, so 3.17 vs 3.00 = +17bps), signal, `asOf`, source, link, stale flag. A series Markets lacks is `available: false` and is never back-filled; regime/drivers/prose only use series that exist. No snapshot (or none of the 5 series) → 503 `available: false` + reason. `whyItMatters` is built only from fetched figures (the old text named AMD and 'portfolio P&L').
