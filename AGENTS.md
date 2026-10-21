@@ -226,8 +226,8 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   good copy; a copy older than 3 days is shown flagged stale. Needs `FRED_API_KEY`.
 - Read by `GET /api/news/calendar` (`economic`, `economicSource: live|stale|unavailable`, `economicMissing`, `economicNote`),
   `GET /api/news` (`economicCalendar`), the Daily Brief's `nextEvent` and **idea generation** (`routes/ideas.js::currentCalendar()` → the
-  `C1..` catalyst citations; publisher "FRED release calendar", link = the release page; the old `news:economic-calendar` cache key is
-  gone). Finnhub's economic calendar (paid, always empty)
+  `C1..` catalyst citations; publisher "FRED release calendar", link = the release page; a calendar older than 3 days is tagged STALE in the
+  prompt line, on the citation and — if cited — as a card warning; the old `news:economic-calendar` cache key is gone). Finnhub's economic calendar (paid, always empty)
   is no longer called; `finnhub.getEconomicCalendar` stays in the provider, unused. The Finnhub EARNINGS calendar is unchanged.
 
 ## Trade idea cards (`server/ideas/`, `routes/ideas.js`)

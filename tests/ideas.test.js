@@ -125,6 +125,34 @@ describe("the stored FRED calendar feeds idea generation as C# citations (Codex 
     expect(c1.label).toBe("CPI (consumer prices) 2026-10-24");
   });
 
+  test("a STALE calendar is flagged in the prompt, on the citation and on the card — only when it is cited (Codex P1 #3)", async () => {
+    const staleCal = () => jest.spyOn(require("../server/markets/calendar"), "getCalendar")
+      .mockReturnValue({ available: true, source: "FRED", generatedAt: "2026-10-10T07:45:00Z", stale: true, events: [EVENT], missing: [] });
+
+    const cited = setup(goodIdea({ basedOn: ["N1", "C1"] }));
+    staleCal();
+    const res = await request(cited).post("/api/ideas/news").send({});
+    expect(callAgent.mock.calls[0][2]).toContain("[C1] 2026-10-24 CPI (consumer prices) prev CPI inflation (YoY) 2.9% (2026-09) | STALE: calendar last refreshed over 3 days ago");
+    const c1 = res.body.idea.basedOn.find(b => b.ref === "C1");
+    expect(c1.stale).toBe(true);
+    expect(c1.label).toBe("CPI (consumer prices) 2026-10-24 (STALE calendar)");
+    expect(res.body.idea.warnings.join(" ")).toMatch(/release date comes from an economic calendar last refreshed over 3 days ago/);
+
+    const notCited = setup(goodIdea({ basedOn: ["N1"] }));
+    staleCal();
+    const res2 = await request(notCited).post("/api/ideas/news").send({});
+    expect(res2.body.idea.warnings.join(" ")).not.toMatch(/economic calendar last refreshed/);
+  });
+
+  test("a fresh calendar carries no stale marker anywhere", async () => {
+    const app = setup(goodIdea({ basedOn: ["N1", "C1"] }));
+    store([EVENT]);
+    const res = await request(app).post("/api/ideas/news").send({});
+    expect(callAgent.mock.calls[0][2]).not.toMatch(/STALE: calendar/);
+    expect(res.body.idea.basedOn.find(b => b.ref === "C1").stale).toBeUndefined();
+    expect(res.body.idea.warnings.join(" ")).not.toMatch(/economic calendar last refreshed/);
+  });
+
   test("research idea gets the same calendar", async () => {
     const app = setup(goodIdea({ basedOn: ["REPORT", "C1"] }));
     store([EVENT]);
