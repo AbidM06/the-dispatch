@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-20 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/journal-idea-chart`
+**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/curve-macro-charts`
 
 ---
 
@@ -52,7 +52,8 @@ Working and merged (PR #4, 2026-09-28):
 | Red team + IC chair on Opus 5.5 (D-27) | Claude | `claude/opus-reviewers` | Merged (PR #5, 2026-10-20). Owner to restart the Mac, generate one report and compare its receipt with an earlier one |
 | Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
 | More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | Merged (PR #6, 2026-10-20) |
-| More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | PR open (draft); needs Codex review. Then PR 3 (yield curve/macro), PR 4 (charts in reports) |
+| More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | Merged (PR #8, 2026-10-21) |
+| More interactive charts (D-28) — PR 3 of 4: yield curve (latest + 1w/1m/1y) and macro views with release dates | Claude | `claude/curve-macro-charts` | PR open (draft); needs Codex review. Then PR 4 (charts in research reports) |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -153,6 +154,12 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-21 — Claude (yield curve + macro views, PR 3 of 4)
+- Owner chose: curve = latest + 1 week / 1 month / 1 year earlier; macro = inflation (CPI, core CPI, PCE), labour (unemployment, payrolls), growth (real GDP), policy rate (fed funds); release dates marked.
+- New `server/markets/views.js` + routes `/api/markets/curve`, `/api/markets/macro[/:id]`; `sources.js` gained `fredReleaseDates` and a `diff` transform; client gained CURVE (Recharts, toggleable lines, table, computed spreads) and MACRO (Lightweight Charts per series, publication date on hover and in a last-12-prints table).
+- "Published" = first FRED release date after the period ended — an inference, said on screen and in the response. Release calendar down → series still plots, gap stated. 15 new tests; checked in a real browser (day + night) against the real server code with a mock FRED. Live FRED unverified from the cloud session (the FRED release-dates endpoints in particular).
+- Next: Codex review, owner merge; then PR 4 (charts inside research reports).
 
 ### 2026-10-20 — Claude (Journal idea chart, PR 2 of 4)
 - Owner chose: chart inside the Journal entry only; mark only the entry zone, target and stop (no idea-date, fill/exit or horizon markers — can be added later).
