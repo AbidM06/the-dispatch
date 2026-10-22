@@ -13,14 +13,24 @@ const finnhub    = require("../providers/finnhub");
 const router = Router();
 
 /**
- * No hand-typed calendar. The old seed listed FOMC/CPI/NFP/PCE dates and
- * "previous" prints typed in once (the FOMC dates followed the 2025 pattern)
- * and served them as the live calendar whenever Finnhub's premium economic
- * endpoint refused — unverifiable dates presented as fact. When the live
- * calendar is unavailable the response says so (`economicSource`).
+ * No hand-typed calendar. The old seed listed FOMC/CPI/NFP/PCE dates and "previous" prints typed in once (the
+ * FOMC dates followed the 2025 pattern) and served them as the live calendar — unverifiable dates presented as
+ * fact. The economic calendar is now FRED's own release dates (markets/calendar.js, D-31, stored at each Markets
+ * refresh; Finnhub's economic calendar is a paid endpoint and always came back empty). When it is unavailable the
+ * response says so (`economicSource`).
  */
-const CALENDAR_UNAVAILABLE_NOTE =
-  "Economic calendar unavailable — Finnhub's economic calendar requires a paid plan and returned no data.";
+const econCalendar = require("../markets/calendar");
+
+/** The economic part of a calendar response: events, where they came from, and what is missing — never invented. */
+function economicPart(daysAhead) {
+  const cal = econCalendar.getCalendar({ daysAhead });
+  return {
+    events:  cal.available ? cal.events : [],
+    source:  cal.available ? (cal.stale ? "stale" : "live") : "unavailable",
+    missing: cal.available ? (cal.missing || []).map(m => m.label) : [],
+    note:    cal.available ? (cal.stale ? "This calendar was last refreshed more than 3 days ago." : undefined) : cal.reason,
+  };
+}
 
 function now() { return new Date().toISOString(); }
 
@@ -51,21 +61,13 @@ router.get("/", async (req, res) => {
     []
   );
 
-  const { data: economicRaw, source: econSource } = await resolveWithFallback(
-    "news:economic-calendar",
-    () => finnhub.getEconomicCalendar(30),
-    finnhub.TTL_CALENDAR_MS,
-    []
-  );
-
-  // Finnhub economic calendar is a premium feature — no hand-typed substitute
-  const haveEcon = Array.isArray(economicRaw) && economicRaw.length > 0;
+  const econ = economicPart(30);
 
   res.json(envelope({
     headlines,
-    economicCalendar: haveEcon ? economicRaw : [],
-    econCalendarSource: haveEcon ? (econSource === "seeded" ? "stale" : "live") : "unavailable",
-    ...(haveEcon ? {} : { econCalendarNote: CALENDAR_UNAVAILABLE_NOTE }),
+    economicCalendar: econ.events,
+    econCalendarSource: econ.source,
+    ...(econ.note ? { econCalendarNote: econ.note } : {}),
     configured: finnhub.isConfigured(),
   }, source, stale));
 });
@@ -74,30 +76,24 @@ router.get("/", async (req, res) => {
 router.get("/calendar", async (req, res) => {
   const daysAhead = Math.min(parseInt(req.query.days || "45", 10), 90);
 
-  const [earningsResult, economicResult] = await Promise.allSettled([
+  const [earningsResult] = await Promise.allSettled([
     resolveWithFallback(
       "news:earnings-calendar",
       () => finnhub.getEarningsCalendar(daysAhead),
       finnhub.TTL_CALENDAR_MS,
       []
     ),
-    resolveWithFallback(
-      "news:economic-calendar",
-      () => finnhub.getEconomicCalendar(daysAhead),
-      finnhub.TTL_CALENDAR_MS,
-      []
-    ),
   ]);
 
-  const earnings  = earningsResult.status === "fulfilled" ? earningsResult.value.data : [];
-  const econRaw   = economicResult.status === "fulfilled" ? economicResult.value.data : [];
-  const haveEcon  = Array.isArray(econRaw) && econRaw.length > 0;
+  const earnings = earningsResult.status === "fulfilled" ? earningsResult.value.data : [];
+  const econ     = economicPart(daysAhead);
 
   res.json(envelope({
     earnings,
-    economic: haveEcon ? econRaw : [],
-    economicSource: haveEcon ? "live" : "unavailable",
-    ...(haveEcon ? {} : { economicNote: CALENDAR_UNAVAILABLE_NOTE }),
+    economic: econ.events,
+    economicSource: econ.source,
+    economicMissing: econ.missing,
+    ...(econ.note ? { economicNote: econ.note } : {}),
     daysAhead,
   }));
 });

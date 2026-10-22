@@ -13,6 +13,7 @@
 const { Router } = require("express");
 const cache      = require("../cache");
 const finnhub    = require("../providers/finnhub");
+const econCalendar = require("../markets/calendar");
 const reportStore = require("../research/reportStore");
 const { generate } = require("../ideas/generator");
 const store      = require("../ideas/store");
@@ -37,8 +38,15 @@ async function currentHeadlines() {
   return fresh;
 }
 
+/**
+ * The upcoming releases the generator may cite as C1..: the stored FRED calendar (D-31). Never fetches; [] when none is stored.
+ * A calendar last refreshed more than 3 days ago is still returned (dates rarely move), but every event is tagged
+ * `calendarStale` so the prompt, the citation and the card say so instead of presenting an old date as current.
+ */
 function currentCalendar() {
-  return cache.get("news:economic-calendar") || [];
+  const cal = econCalendar.getCalendar({ daysAhead: 45 });
+  if (!cal.available) return [];
+  return cal.stale ? cal.events.map(e => ({ ...e, calendarStale: true })) : cal.events;
 }
 
 router.get("/", (req, res) => {

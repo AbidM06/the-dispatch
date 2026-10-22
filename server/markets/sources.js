@@ -125,7 +125,11 @@ function parseFredTimestamp(s) {
   return isNaN(d) ? null : d.toISOString();
 }
 
-async function fredObservations(series, { start, limit, sort = "asc" } = {}) {
+/**
+ * `realtime` (YYYY-MM-DD) asks FRED for the data AS IT WAS KNOWN on that day (its real-time vintage): figures
+ * published after it are absent and later revisions are not applied.
+ */
+async function fredObservations(series, { start, limit, sort = "asc", realtime } = {}) {
   const url = new URL(`${FRED}/series/observations`);
   url.searchParams.set("series_id", series);
   url.searchParams.set("api_key", fredKey());
@@ -133,6 +137,7 @@ async function fredObservations(series, { start, limit, sort = "asc" } = {}) {
   url.searchParams.set("sort_order", sort);
   if (start) url.searchParams.set("observation_start", start);
   if (limit) url.searchParams.set("limit", String(limit));
+  if (realtime) { url.searchParams.set("realtime_start", realtime); url.searchParams.set("realtime_end", realtime); }
   const json = await getJson(url.toString());
   return (json.observations || [])
     .filter(o => o.value !== "." && o.value !== "")
@@ -189,6 +194,35 @@ async function fredReleaseDates(series) {
   const d = await getJson(u.toString());
   const dates = (d.release_dates || []).map(x => x.date).filter(Boolean).sort();
   return { releaseId: release.id, name: release.name, link: release.link || `https://fred.stlouisfed.org/release?rid=${release.id}`, dates };
+}
+
+/** Every FRED release (id + name), so a release can be found by its NAME rather than a remembered id. */
+async function fredReleases() {
+  const u = new URL(`${FRED}/releases`);
+  u.searchParams.set("api_key", fredKey());
+  u.searchParams.set("file_type", "json");
+  u.searchParams.set("limit", "1000");
+  const d = await getJson(u.toString());
+  return (d.releases || []).filter(r => r && r.id != null && r.name);
+}
+
+/**
+ * fredUpcomingReleaseDates - the dates FRED lists for a release from `from` (YYYY-MM-DD) onward, INCLUDING dates
+ * whose data are not out yet (that is what makes them upcoming). Unlike fredReleaseDates, which keeps only dates
+ * with data, so each past print can be paired with the day it was published.
+ */
+async function fredUpcomingReleaseDates(releaseId, from) {
+  const u = new URL(`${FRED}/release/dates`);
+  u.searchParams.set("release_id", releaseId);
+  u.searchParams.set("api_key", fredKey());
+  u.searchParams.set("file_type", "json");
+  u.searchParams.set("realtime_start", from);
+  u.searchParams.set("realtime_end", "9999-12-31");
+  u.searchParams.set("include_release_dates_with_no_data", "true");
+  u.searchParams.set("sort_order", "asc");
+  u.searchParams.set("limit", "1000");
+  const d = await getJson(u.toString());
+  return (d.release_dates || []).map(x => x.date).filter(x => x && x >= from).sort();
 }
 
 async function fredQuote(src) {
@@ -360,6 +394,6 @@ const HISTORY = { yahoo: yahooHistory, fred: fredHistory, polymarket: polymarket
 module.exports = {
   QUOTE, HISTORY, polymarketTop,
   // exported for tests
-  FRED_HELPERS: { fredObservations, fredSeriesInfo, fredReleaseDates, applyTransform },
+  FRED_HELPERS: { fredObservations, fredSeriesInfo, fredReleaseDates, fredReleases, fredUpcomingReleaseDates, applyTransform },
   _internal: { parseFredTimestamp, applyTransform, withChange, yahooQuote, fredQuote, frankfurterQuote, finnhubQuote, polymarketHistory, yahooHistory },
 };

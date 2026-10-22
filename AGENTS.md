@@ -138,7 +138,7 @@ server/providers/
   anthropic.js             fetchAllAnalysis(), fetchTickerExplain(), callClaude(), fetchResearchReport()
   finnhub.js               News, earnings calendar, economic calendar, sentiment
   budget.js                USD caps over the spend ledger + auto API-fallback state machine
-server/markets/            instruments.js · sources.js · service.js — free Markets data + provenance
+server/markets/            instruments.js · sources.js · service.js · views.js · calendar.js — free Markets data + provenance
 server/ideas/              generator.js · store.js — on-demand idea cards (every one logged to the Journal)
 server/journal/            store.js · migrate.js — append-only trade Journal (stage 1)
 server/umushroom/          source.js — fetch + validate + label the public UMushroom repo files (fails closed; see D-23)
@@ -206,8 +206,31 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   figures that were fetched, and it is `null` when none applies AND a series is missing — so it never
   says "no stress signals" on partial data.
 - No snapshot (or none of the five series) → 503 `available: false` + reason; the Desk tab shows it.
-- `nextEvent` is `{available: false, reason}` until the FRED release-dates calendar exists. There is no
-  "actionable setup" and no holdings talk. `tests/brief.test.js` guards all of this.
+- `nextEvent` is the soonest entry in the stored FRED economic calendar (D-31, below): `{available: true, date, name,
+  previous[], source, stale, missing[]}`, or `{available: false, reason}` — no calendar stored, or nothing in the next 90 days.
+  There is no "actionable setup" and no holdings talk. `tests/brief.test.js` guards all of this.
+
+## Economic calendar (`server/markets/calendar.js`) — D-31
+- **Free FRED data, no AI, no typed-in dates (D-02).** Each release is found by its **name** in FRED's release list
+  (`Consumer Price Index`, `Employment Situation`, `Personal Income and Outlays`, `Gross Domestic Product`),
+  then `release/dates` is asked for dates from today onward **including dates with no data yet** (that is what makes them
+  upcoming). A release FRED does not have is listed in `missing` and said on screen ("not listed by FRED: ...") — never filled in.
+  **FOMC decisions are deliberately NOT mapped:** FRED's `FOMC Press Release` is daily policy-rate data whose calendar lists ordinary
+  days, so it would label them "FOMC decision" (Codex review of PR #11); it is always reported as missing and never requested. Revisit
+  only with a decision-specific schedule. FRED has no release times or consensus, so none are shown.
+- The SOONEST date of each event carries the **previous reading** (real FRED figures with their period, e.g.
+  `CPI inflation (YoY) 2.9% (2026-09)`); later dates carry none (they will follow newer data). It is read **as FRED knew it the
+  day before that release** (`fredObservations(..., { realtime })`, i.e. `realtime_start=realtime_end=` that day, or today if the
+  release is further off), so a refresh that runs after the release has landed (the afternoon refresh on release day) still shows
+  the print BEFORE it, never the one just published.
+- **Refreshed with every Markets refresh** (`jobs/refreshMarkets.js`, free) and stored in `data/economic_calendar.json`
+  (gitignored; memory-only in tests unless `CALENDAR_PATH`). Page loads only READ it (D-09). A failed refresh keeps the last
+  good copy; a copy older than 3 days is shown flagged stale. Needs `FRED_API_KEY`.
+- Read by `GET /api/news/calendar` (`economic`, `economicSource: live|stale|unavailable`, `economicMissing`, `economicNote`),
+  `GET /api/news` (`economicCalendar`), the Daily Brief's `nextEvent` and **idea generation** (`routes/ideas.js::currentCalendar()` → the
+  `C1..` catalyst citations; publisher "FRED release calendar", link = the release page; a calendar older than 3 days is tagged STALE in the
+  prompt line, on the citation and — if cited — as a card warning; the old `news:economic-calendar` cache key is gone). Finnhub's economic calendar (paid, always empty)
+  is no longer called; `finnhub.getEconomicCalendar` stays in the provider, unused. The Finnhub EARNINGS calendar is unchanged.
 
 ## Trade idea cards (`server/ideas/`, `routes/ideas.js`)
 - On-demand only: `POST /api/ideas/news {headlineId?}`, `POST /api/ideas/research {reportId|type}`;

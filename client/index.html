@@ -3461,8 +3461,19 @@ function App() {
                   style:{ marginTop:14,padding:'10px 12px',background:'rgba(200,151,42,0.06)',border:'1px solid rgba(200,151,42,0.2)' },
                 },
                   React.createElement('div', { style:{ fontFamily:'var(--mono)',fontSize:8.5,letterSpacing:'0.15em',color:'#7d5a00',marginBottom:5 } }, '⏰ NEXT EVENT'),
-                  React.createElement('div', { style:{ fontSize:11.5,color:'var(--steel)',lineHeight:1.55 } },
-                    'Unavailable — ' + (b?.nextEvent?.reason || 'no calendar source.'))
+                  b?.nextEvent?.available
+                    ? React.createElement(React.Fragment, null,
+                        React.createElement('div', { style:{ display:'flex',gap:12,alignItems:'baseline',flexWrap:'wrap' } },
+                          React.createElement('span', { style:{ fontFamily:'var(--mono)',color:'var(--blue)',fontSize:11,fontWeight:500 } }, b.nextEvent.date),
+                          React.createElement('span', { style:{ fontWeight:500,fontSize:12 } }, b.nextEvent.name)),
+                        (b.nextEvent.previous || []).length > 0 && React.createElement('div', { style:{ fontSize:11,color:'var(--steel)',lineHeight:1.55,marginTop:4 } },
+                          'Last reading: ' + b.nextEvent.previous.map(function(p) { return p.text; }).join(' · ')),
+                        React.createElement('div', { style:{ fontFamily:'var(--mono)',fontSize:9,color:'var(--steel)',letterSpacing:'0.06em',marginTop:6,lineHeight:1.6 } },
+                          'FRED release calendar · date only (release time not published)' +
+                          (b.nextEvent.stale ? ' · ⚠ calendar last refreshed over 3 days ago' : '') +
+                          ((b.nextEvent.missing || []).length ? ' · not listed by FRED: ' + b.nextEvent.missing.join(', ') : '')))
+                    : React.createElement('div', { style:{ fontSize:11.5,color:'var(--steel)',lineHeight:1.55 } },
+                        'Unavailable — ' + (b?.nextEvent?.reason || 'no calendar source.'))
                 )
               )
         )
@@ -6799,13 +6810,18 @@ function App() {
                   ? (news.calendar.economicNote || 'Economic calendar unavailable.')
                   : 'No upcoming events')
             : ecoEvents.slice(0, 10).map(function(ev, i) {
-                var impCls = (ev.importance||'').toUpperCase() === 'HIGH' ? 'imp-high-news' : (ev.importance||'').toUpperCase() === 'MEDIUM' ? 'imp-med-news' : 'imp-low-news';
-                return React.createElement('div', { key: i, className:'cal-event-news' },
+                // FRED calendar entries carry no importance rating, so none is shown (the old badge defaulted to LOW).
+                var prevText = (ev.previous || []).map(function(p) { return p.text; }).join(' · ');
+                return React.createElement('div', { key: i, className:'cal-event-news', style:{ flexWrap:'wrap' } },
                   React.createElement('span', { className:'cal-date-news' }, ev.date || ''),
                   React.createElement('span', { className:'cal-name-news' }, ev.event || ev.name || ''),
-                  React.createElement('span', { className: impCls }, (ev.importance||'LOW').toUpperCase())
+                  prevText && React.createElement('span', { style:{ flexBasis:'100%',fontSize:10.5,color:'var(--steel)',paddingLeft:2 } }, 'Last reading: ' + prevText)
                 );
-              })
+              }),
+          ecoEvents.length > 0 && React.createElement('div', { style:{ color:'var(--steel)',fontSize:9.5,fontFamily:'var(--mono)',letterSpacing:'0.05em',paddingTop:8,lineHeight:1.6 } },
+            'FRED release calendar · dates only' +
+            (news.calendar.economicSource === 'stale' ? ' · ⚠ ' + (news.calendar.economicNote || 'calendar is stale') : '') +
+            ((news.calendar.economicMissing || []).length ? ' · not listed by FRED: ' + news.calendar.economicMissing.join(', ') : ''))
         )
       ),
 
