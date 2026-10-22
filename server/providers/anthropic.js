@@ -22,6 +22,10 @@ const { callOpenAI } = require("./openai");
 const models       = require("./models");
 const MODEL        = models.HAIKU;          // Haiku — events, risk, econ, explains (never a stand-in for Sonnet, D-19)
 const MODEL_SONNET = models.sonnetModel();  // SONNET_MODEL (default Sonnet 5) — macro, commodities, equity, thematic
+// Output ceiling (max_tokens) per research draft. Sonnet 5.5 thinks before it writes and thinking counts
+// toward this limit, so the old 4-8k caps were sometimes used up with no answer left (macro, Oct 2026).
+// A ceiling, not a charge: only tokens actually produced are billed ($10 per million on Sonnet).
+const REPORT_MAX_TOKENS = { fx: 8000, rates: 8000, thematic: 10000, equity: 16000, commodities: 12000, sector: 12000, macro: 16000 };
 
 // Newer models take the dynamic-filtering web_search tool; Haiku 4.5 does not and
 // must keep the basic variant (so does Haiku 5.5 — dynamic filtering is unconfirmed for it). Sending the wrong variant for a model is a 400.
@@ -1017,8 +1021,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
-    if (specOnly) return { reportType: "fx", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 4000);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
+    if (specOnly) return { reportType: "fx", system, prompt, maxTokens: REPORT_MAX_TOKENS.fx, tier: "haiku" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.fx);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.pairViews)) {
       throw new Error("fetchResearchReport[fx]: could not parse JSON response");
@@ -1068,8 +1072,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 MS language: "We believe". Never fabricate client conversations, proprietary surveys, or channel checks. Return pure JSON only.`;
 
-    if (specOnly) return { reportType: "rates", system, prompt, maxTokens: 4000, tier: "haiku" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 4000);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
+    if (specOnly) return { reportType: "rates", system, prompt, maxTokens: REPORT_MAX_TOKENS.rates, tier: "haiku" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.rates);   // D-19: Sonnet, never Haiku (OpenAI only if its key is set)
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.thePuzzle) {
       throw new Error("fetchResearchReport[rates]: could not parse JSON response");
@@ -1121,8 +1125,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Use MS language: "We believe", "Key Theme: X". Return pure JSON only — no extra text outside the JSON object.`;
 
-    if (specOnly) return { reportType: "thematic", system, prompt, maxTokens: 5000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 5000);
+    if (specOnly) return { reportType: "thematic", system, prompt, maxTokens: REPORT_MAX_TOKENS.thematic, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.thematic);
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.keyThemes) || !Array.isArray(data.predictions)) {
       throw new Error("fetchResearchReport[thematic]: could not parse JSON response");
@@ -1242,8 +1246,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Include at least 4 entries in "risks" and cover every channel that the verified data flags as elevated. Populate "estimates" with every forecast figure you produced yourself — that array is what separates your projections from measured data, so an empty array on a report full of forecasts is wrong. Use GS language: "We forecast", "We estimate", "We expect". Return pure JSON only.`;
 
-    if (specOnly) return { reportType: "equity", system, prompt, maxTokens: 8000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
+    if (specOnly) return { reportType: "equity", system, prompt, maxTokens: REPORT_MAX_TOKENS.equity, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.equity);
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !data.epsOutlook) {
       throw new Error("fetchResearchReport[equity]: could not parse JSON response");
@@ -1332,8 +1336,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Write at graduate level. Every price, volume, and percentage must be real and sourced from your web search. Use web_search to find today's actual spot prices for the live_market_data array — search CME, Bloomberg, or Reuters for current Brent, WTI, and Henry Hub prices as of ${today}. The EIA historical data in context is for trend reference only (it lags ~1 week). Populate live_market_data with today's actual market prices. Return pure JSON only.`;
 
-    if (specOnly) return { reportType: "commodities", system, prompt, maxTokens: 6000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 6000);
+    if (specOnly) return { reportType: "commodities", system, prompt, maxTokens: REPORT_MAX_TOKENS.commodities, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.commodities);
     const data = extractJSON(raw, "object", { preserveCitations: true });
     if (!data || !data.title || !Array.isArray(data.keyTakeaways)) {
       throw new Error("fetchResearchReport[commodities]: could not parse JSON response");
@@ -1408,8 +1412,8 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
 
 Probabilities must sum to ~100%. Every number must come from the verified block, your web search, or be declared as your own estimate. Return pure JSON only.`;
 
-    if (specOnly) return { reportType: "sector", system, prompt, maxTokens: 6000, tier: "fallback" };
-    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 6000);
+    if (specOnly) return { reportType: "sector", system, prompt, maxTokens: REPORT_MAX_TOKENS.sector, tier: "fallback" };
+    const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.sector);
     return finalizeResearchReport("sector", raw, sources, grounded);
   }
 
@@ -1514,8 +1518,8 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 
 Write at graduate level. Every number must be specific and sourced. Use language: "We estimate", "We see incremental risks", "Effects could be larger if", "Under our baseline". Keep each string value under 200 words. Return pure JSON only — no markdown, no preamble, no trailing text.`;
 
-  if (specOnly) return { reportType: "macro", system, prompt, maxTokens: 8000, tier: "fallback" };
-  const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, 8000);
+  if (specOnly) return { reportType: "macro", system, prompt, maxTokens: REPORT_MAX_TOKENS.macro, tier: "fallback" };
+  const { text: raw, sources, grounded } = await callWithFallbackSourced(system, prompt, REPORT_MAX_TOKENS.macro);
   const data = extractJSON(raw, "object", { preserveCitations: true });
 
   if (!data || !data.title || !data.scenarios || !Array.isArray(data.abstract)) {
@@ -1534,6 +1538,7 @@ Write at graduate level. Every number must be specific and sourced. Use language
 }
 
 module.exports = {
+  REPORT_MAX_TOKENS,
   extractJSON,
   buildResearchSpec,
   finalizeResearchReport,

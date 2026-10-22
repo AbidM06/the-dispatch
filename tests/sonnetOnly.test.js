@@ -61,7 +61,8 @@ describe("no silent Haiku stand-in for Sonnet", () => {
   test("FX and Rates drafts use the same Sonnet → (OpenAI if keyed) path as every other report", () => {
     const src = require("fs").readFileSync(require("path").join(__dirname, "../server/providers/anthropic.js"), "utf8");
     // Codex review on #10: they used to call Sonnet directly, skipping the keyed OpenAI tier.
-    expect(src.match(/callWithFallbackSourced\(system, prompt, 4000\)/g)).toHaveLength(2);
+    expect(src).toMatch(/callWithFallbackSourced\(system, prompt, REPORT_MAX_TOKENS\.fx\)/);
+    expect(src).toMatch(/callWithFallbackSourced\(system, prompt, REPORT_MAX_TOKENS\.rates\)/);
     expect(src).not.toMatch(/await callClaudeSourced\(system, prompt/);
     expect(src).not.toMatch(/Tier 3: Claude Haiku/);
   });
@@ -159,5 +160,13 @@ describe("reviewers retry once on a temporary failure (owner, D-19)", () => {
     expect(isTransient(err(402))).toBe(false);
     expect(isTransient(err(503))).toBe(true);
     expect(isTransient(new Error("request timed out"))).toBe(true);
+  });
+});
+
+describe("research draft output ceilings (max_tokens)", () => {
+  test("every report type has a ceiling and the spec uses it", () => {
+    const { REPORT_MAX_TOKENS } = require("../server/providers/anthropic");
+    expect(Object.keys(REPORT_MAX_TOKENS).sort()).toEqual(["commodities", "equity", "fx", "macro", "rates", "sector", "thematic"]);
+    expect(REPORT_MAX_TOKENS.macro).toBe(16000);
   });
 });
