@@ -183,12 +183,55 @@ describe("GET /api/brief", () => {
     expect(row.staleSince).toBe("2026-10-15T07:45:00.000Z");
   });
 
-  test("nextEvent is explicitly unavailable — no typed-in calendar", async () => {
+  test("nextEvent is explicitly unavailable when no calendar is stored — no typed-in calendar", async () => {
     setSnapshot(FULL());
+    jest.spyOn(require("../server/markets/calendar"), "getCalendar").mockReturnValue({ available: false, reason: "Economic calendar unavailable - not fetched yet." });
     const { nextEvent } = (await request(app).get("/api/brief")).body.data;
     expect(nextEvent.available).toBe(false);
     expect(nextEvent.reason).toMatch(/calendar/i);
     expect(nextEvent.date).toBeUndefined();
+  });
+
+  describe("nextEvent comes from the stored FRED calendar (D-31)", () => {
+    const EV = (extra = {}) => ({
+      key: "cpi", date: "2026-10-24", event: "CPI (consumer prices)", release: "Consumer Price Index",
+      previous: [{ label: "CPI inflation (YoY)", value: 2.9, period: "2026-09", text: "CPI inflation (YoY) 2.9% (2026-09)", sourceUrl: "https://fred.stlouisfed.org/series/CPIAUCSL" }],
+      source: "FRED", sourceUrl: "https://www.bls.gov/cpi/", ...extra,
+    });
+    const stored = (over = {}) => jest.spyOn(require("../server/markets/calendar"), "getCalendar").mockReturnValue({
+      available: true, source: "FRED", generatedAt: "2026-10-21T07:45:00.000Z", stale: false,
+      events: [EV(), EV({ key: "gdp", date: "2026-10-29", event: "GDP", previous: [] })],
+      missing: [{ key: "fomc", label: "FOMC decision", reason: "FRED has no release with this name" }], ...over,
+    });
+
+    test("the soonest event, with its previous reading, source, and what FRED does not list", async () => {
+      setSnapshot(FULL()); stored();
+      const { nextEvent } = (await request(app).get("/api/brief")).body.data;
+      expect(nextEvent).toMatchObject({
+        available: true, date: "2026-10-24", name: "CPI (consumer prices)", source: "FRED", stale: false,
+        missing: ["FOMC decision"],
+      });
+      expect(nextEvent.previous[0].text).toBe("CPI inflation (YoY) 2.9% (2026-09)");
+    });
+
+    test("a stale calendar is flagged", async () => {
+      setSnapshot(FULL()); stored({ stale: true });
+      expect((await request(app).get("/api/brief")).body.data.nextEvent.stale).toBe(true);
+    });
+
+    test("a stored calendar with nothing in the next 90 days is 'unavailable' with the reason, not an old date", async () => {
+      setSnapshot(FULL()); stored({ events: [] });
+      const { nextEvent } = (await request(app).get("/api/brief")).body.data;
+      expect(nextEvent.available).toBe(false);
+      expect(nextEvent.reason).toMatch(/no release in the next 90 days/);
+    });
+
+    test("an available next event matches the response schema", async () => {
+      setSnapshot(FULL()); stored();
+      const { body } = await request(app).get("/api/brief");
+      const { schemas, validate } = require("../server/schemas");
+      expect(validate(schemas.BriefResponse, body).ok).toBe(true);
+    });
   });
 
   test("the response matches its schema", async () => {

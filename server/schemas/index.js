@@ -171,10 +171,20 @@ const BriefPayload = z.object({
   whatChanged:   z.array(WhatChangedItem),
   missing:       z.array(z.string()),
   whyItMatters:  z.string().nullable(),
-  nextEvent: z.object({
-    available: z.literal(false),
-    reason:    z.string(),
-  }),
+  nextEvent: z.union([
+    z.object({ available: z.literal(false), reason: z.string() }),
+    z.object({
+      available: z.literal(true),
+      date:      z.string(),
+      name:      z.string(),
+      release:   z.string(),
+      previous:  z.array(z.object({ label: z.string(), text: z.string() }).passthrough()),
+      source:    z.string(),
+      sourceUrl: z.string(),
+      stale:     z.boolean(),
+      missing:   z.array(z.string()),
+    }),
+  ]),
 });
 
 const BriefResponse = Envelope.extend({ data: BriefPayload });

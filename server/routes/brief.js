@@ -8,7 +8,8 @@
  * and previous value. There are no seeds, no hardcoded baselines and no
  * hand-typed calendar (D-02): a figure Markets does not have is reported as
  * unavailable, and with no snapshot at all the route returns 503
- * `available: false` + the reason.
+ * `available: false` + the reason. The next event is the soonest entry in the
+ * stored FRED economic calendar (markets/calendar.js, D-31) — read, never fetched.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -16,6 +17,7 @@
 
 const { Router } = require("express");
 const markets    = require("../markets/service");
+const calendar   = require("../markets/calendar");
 
 const router = Router();
 
@@ -28,10 +30,18 @@ const SERIES = [
   { key: "t10y2y",    id: "T10Y2Y", series: "T10Y2Y", label: "Yield Curve (10-2Y)" },
 ];
 
-const NEXT_EVENT_UNAVAILABLE = {
-  available: false,
-  reason: "No verified economic-calendar source yet (planned: FRED release dates).",
-};
+/** The soonest event in the stored FRED calendar (D-31), or an explicit "unavailable" with the reason. Never fetches. */
+function nextEvent() {
+  const cal = calendar.getCalendar({ daysAhead: 90 });
+  if (!cal.available) return { available: false, reason: cal.reason };
+  const ev = cal.events[0];
+  if (!ev) return { available: false, reason: "The stored calendar lists no release in the next 90 days." };
+  return {
+    available: true, date: ev.date, name: ev.event, release: ev.release, previous: ev.previous || [],
+    source: ev.source, sourceUrl: ev.sourceUrl, stale: cal.stale,
+    missing: (cal.missing || []).map(m => m.label),
+  };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -167,7 +177,7 @@ router.get("/", (req, res) => {
       whatChanged:     rows,
       missing:         rows.filter(r => !r.available).map(r => r.series),
       whyItMatters:    buildWhyItMatters(rates, hyRow.available ? hyRow.deltaBps : null),
-      nextEvent:       NEXT_EVENT_UNAVAILABLE,
+      nextEvent:       nextEvent(),
     },
   });
 });
