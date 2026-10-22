@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/economic-calendar`
+**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/report-charts`
 
 ---
 
@@ -53,8 +53,9 @@ Working and merged (PR #4, 2026-09-28):
 | Haiku 4.5 → Haiku 5.5 for every Haiku job incl. research claim extraction (D-26) | Claude | `claude/haiku-5-5` | Merged (PR #4, 2026-10-20) |
 | More interactive charts (D-28) — PR 1 of 4: Markets compare/overlay + 1Y/5Y ranges | Claude | `claude/market-compare-charts` | Merged (PR #6, 2026-10-20) |
 | More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | Merged (PR #8, 2026-10-21) |
-| More interactive charts (D-28) — PR 3 of 4: yield curve (latest + 1w/1m/1y) and macro views with release dates | Claude | `claude/curve-macro-charts` | PR open (draft); needs Codex review. Then PR 4 (charts in research reports) |
-| Economic calendar (D-31): FRED release dates for CPI/jobs/PCE/GDP (FOMC shown as 'not listed by FRED'), previous readings, Desk 'Next event' + News calendar | Claude | `claude/economic-calendar` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. **Not verified against live FRED** (sandbox cannot reach it): after merging, press Refresh on the Markets tab and check the News tab calendar fills in |
+| More interactive charts (D-28) — PR 3 of 4: yield curve (latest + 1w/1m/1y) and macro views with release dates | Claude | `claude/curve-macro-charts` | Merged (PR #10, 2026-10-21) |
+| More interactive charts (D-28) — PR 4 of 4: live market charts inside research reports | Claude | `claude/report-charts` | PR #12 open (draft), Codex approved at f845b95; main (PR #11) merged into the branch to clear conflicts. Last of the D-28 plan |
+| Economic calendar (D-31): FRED release dates for CPI/jobs/PCE/GDP (FOMC shown as 'not listed by FRED'), previous readings, Desk 'Next event' + News calendar | Claude | `claude/economic-calendar` | Merged (PR #11, 2026-10-22), Codex approved; owner to `git pull` + Mac restart. **Not verified against live FRED** (sandbox cannot reach it): after merging, press Refresh on the Markets tab and check the News tab calendar fills in |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
 ## 3. Next up (agreed with the owner, not started)
@@ -155,6 +156,14 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-21 — Claude (live charts in research reports, PR 4 of 4)
+- Owner chose: every report type; a fixed chart set per type chosen in code; exhibits inside the report; goals = check the AI's claims, polish, interview prep; live data with a marker at the report date; plan approved as proposed.
+- New `server/research/exhibits.js` (the fixed sets); `attachQA` adds `exhibits` to every report payload at read time (old reports included); verified rows now carry `key`. Client: `RpExhibits` between the policy proxy and the report body, reusing `CompareChart` / `MarketChart` / `CurvePanel` / `MacroCard`; the first two gained a `reportDate` marker (`mkReportMarker`, none outside the window).
+- Beside each chart the report's own verified figure for the same series, when it has one ("In this report's verified data: …") — so text can be checked against the picture. No automatic text-to-chart matching (a wrong verdict is worse than none).
+- Two things differ from the proposal: no sector ETFs exist in Markets (equity and sector share one set) and there is no 2Y instrument (rates shows the 2s10s history instead of 10Y vs 2Y).
+- Found by test: specs shared arrays between requests (fixed). Found in the browser: a 1-year chart was titled "last 6 months" (fixed). 8 new tests; checked in headless Chromium, day and night, all seven report types, no JS errors, against the real server code with mocked upstream data. Live Yahoo/FRED unverified from the cloud session.
+- Next: Codex review, owner merge, `git pull`, restart. That completes the D-28 chart plan.
 
 ### 2026-10-21 — Claude (economic calendar, D-31)
 - Owner said 'begin from biggest priority'; the economic calendar was the biggest remaining gap ('Next event' and the News calendar both said unavailable). Questioned first; owner chose: data releases with FOMC if FRED has it; shown on both the Desk 'Next event' and the News calendar; entry = date + name + previous reading; dates only (no release time).

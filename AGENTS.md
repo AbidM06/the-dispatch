@@ -526,6 +526,7 @@ redTeamLog.js          Append-only log of red-team warnings (data/redteam_log.js
 claimLedger.js         Claim normalization, audit merge, hard-fail detection (CLM-xxx ids)
 sourceRegistry.js      Source validation/dedup/tier inference (SRC-xxx ids) — never invents URLs
 qualityGate.js         15-dimension weighted score + deterministic hard fails (prob sums, unsupported claims, dangling sources)
+exhibits.js            FIXED set of live market charts per report type (D-28, PR 4) — code-chosen, never the model's
 reportStore.js         Versioned report persistence (data/research_reports/, gitignored; memory-only in tests)
 interrogator.js        Truth-over-agreement chat pinned to a reportId; corrections append with audit trail
 agents/                leadAnalyst (draft reuses fetchResearchReport + extraction + revision), dataAuditor,
@@ -581,6 +582,7 @@ QA strip (score/status/claims/sources) + cost receipt (`RpCostReceipt`, `.rp-cos
 cited sources (`Rp*`) + source registry viewer + interrogation chat (`.interro-*`, `.qa-*`, `.claim-*`, `.src-*` CSS).
 Top bar shows today's AI spend (`.ai-spend-chip`) from `/api/health` budget.
 Progress polling replaces time-guessed phase messages when the orchestrator reports a real stage.
+**Live market charts in reports (D-28, PR 4; `RpExhibits`, `server/research/exhibits.js`):** every report payload carries `exhibits` — a fixed list of chart specs for its type, added at read time by `attachQA` so reports written before this change get them too. Specs only; the client draws them with the existing `CompareChart` / `MarketChart` / `CurvePanel` / `MacroCard` from the free Markets/FRED endpoints (cost $0, no AI; the model never picks a chart, so it cannot plot something invented). Charts are LIVE (latest data) with a ▼ marker on the report's `generatedAt` day (none if that day is outside the window or more than 5 days older than the last bar). On a macro chart the marker sits on the latest print PUBLISHED on or before the report day (`mcReportPoint`; macro points sit on their period end, not their release day), with a caption naming it; none when no print has a publication date. The yield-curve exhibit has no time axis, so it carries no marker and says so (the report's own 2Y/10Y/2s10s sit beneath it). Beside each chart, the report's own verified figure for the same series: verified rows carry `key` (macroContext fact key) and each spec lists `factKeys`; an older report whose rows lack keys just shows no such line. Sets: rates = curve + 2s10s; fx = GBPUSD/EURUSD/USDJPY rebased + DXY; equity and sector = SPX vs UKX rebased + US10Y + WTI; macro = CPI + payrolls (beside the existing rates chart); thematic = Gold/WTI/DXY rebased; commodities = WTI − Brent spread (beside the existing EIA chart). `tests/reportExhibits.test.js` guards that every exhibit is drawable.
 
 ## Scheduled refresh
 The Markets refresh runs **inside the server** (`jobs/marketsScheduler.js`), weekdays 07:45
