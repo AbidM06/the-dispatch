@@ -100,7 +100,7 @@ ${(chairNotes || "none").slice(0, 3000)}
 
 Return the FULL corrected report JSON with the same keys as the original. Fix probability sums, remove or soften unsupported claims, disclose data staleness explicitly in the relevant text, and resolve contradictions. Do not add new unsupported claims.`;
 
-  const raw  = await callAgent("lead", system, user, { maxTokens: 8000, usage });
+  const raw  = await callAgent("lead", system, user, { maxTokens: 16000, usage });
   const data = anthropic.extractJSON(raw, "object");
   if (!data || !data.title) throw new Error("leadAnalyst.revise: could not parse revised report");
   return data;

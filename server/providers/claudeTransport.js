@@ -60,7 +60,7 @@ async function sendSync(body, label) {
           },
           body: JSON.stringify(body),
         },
-        300_000  // web_search + large reports can take 2-3 min
+        body.max_tokens > 8000 ? 600_000 : 300_000  // web_search + large reports can take 2-3 min; a 16k ceiling can run longer
       );
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));

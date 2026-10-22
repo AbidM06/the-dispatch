@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-21 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/report-charts`
+**Last updated:** 2026-10-22 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/confident-hamilton-o9ugju`
 
 ---
 
@@ -55,6 +55,7 @@ Working and merged (PR #4, 2026-09-28):
 | More interactive charts (D-28) — PR 2 of 4: Journal idea price chart (entry zone, target, stop) | Claude | `claude/journal-idea-chart` | Merged (PR #8, 2026-10-21) |
 | More interactive charts (D-28) — PR 3 of 4: yield curve (latest + 1w/1m/1y) and macro views with release dates | Claude | `claude/curve-macro-charts` | Merged (PR #10, 2026-10-21) |
 | More interactive charts (D-28) — PR 4 of 4: live market charts inside research reports | Claude | `claude/report-charts` | PR #12 open (draft), Codex approved at f845b95; main (PR #11) merged into the branch to clear conflicts. Last of the D-28 plan |
+| Research draft token limits doubled (D-32): macro failed with `max_tokens` after retries | Claude | `claude/confident-hamilton-o9ugju` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Owner to generate a macro report and read the cost receipt |
 | Economic calendar (D-31): FRED release dates for CPI/jobs/PCE/GDP (FOMC shown as 'not listed by FRED'), previous readings, Desk 'Next event' + News calendar | Claude | `claude/economic-calendar` | Merged (PR #11, 2026-10-22), Codex approved; owner to `git pull` + Mac restart. **Not verified against live FRED** (sandbox cannot reach it): after merging, press Refresh on the Markets tab and check the News tab calendar fills in |
 | Journal tab: UMUSHROOM view (D-23) — reads public `dispatch-umushroom` | Claude | `claude/umushroom-view` | PR #1 (draft) approved by Codex at d6d8d91, CI green; owner to merge AFTER dispatch-umushroom PR #1, then set `UMUSHROOM_RAW_BASE=.../dispatch-umushroom/main` in the Mac `.env` and restart. Open for owner: sterling-hedge headroom on the -18% cap; scheduled 07:45 morning-note task not yet set up |
 
@@ -156,6 +157,11 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-10-22 — Claude (research token limits, D-32)
+- Owner's macro report failed: Sonnet 5.5 spent its whole 8,000-token limit thinking and wrote no answer, after the automatic retries. Raised every draft ceiling ~2x (see D-32), the revision call to 16,000, and the request timeout to 10 min for limits over 8,000. Tests 603 passing.
+- Real token usage per report is NOT known from the cloud sandbox (the ledger `data/ai_spend.json` and report receipts live on the owner's Mac). Next: owner generates a macro report and reports the receipt (`meta.cost`); if output tokens stay well under the old limits, consider lowering again.
+- Not done: no thinking-effort setting (untested on Sonnet 5.5). Open if reports are still slow or costly.
 
 ### 2026-10-21 — Claude (live charts in research reports, PR 4 of 4)
 - Owner chose: every report type; a fixed chart set per type chosen in code; exhibits inside the report; goals = check the AI's claims, polish, interview prep; live data with a marker at the report date; plan approved as proposed.
