@@ -158,6 +158,10 @@ function adjudicate({ research, claims, sources, chairOutput }) {
     status = chairStatus === "APPROVED_WITH_CAVEATS" ? "APPROVED_WITH_CAVEATS" : "APPROVED";
   }
 
+  // A claim rewritten after failing the check and never re-checked (REVISED_UNCHECKED) is not a
+  // hard fail — otherwise no revision could ever clear — but the report cannot be a clean APPROVED.
+  if (status === "APPROVED" && ledger.revisedUncheckedClaims(claims).length > 0) status = "APPROVED_WITH_CAVEATS";
+
   return { status, score, hardFailures, minScore: threshold };
 }
 

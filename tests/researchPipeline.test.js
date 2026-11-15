@@ -175,6 +175,25 @@ beforeEach(() => {
 
 // ══════════════════════════════════════════════════════════════════════════════
 describe("claimLedger", () => {
+  test("REVISED_UNCHECKED is code-only: a model cannot assign it; summary counts it apart from verified", () => {
+    const claims = ledger.normalizeClaims([{ statement: "A", classification: "FACT", verificationStatus: "REVISED_UNCHECKED" }]);
+    expect(claims[0].verificationStatus).toBe("NOT_CHECKED");
+    ledger.applyAuditVerdicts(claims, [{ claimId: "CLM-001", verificationStatus: "REVISED_UNCHECKED" }]);
+    expect(claims[0].verificationStatus).toBe("NOT_CHECKED");
+    claims[0].verificationStatus = ledger.REVISED_UNCHECKED;
+    expect(ledger.summarizeClaims(claims)).toMatchObject({ total: 1, verified: 0, revisedUnchecked: 1 });
+    expect(ledger.revisedUncheckedNote(claims)).toMatch(/^1 claim was rewritten/);
+    expect(ledger.revisedUncheckedNote([...claims, { ...claims[0], claimId: "CLM-002" }])).toMatch(/^2 claims were rewritten/);
+  });
+
+  test("gate: REVISED_UNCHECKED is not a hard fail but caps a clean APPROVED", () => {
+    const dims = {}; for (const d of gate.SCORE_DIMENSIONS) dims[d] = 90;
+    const claims = [{ claimId: "CLM-001", statement: "x", classification: "FACT", materiality: "HIGH", sourceIds: [], confidence: 0.5, verificationStatus: "REVISED_UNCHECKED" }];
+    const v = gate.adjudicate({ research: {}, claims, sources: [], chairOutput: { status: "APPROVED", dimensionScores: dims } });
+    expect(v.hardFailures).toEqual([]);
+    expect(v.status).toBe("APPROVED_WITH_CAVEATS");
+  });
+
   test("normalizes, ids, clamps confidence, dedupes", () => {
     const claims = ledger.normalizeClaims([
       { statement: "A", classification: "FACT", materiality: "HIGH", confidence: 95 },
@@ -422,7 +441,59 @@ describe("orchestrator", () => {
     expect(roles.filter(r => r === "chair")).toHaveLength(2);  // score + re-score
     expect(report.institutionalQA.revisionRounds).toBe(1);
     expect(report.research.title).toBe("Revised Report");
-    expect(report.institutionalQA.status).toBe("APPROVED");
+    // The rewritten claim was never re-checked, so the report cannot be a clean APPROVED (WO-01).
+    expect(report.institutionalQA.status).toBe("APPROVED_WITH_CAVEATS");
+  });
+
+  describe("WO-01: a revision never upgrades a claim it did not re-check", () => {
+    const auditUnsupported = { ...AUDIT_OK, verdicts: [
+      { claimId: "CLM-001", verificationStatus: "UNSUPPORTED", notes: "cannot verify" },
+      { claimId: "CLM-002", verificationStatus: "FORECAST", confidence: 0.6 },
+      { claimId: "CLM-003", verificationStatus: "VERIFIED", confidence: 0.9 },
+    ] };
+
+    test("HIGH FACT audited UNSUPPORTED → revision → REVISED_UNCHECKED, not APPROVED, plain line shown", async () => {
+      mockAgents({ audit: auditUnsupported });
+      const report = await orch.runPipeline({ type: "macro" });
+      const qa = report.institutionalQA;
+      expect(qa.revisionRounds).toBe(1);
+      const c1 = report.claims.find(c => c.claimId === "CLM-001");
+      expect(c1.verificationStatus).toBe("REVISED_UNCHECKED");
+      expect(c1.notes).toMatch(/revision round 1/);
+      expect(c1.confidence).toBeLessThanOrEqual(0.5);
+      expect(qa.status).not.toBe("APPROVED");
+      expect(qa.status).toBe("APPROVED_WITH_CAVEATS");
+      expect(qa.revisedUnchecked).toEqual(["CLM-001"]);
+      expect(qa.revisedUncheckedNote).toBe("1 claim was rewritten after failing the check and was not re-checked");
+      expect(qa.claimSummary).toMatchObject({ revisedUnchecked: 1, verified: 1 });   // only CLM-003 counts as verified
+      expect(qa.claimSummary.byStatus.REVISED_UNCHECKED).toBe(1);
+      expect(qa.hardFailures.some(f => f.rule === "UNSUPPORTED_MATERIAL_CLAIM")).toBe(false);   // cleared, not re-triggered
+    });
+
+    test("no claim's status improves inside the revision loop", async () => {
+      mockAgents({ audit: auditUnsupported });
+      const report = await orch.runPipeline({ type: "macro" });
+      const byId = Object.fromEntries(report.claims.map(c => [c.claimId, c.verificationStatus]));
+      // Only the audit set statuses; the loop may only move UNSUPPORTED → REVISED_UNCHECKED.
+      expect(byId).toEqual({ "CLM-001": "REVISED_UNCHECKED", "CLM-002": "FORECAST", "CLM-003": "VERIFIED" });
+      expect(report.claims.filter(c => ["VERIFIED", "PARTIALLY_VERIFIED"].includes(c.verificationStatus)).map(c => c.claimId)).toEqual(["CLM-003"]);
+    });
+
+    test("client: the ledger reads 'REVISED, NOT RE-CHECKED' and the QA strip shows the line", () => {
+      const html = require("fs").readFileSync(require("path").join(__dirname, "../client/index.html"), "utf8");
+      expect(html).toMatch(/s === 'REVISED_UNCHECKED'\) return 'REVISED, NOT RE-CHECKED'/);
+      expect(html).toMatch(/claimStatusLabel\(c\.verificationStatus\)/);
+      const strip = html.slice(html.indexOf("function renderQAStrip"), html.indexOf("function renderQAPanel"));
+      expect(strip).toMatch(/qa\.revisedUncheckedNote/);
+    });
+
+    test("a clean run carries no revised-unchecked line", async () => {
+      mockAgents();
+      const report = await orch.runPipeline({ type: "macro" });
+      expect(report.institutionalQA.status).toBe("APPROVED");
+      expect(report.institutionalQA.revisedUnchecked).toEqual([]);
+      expect(report.institutionalQA.revisedUncheckedNote).toBeNull();
+    });
   });
 
   test("max validation rounds enforced (no infinite loop)", async () => {

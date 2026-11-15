@@ -5552,7 +5552,13 @@ function App() {
     if (s === 'VERIFIED') return 'var(--green)';
     if (s === 'PARTIALLY_VERIFIED' || s === 'ESTIMATE' || s === 'FORECAST' || s === 'OPINION') return 'var(--gold)';
     if (s === 'NOT_CHECKED') return 'var(--ink-low)';
+    if (s === 'REVISED_UNCHECKED') return 'var(--gold)';
     return 'var(--red)';
+  }
+  // REVISED_UNCHECKED (WO-01): rewritten after failing the check, and nothing has checked the rewrite.
+  function claimStatusLabel(s) {
+    if (s === 'REVISED_UNCHECKED') return 'REVISED, NOT RE-CHECKED';
+    return String(s).replace(/_/g, ' ');
   }
 
   function renderQAStrip(r) {
@@ -5576,6 +5582,7 @@ function App() {
       redteamChallenges > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--red)'} }, redteamChallenges + ' material challenge' + (redteamChallenges > 1 ? 's' : '')),
       qa.revisionRounds > 0 && React.createElement('span', { className:'qa-strip-stat' }, 'Revised ×' + qa.revisionRounds),
       Array.isArray(qa.unreviewed) && qa.unreviewed.length > 0 && React.createElement('span', { className:'qa-strip-stat', style:{color:'var(--gold)'} }, 'Partly unreviewed — ' + qa.unreviewed.join(' · ')),
+      qa.revisedUncheckedNote && React.createElement('span', { className:'qa-strip-stat qa-revised-unchecked', style:{color:'var(--gold)'} }, qa.revisedUncheckedNote),
       React.createElement('span', { style:{flex:1} }),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleQaPanel }, qaPanelOpen ? 'HIDE QA' : 'VIEW QA'),
       React.createElement('button', { className:'btn', style:{fontSize:9}, onClick: toggleSrcPanel }, srcPanelOpen ? 'HIDE SOURCES' : 'VIEW SOURCES')
@@ -5635,7 +5642,7 @@ function App() {
             React.createElement('div', { className:'claim-class' }, c.classification + (c.materiality === 'HIGH' ? ' ·H' : '')),
             React.createElement('div', { className:'claim-statement' }, c.statement,
               lowConf.includes(c.claimId) && React.createElement('span', { style:{color:'var(--gold)',marginLeft:6,fontFamily:'var(--mono)',fontSize:'clamp(8px,0.7vw,9px)'} }, 'LOW CONF')),
-            React.createElement('div', { className:'claim-status', style:{color:claimStatusColor(c.verificationStatus)} }, String(c.verificationStatus).replace(/_/g, ' '))
+            React.createElement('div', { className:'claim-status', style:{color:claimStatusColor(c.verificationStatus)} }, claimStatusLabel(c.verificationStatus))
           ))
         )
       ),

@@ -312,14 +312,16 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
       research = { ...revRes.out, reportType: research.reportType || type, generatedAt: research.generatedAt,
                    ...(draftUngrounded ? { grounded: false } : {}) };
 
-      // Reconcile ledger with the revised text: claims that hard-failed are
-      // marked as addressed-by-revision (audit trail kept in notes).
+      // Reconcile ledger with the revised text: a claim that hard-failed as UNSUPPORTED was
+      // rewritten, but NOTHING has checked the rewrite. It becomes REVISED_UNCHECKED — never
+      // VERIFIED or PARTIALLY_VERIFIED — and the report cannot be a clean APPROVED (WO-01, D-39).
+      // A real re-check of the revised statement is WO-04; no extra call is made here.
       for (const f of verdict.hardFailures) {
         for (const id of f.claimIds || []) {
           const c = claims.find(x => x.claimId === id);
           if (c && c.verificationStatus === "UNSUPPORTED") {
-            c.verificationStatus = "PARTIALLY_VERIFIED";
-            c.notes = `${c.notes ? c.notes + " | " : ""}Revised in round ${rounds} to address unsupported status`;
+            c.verificationStatus = ledger.REVISED_UNCHECKED;
+            c.notes = `${c.notes ? c.notes + " | " : ""}Rewritten in revision round ${rounds} after failing as UNSUPPORTED; not re-checked`;
             c.confidence = Math.min(c.confidence, 0.5);
           }
         }
@@ -356,9 +358,13 @@ async function runStages({ type, topic = "", ratesContext = "", macroCtx = null,
   const failedReviewers = [["Data auditor", auditRes], ["Red team", redRes], ["Cross-asset PM", pmRes]]
     .filter(([, r]) => r && r.ok === false && !r.skipped).map(([n, r]) => `${n}: ${r.error}`);
 
+  const revisedUnchecked = ledger.revisedUncheckedClaims(claims);
   const institutionalQA = qaRan ? {
-    status:        failedReviewers.length && verdict.status === "APPROVED" ? "APPROVED_WITH_CAVEATS" : verdict.status,
+    status:        (failedReviewers.length || revisedUnchecked.length) && verdict.status === "APPROVED" ? "APPROVED_WITH_CAVEATS" : verdict.status,
     unreviewed:    failedReviewers,
+    // Claims rewritten after failing the check, not re-checked since (WO-01). Empty = none.
+    revisedUnchecked: revisedUnchecked.map(c => c.claimId),
+    revisedUncheckedNote: ledger.revisedUncheckedNote(claims),
     score:         verdict.score,
     minScore:      verdict.minScore,
     hardFailures:  verdict.hardFailures,

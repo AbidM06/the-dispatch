@@ -14,7 +14,7 @@
  *   asOf: "YYYY-MM-DD" | null,
  *   verificationStatus: VERIFIED | PARTIALLY_VERIFIED | CONFLICTING_DATA |
  *                       STALE | UNSUPPORTED | ESTIMATE | FORECAST | OPINION |
- *                       NOT_CHECKED | CORRECTED,
+ *                       NOT_CHECKED | CORRECTED | REVISED_UNCHECKED,
  *   agentsAgreeing: [], agentsDisagreeing: [], notes: string
  * }
  * ─────────────────────────────────────────────────────────────────────────────
@@ -23,10 +23,16 @@
 
 const CLASSIFICATIONS = new Set(["FACT", "ESTIMATE", "FORECAST", "OPINION", "INFERENCE"]);
 const MATERIALITIES   = new Set(["HIGH", "MEDIUM", "LOW"]);
-const VERIFICATION_STATUSES = new Set([
+// Statuses a model (extraction or the data auditor) may assign.
+const MODEL_STATUSES = new Set([
   "VERIFIED", "PARTIALLY_VERIFIED", "CONFLICTING_DATA", "STALE",
   "UNSUPPORTED", "ESTIMATE", "FORECAST", "OPINION", "NOT_CHECKED", "CORRECTED",
 ]);
+// REVISED_UNCHECKED is set by CODE only (orchestrator revision loop, WO-01 / D-39): the claim
+// failed as UNSUPPORTED, the analyst rewrote the text, and nothing has checked the rewrite.
+// It is not a pass: the report can never be a clean APPROVED while one exists.
+const REVISED_UNCHECKED = "REVISED_UNCHECKED";
+const VERIFICATION_STATUSES = new Set([...MODEL_STATUSES, REVISED_UNCHECKED]);
 
 function pad3(n) { return String(n).padStart(3, "0"); }
 
@@ -61,7 +67,7 @@ function normalizeClaims(rawClaims) {
       sourceIds:          Array.isArray(raw.sourceIds) ? raw.sourceIds.filter(s => typeof s === "string") : [],
       confidence:         Math.round(confidence * 100) / 100,
       asOf:               typeof raw.asOf === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.asOf) ? raw.asOf : null,
-      verificationStatus: VERIFICATION_STATUSES.has(raw.verificationStatus) ? raw.verificationStatus : "NOT_CHECKED",
+      verificationStatus: MODEL_STATUSES.has(raw.verificationStatus) ? raw.verificationStatus : "NOT_CHECKED",
       agentsAgreeing:     Array.isArray(raw.agentsAgreeing) ? raw.agentsAgreeing : ["lead"],
       agentsDisagreeing:  Array.isArray(raw.agentsDisagreeing) ? raw.agentsDisagreeing : [],
       notes:              typeof raw.notes === "string" ? raw.notes : "",
@@ -82,7 +88,7 @@ function applyAuditVerdicts(claims, verdicts) {
     if (!v || typeof v !== "object") continue;
     const claim = byId.get(v.claimId);
     if (!claim) continue;
-    if (VERIFICATION_STATUSES.has(v.verificationStatus)) {
+    if (MODEL_STATUSES.has(v.verificationStatus)) {
       claim.verificationStatus = v.verificationStatus;
     }
     if (typeof v.confidence === "number") {
@@ -114,6 +120,20 @@ function unsupportedMaterialClaims(claims) {
   );
 }
 
+/** Claims rewritten in a revision round after failing as UNSUPPORTED, and not re-checked since. */
+function revisedUncheckedClaims(claims) {
+  return (claims || []).filter(c => c.verificationStatus === REVISED_UNCHECKED);
+}
+
+/** Plain-English line for the QA strip, or null when there are none. */
+function revisedUncheckedNote(claims) {
+  const n = revisedUncheckedClaims(claims).length;
+  if (!n) return null;
+  return n === 1
+    ? "1 claim was rewritten after failing the check and was not re-checked"
+    : `${n} claims were rewritten after failing the check and were not re-checked`;
+}
+
 /** Claims flagged stale by the auditor. */
 function staleClaims(claims) {
   return claims.filter(c => c.verificationStatus === "STALE");
@@ -128,13 +148,19 @@ function summarizeClaims(claims) {
   const byStatus = {};
   for (const c of claims) byStatus[c.verificationStatus] = (byStatus[c.verificationStatus] || 0) + 1;
   const lowConfidence = claims.filter(c => c.confidence < 0.5).map(c => c.claimId);
-  return { total, verified, byStatus, lowConfidence };
+  // Counted on its own: a rewritten-but-unchecked claim is never part of `verified`.
+  const revisedUnchecked = revisedUncheckedClaims(claims).length;
+  return { total, verified, revisedUnchecked, byStatus, lowConfidence };
 }
 
 module.exports = {
   CLASSIFICATIONS,
   MATERIALITIES,
   VERIFICATION_STATUSES,
+  MODEL_STATUSES,
+  REVISED_UNCHECKED,
+  revisedUncheckedClaims,
+  revisedUncheckedNote,
   normalizeClaims,
   applyAuditVerdicts,
   unsupportedMaterialClaims,
