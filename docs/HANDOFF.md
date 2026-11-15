@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-11-15 · **by:** Claude (overseer, cloud session) · **branch:** `claude/bold-babbage-isrzsv`
+**Last updated:** 2026-11-15 · **by:** Claude Opus 5.5 (builder, WO-01) · **branch:** `claude/integrity-fixes`
 
 ---
 
@@ -42,7 +42,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | `claude/bold-babbage-isrzsv` | PR open (draft), docs only. Merge this first |
-| WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Launched 2026-11-15 from the overseer session |
+| WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | PR open (draft), 618 tests green; needs Codex review + overseer check, then owner merge + `git pull` + Mac restart. Not verified against the live Anthropic API |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
 | Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | Merged (PR #7, 2026-10-21). Owner to `git pull` + restart the Mac, then check the Desk tab shows previous-close changes and 'unavailable' for Next event |
 | Data-accuracy audit items 2–6 (D-30): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-29, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
@@ -162,6 +162,16 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 — Claude Opus 5.5 (builder: WO-01 integrity fixes)
+- **Item 1:** the 3 failing tests were fixed-date fixtures read against the real clock; server code was right each time (idea horizon expired → `unavailable`; FRED curve fixture > 7 days old → 502; GDP's only fixture date now past → missing). Each test now pins `Date` to its fixture day; no assertion weakened.
+- **Item 2:** a revision sets a failed claim to `REVISED_UNCHECKED` (code-only status), never `PARTIALLY_VERIFIED`; not a hard fail, but caps the report at `APPROVED_WITH_CAVEATS`; `institutionalQA.revisedUnchecked` + `revisedUncheckedNote`; `claimSummary.revisedUnchecked`. Client: "REVISED, NOT RE-CHECKED" in the claim ledger, the note in the QA strip.
+- **Item 3:** fx/rates/commodities/macro/equity/sector templates no longer pre-fill directions, roles, stances, example levels/prices/dates/sources; fx asks for 2-4 pair views; AMD lines removed from the equity prompt; forecast-chart quarters computed from today (were fixed Q2-26..Q1-27). Keys and shapes unchanged.
+- **Item 4:** Events/Risk/econ prompt says "up to 5/7/3, ranked; fewer is correct; an empty list is acceptable"; schema 0..N; Risk/Events envelopes now keep server-added fields (`analysisMode`), which the old `length(7)` failure had been masking on the no-AI path; Risk tab shows "Nothing met the evidence bar" when empty.
+- **The client has no Events panel** (events/econ are loaded into state but never rendered), so only the Risk tab got the empty state — no panel was built (out of scope).
+- Checked in headless Chromium against the real server code (real pipeline run with mocked AI agents, all upstream HTTP failing): no page errors; QA strip shows "APPROVED WITH CAVEATS … 1 claim was rewritten after failing the check and was not re-checked"; ledger shows "REVISED, NOT RE-CHECKED"; Risk tab shows the empty message.
+- Tests: **618 passing** (603 + 15 new). Not verified live: Anthropic, FRED, Finnhub (no keys or network in the sandbox).
+- For the overseer: the equity schema still has an `amdImplications` key (the client renders "AMD PORTFOLIO IMPLICATIONS"); kept because the order froze keys — removing it needs a decision.
 
 ### 2026-11-15 — Claude (overseer: agent-setup review, evidence-gate programme)
 - Owner asked for a review of the news and research agents against an X article ("Loops and Graphs") and for Claude to act as overseer guiding Opus 5.5. Owner's answers: they are the reader (a student recruiting for Sales & Trading); an opinion without evidence must not be shown; AI stays manual; the goal is showable proof of credibility, shown by live demo.

@@ -57,7 +57,7 @@ Rules that follow:
 
 ---
 
-## WO-01 — Integrity fixes · status: in progress (Opus 5.5, `claude/integrity-fixes`)
+## WO-01 — Integrity fixes · status: PR open (Opus 5.5, `claude/integrity-fixes`)
 
 **Goal:** remove four places where the system asserts something it has not checked, or is
 pushed to produce an opinion. No new features, no extra AI cost.
