@@ -6554,7 +6554,9 @@ function App() {
   }
 
   function ncdChip(b, i) {
-    const text = [b.publisher || b.ref, b.publishedAt ? mkFmtWhen(b.publishedAt) : null, b.stale ? 'STALE' : null].filter(Boolean).join(' · ');
+    // A search result's page_age is free text ("2 days ago"), shown as given rather than parsed.
+    const when = !b.publishedAt ? null : isNaN(Date.parse(b.publishedAt)) ? String(b.publishedAt) : mkFmtWhen(b.publishedAt);
+    const text = [b.publisher || b.ref, when, b.stale ? 'STALE' : null].filter(Boolean).join(' · ');
     const title = b.ref + ' — ' + (b.label || '') + (b.passage ? '\n"' + b.passage + '"' : '');
     return b.url
       ? React.createElement('a', { key: i, className: 'ncd-chip', href: b.url, target: '_blank', rel: 'noopener noreferrer', title: title }, text + ' ↗')
@@ -6583,7 +6585,7 @@ function App() {
     const fmtMove = (r) => (r.move > 0 ? '+' : '') + r.move + (r.moveUnit === 'bp' ? 'bp' : '%');
     return React.createElement('div', { className: 'idc-body ncd-body' },
       c.check && c.check.status === 'not_checked' && React.createElement('div', { className: 'ncd-banner', role: 'status' },
-        'NOT CHECKED — ' + (c.check.reason || 'the evidence check did not run.') + ' Sentences marked NOT CHECKED passed the code check only.'),
+        'NOT CHECKED — ' + (c.check.reason || 'The evidence check did not run; these sentences passed the code check only.')),
       c.selection && React.createElement('div', { className: 'idc-sub', style: { marginBottom: 6 } },
         'Picked as the top story' + (c.selection.reason ? ': ' + c.selection.reason : '') + (c.selection.repeatOfPrevious ? ' (same story as the previous card — a newer input was cited)' : '')),
       ncdSection('What happened', c.whatHappened),
@@ -6666,7 +6668,7 @@ function App() {
       newsCardUnavailable && React.createElement('div', { className: 'rp-unavailable', style: { padding: '22px 16px' }, 'data-ncd': 'unavailable' },
         React.createElement('div', { className: 'rp-unavail-hd' }, 'NEWS CARD UNAVAILABLE'),
         React.createElement('div', { className: 'rp-unavail-reason' }, newsCardUnavailable),
-        React.createElement('div', { className: 'rp-unavail-note' }, 'No card is shown because none could be written and checked. Nothing was stored.')),
+        React.createElement('div', { className: 'rp-unavail-note' }, 'No placeholder card is shown — a card with invented content would look like a real one.')),
       newsCards.length === 0 && !newsCardBusy && React.createElement('div', { className: 'idc-sub', style: { padding: '8px 0' } }, 'No news cards yet.'),
       newsCards.map(NewsCardItem)
     );
