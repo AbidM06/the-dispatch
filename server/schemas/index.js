@@ -81,12 +81,15 @@ const RiskItem = z.object({
 }).passthrough();   // keep server-added provenance such as `basis` (validate() used to strip it)
 
 const RiskPayload = z.object({
-  risks: z.array(RiskItem).length(7),
+  // "Up to 7, ranked" (WO-01): a fixed count forced the model to pad with weak items. 0 is valid.
+  risks: z.array(RiskItem).max(7),
 });
 
+// passthrough: keep server-added envelope fields (analysisMode, _apiFallback, _cooldown). They were
+// only ever kept on the no-AI path because its < 7 risks failed the old length(7) check (WO-01).
 const RiskResponse = Envelope.extend({
   data: RiskPayload,
-});
+}).passthrough();
 
 // ── /api/events ───────────────────────────────────────────────────────────────
 const EventItem = z.object({
@@ -98,13 +101,13 @@ const EventItem = z.object({
 }).passthrough();   // keep server-added provenance such as `basis` (validate() used to strip it)
 
 const EventsPayload = z.object({
-  events: z.array(EventItem),
-  econ:   z.array(z.any()),
+  events: z.array(EventItem).max(5),   // up to 5, ranked; 0 is valid (WO-01)
+  econ:   z.array(z.any()).max(3),     // up to 3; 0 is valid
 });
 
 const EventsResponse = Envelope.extend({
   data: EventsPayload,
-});
+}).passthrough();
 
 // ── /api/explain/:ticker ──────────────────────────────────────────────────────
 const ExplainPayload = z.object({

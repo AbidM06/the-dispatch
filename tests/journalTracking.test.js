@@ -165,7 +165,7 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const markets = require("../server/markets/service");
     jest.spyOn(markets, "getHistory").mockImplementation(async (id) => {
       // every series ends with a still-trading bar, which the tracker must ignore
-      const live = bar(new Date().toISOString().slice(0, 10), 1, 1, 1, 1);   // today: may still be trading
+      const live = bar(new Date(Date.now()).toISOString().slice(0, 10), 1, 1, 1, 1);   // today: may still be trading
       if (id === "SPX") return { type: "ohlc", bars: [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-04", 0, 0, 0, 5100), live] };
       if (history[id]) return { ...history[id], bars: [...history[id].bars, live] };
       throw new Error("no source");
@@ -232,6 +232,10 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
   });
 
   test("the newest (possibly still-trading) bar is never scored", async () => {
+    // Pin "now" inside the idea's 42-day horizon (created 2026-09-01). On the real clock the
+    // horizon has long passed, so the idea correctly reads "unavailable" instead of "open".
+    jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-04T12:00:00Z"));
+    try {
     const { journal, tracker } = setup({ XLE: { type: "ohlc", bars: [bar("2026-09-02", 100, 101, 99.5, 100), bar("2026-09-03", 104, 111, 103, 110)] } });
     const e = journal.logIdea({ ...IDEA });
     // setup() appends a live bar; here the target-hit day is the last COMPLETE bar, so it counts…
@@ -242,10 +246,11 @@ describe("updateAll — end to end over the Journal and Markets history", () => 
     const markets = require("../server/markets/service");
     markets.getHistory.mockImplementation(async (id) => ({ type: "ohlc", bars: id === "SPX"
       ? [bar("2026-09-02", 0, 0, 0, 5000), bar("2026-09-03", 0, 0, 0, 5050)]
-      : [bar("2026-09-02", 100, 101, 99.5, 100), bar(new Date().toISOString().slice(0, 10), 104, 111, 103, 110)] }));
+      : [bar("2026-09-02", 100, 101, 99.5, 100), bar(new Date(Date.now()).toISOString().slice(0, 10), 104, 111, 103, 110)] }));
     const e2 = s2.journal.logIdea({ ...IDEA });
     doc = await s2.tracker.updateAll();
     expect(doc.entries[e2.entryId]).toMatchObject({ status: "open", markDate: "2026-09-02" });
+    } finally { Date.now.mockRestore(); }
   });
 
   test("a lost tracking file is rebuilt from the Journal's outcome, not recomputed", async () => {

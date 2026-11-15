@@ -245,7 +245,12 @@ describe("it rides along with the Markets refresh", () => {
   });
 });
 
+// Fake ONLY the Date object (timers stay real, so supertest's sockets still work).
+const ONLY_DATE = ["hrtime", "nextTick", "performance", "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
+  "requestIdleCallback", "cancelIdleCallback", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout"];
+
 describe("the News calendar routes serve the stored FRED calendar", () => {
+  afterEach(() => jest.useRealTimers());
   function app() {
     jest.doMock("../server/providers/finnhub", () => ({
       getMarketNews: jest.fn().mockResolvedValue([]),
@@ -262,6 +267,9 @@ describe("the News calendar routes serve the stored FRED calendar", () => {
   }
 
   test("events, source and what FRED does not list", async () => {
+    // The fixture's FRED dates are fixed (Oct-Dec 2026) and the route reads the real clock, so pin
+    // the clock to the fixture's day; otherwise GDP's only date (2026-10-29) falls into the past.
+    jest.useFakeTimers({ now: NOW, doNotFake: ONLY_DATE });
     mockFred();
     await require("../server/markets/calendar").refresh({ now: new Date() });
     const res = await request(app()).get("/api/news/calendar?days=90");
