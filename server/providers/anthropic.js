@@ -1239,14 +1239,6 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "sectorViews": [
     { "sector": "<sector>", "stance": "Overweight|Neutral|Underweight", "rationale": "<max 1 sentence>", "keyRisk": "<max 1 sentence>", "oilSensitivity": "POSITIVE|NEGATIVE|NEUTRAL", "rateSensitivity": "POSITIVE|NEGATIVE|NEUTRAL" }
   ],
-  "amdImplications": {
-    "currentEps": "<most recent annual EPS>",
-    "epsGrowthForecast": "<percent>",
-    "aiRevenue": "<share of revenue from AI accelerators>",
-    "keyRisk": "<max 2 sentences>",
-    "keyOpportunity": "<max 2 sentences>",
-    "valuation": "<current P/E vs historical>"
-  },
   "consensusComparison": {
     "vsBottomUp": "<above/below/in-line vs analyst consensus, with the numbers>",
     "vsTopDown": "<vs strategist consensus, with the numbers>",

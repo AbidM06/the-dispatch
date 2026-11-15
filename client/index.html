@@ -5936,36 +5936,6 @@ function App() {
         )
       ),
 
-      // AMD Implications — portfolio-relevant
-      r.amdImplications && React.createElement('div', null,
-        React.createElement('div', { className:'research-section-head' }, '◈ AMD PORTFOLIO IMPLICATIONS'),
-        React.createElement('div', { style:{padding:'14px 16px',background:'rgba(28,58,94,.04)',border:'1px solid rgba(28,58,94,.2)',borderLeft:'4px solid var(--blue)',marginBottom:16} },
-          React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12} },
-            [
-              { lbl:'CURRENT EPS', val: r.amdImplications.currentEps },
-              { lbl:'EPS GROWTH FORECAST', val: r.amdImplications.epsGrowthForecast },
-              { lbl:'AI REVENUE SHARE', val: r.amdImplications.aiRevenue },
-            ].map(({ lbl, val }) => React.createElement('div', { key:lbl, style:{textAlign:'center'} },
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:12,fontWeight:700,color:'var(--blue)',lineHeight:1.2} }, val || '—'),
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:7.5,color:'var(--steel)',letterSpacing:'0.1em',marginTop:3} }, lbl)
-            ))
-          ),
-          React.createElement('div', { style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:10} },
-            React.createElement('div', null,
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--green)',letterSpacing:'0.1em',marginBottom:4,fontWeight:700} }, '↑ KEY OPPORTUNITY'),
-              React.createElement('div', { style:{fontSize:11,lineHeight:1.6,color:'var(--ink)'} }, r.amdImplications.keyOpportunity)
-            ),
-            React.createElement('div', null,
-              React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:8.5,color:'var(--red)',letterSpacing:'0.1em',marginBottom:4,fontWeight:700} }, '↓ KEY RISK'),
-              React.createElement('div', { style:{fontSize:11,lineHeight:1.6,color:'var(--ink)'} }, r.amdImplications.keyRisk)
-            )
-          ),
-          r.amdImplications.valuation && React.createElement('div', { style:{fontFamily:'var(--mono)',fontSize:9.5,color:'var(--steel)',borderTop:'1px solid var(--rule)',paddingTop:8} },
-            'VALUATION: ' + r.amdImplications.valuation
-          )
-        )
-      ),
-
       // ── Cross-asset transmission ────────────────────────────────────────
       // The section whose absence started all this: equities were being analysed
       // with no view of energy, discount rates, or the policy path.
