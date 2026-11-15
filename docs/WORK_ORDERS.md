@@ -1,6 +1,7 @@
 # WORK ORDERS — the evidence-gate programme
 
-> Written by the overseer model (Claude, Fable) for the builder model (Claude Opus 5.5).
+> Written by the overseer model (Claude, Fable) for the builder model (Claude Opus 5.5; Sonnet 5.5
+> for deletion-type orders, D-42).
 > One work order = one branch = one draft pull request. Codex cross-reviews as usual
 > (AGENTS.md). The overseer checks each result before the next order starts.
 > Decisions behind this file: D-33 to D-39 in `docs/DECISIONS.md`.
@@ -170,7 +171,7 @@ on every turn. From WO-02 on:
 
 ---
 
-## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: in progress (Opus 5.5, `claude/cleanup-neutral`)
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Sonnet 5.5 builder, D-42; 607 tests pass), PR open, waiting for Codex review and the owner's merge
 
 **Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
 feature, no new AI call, no change to any report's JSON shape other than the one key named in
@@ -235,12 +236,14 @@ wording beyond the labels named above.
 
 ---
 
-## WO-03 — News card · status: spec written, waiting for the owner's go-ahead (D-35, D-38, D-41)
+## WO-03 — News card · status: APPROVED by the owner 2026-11-15 (D-43); builder Opus 5.5; launch after WO-02 is merged (D-35, D-38, D-41, D-43)
 
 **Goal:** press a button on a headline and get a card that says what happened, what moved, why
 it matters and what to watch — where every sentence shows its evidence, and anything without
 evidence has been removed by code and counted. This is the first full build of the target
-shape. Target cost about $0.10 a card, shown on a receipt.
+shape. There is no per-card cost target and no search limit (D-43): the real cost is shown on
+the receipt. Overseer's rough estimate $0.15-0.30 a card, NOT measured; the daily USD cap
+stays the runaway guard.
 
 **The card explains; it does not recommend.** A trade opinion still comes only from the
 existing "generate idea" button, which already cites supplied inputs, is logged to the Journal
@@ -250,7 +253,7 @@ later cleanup, after the owner has seen the card work on the Mac with the real A
 ### The graph
 
 ```
-inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (code) ─► gate B (Haiku, 1 call) ─► merge + store (code)
+inputs (code) ─► writer (Sonnet, 1 call, web search not capped) ─► gate A (code) ─► gate B (Sonnet, 1 call) ─► merge + store (code)
 ```
 
 1. **Inputs — code, $0.** Build one registry of everything the writer may cite, each with an
@@ -261,9 +264,10 @@ inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (cod
 2. **What moved — code, $0.** From the snapshot alone: per asset group, the instruments with
    the largest move since their previous close (rates and spreads in bp, others in %). Each row
    keeps its source, time and STALE flag. No model writes this section.
-3. **Writer — one Sonnet call** (`callAgent`, new role `newscard`), at most ONE web search
-   (`max_uses: 1` on the search tool — confirm the parameter against the API docs; if it is
-   not supported, send no search tool and say so in the PR). It receives the focus headline,
+3. **Writer — one Sonnet call** (`callAgent`, new role `newscard`), with the web-search tool and
+   **no limit on the number of searches** (D-43: the owner wants accuracy first; do not send
+   `max_uses`). Build the request with `webSearchTool(model)` / `models.searchRequest` as
+   research does. The receipt shows how many searches ran and what they cost. It receives the focus headline,
    the other headlines, the market lines, calendar and facts. It returns JSON only:
    - `whatHappened`: 2–3 sentences, each `{ text, basedOn: [ids] }`
    - `whyItMatters`: 2–5 sentences, each `{ text, basedOn }` — the chain from event to
@@ -274,21 +278,30 @@ inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (cod
    Rules in the prompt: use figures exactly as given, never compute or recall one; no
    recommendation, direction, target or trade; a sentence with nothing to cite is left out;
    fewer sentences is correct. Web-search support arrives as the tool's cite markup — resolve
-   it server-side to the URLs actually returned (`parseCiteTags` / `extractSearchSources`
-   already do this for research) and register them as `W#` inputs. The model never writes a URL.
+   it server-side to the sources actually returned (`parseCiteTags` / `extractSearchSources`
+   do this for research) and register them as `W#` inputs. The model never writes a URL.
+   **A `W#` record must carry the passage text the API itself returned for that citation**,
+   not only URL, title and page age (which is all today's helpers keep — extend them, and
+   confirm against the API docs which response field holds the cited source text). The
+   writer's own sentence is never evidence for itself. If the response gives no passage for a
+   `W#`, that source cannot support anything: a sentence whose only evidence is such a source
+   is removed under "search evidence unavailable" (Codex review of PR #16).
    For the "top story" button the same call first picks the headline that best explains
    today's moves and returns `selection: { ref, reason, basedOn }`; it must not pick the
    previous card's story unless something new and material happened.
 4. **Gate A — code, $0 (cite or drop).** For each sentence: every id in `basedOn` exists in
    the registry and the sentence has at least one piece of evidence (an id or a resolved
    search source); a `sentiment` sentence cites at least one sentiment-eligible input; every
-   figure in the sentence appears in one of its cited inputs (reuse the number / date / tenor
+   figure in the sentence appears in the TEXT of one of its cited inputs — the registry line
+   for `N#` / `M:` / `C#` / `F:`, the API-returned passage for `W#` (reuse the number / date / tenor
    handling in `server/research/factCheck.js`; be conservative the same way). A sentence that
    fails is removed and recorded with its reason. A sentence citing a STALE input is kept and
    tagged STALE.
-5. **Gate B — one Haiku 5.5 call, no search (does the evidence support the sentence?).** It
-   sees ONLY each surviving `whyItMatters` / `sentiment` / `whatWouldChangeIt` sentence next to
-   the text of its own cited evidence — not the card, not the other sentences. Per sentence it
+5. **Gate B — one Sonnet call (`models.sonnetModel()`, D-43; not Haiku), no search (does the evidence support the sentence?).** It
+   sees ONLY each surviving model-written sentence — `whatHappened` included, so a false
+   account of the story cannot pass on a citation alone — next to the text of its own cited
+   evidence (registry lines and API-returned passages, never the writer's prose): not the
+   card, not the other sentences. Per sentence it
    returns `{ verdict: SUPPORTS | PARTLY | NO, recommendation: true|false, reason }`. Code then
    applies it: `NO` → removed; `recommendation: true` → removed ("news cards explain only");
    `PARTLY` → shown with a "partly supported" tag and the reason. The model's own confidence is
@@ -347,7 +360,12 @@ correction arrives with WO-04). No schedule, no call on page load.
    state and still has What moved and What to watch.
 10. The stored card carries a receipt with both calls on it; the file is append-only (no
     route edits or deletes a card).
-11. No new timer, scheduler or page-load fetch (extend the existing guard in
+11. A sentence supported only by a `W#` source: with the figure present in the returned
+    passage it survives; with no passage returned it is removed under "search evidence
+    unavailable"; the writer's own text is never passed to either gate as evidence.
+12. A `whatHappened` sentence that contradicts its cited headline gets `NO` and is removed; a
+    recommendation placed in `whatHappened` is removed too.
+13. No new timer, scheduler or page-load fetch (extend the existing guard in
     `tests/reviewFixes.test.js` or equivalent).
 
 ### Scope

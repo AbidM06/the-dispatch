@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-11-15 · **by:** Claude (overseer) · **branch:** `claude/bold-babbage-isrzsv`
+**Last updated:** 2026-11-15 · **by:** Claude (overseer) · **branch:** `claude/admiring-ritchie-t8j3dv`
 
 ---
 
@@ -41,9 +41,9 @@ Working and merged (PR #4, 2026-09-28):
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
-| WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Opus 5.5 (builder) | `claude/cleanup-neutral` | Launched 2026-11-15 from the overseer session |
-| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41) | Claude (overseer) | `claude/bold-babbage-isrzsv` | Spec written; **waiting for the owner's go-ahead** before a builder is launched |
-| **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | `claude/bold-babbage-isrzsv` | PR open (draft), docs only. Merge this first |
+| WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Sonnet 5.5 (builder, D-42), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Built**, PR open (draft); 607 tests pass. Needs Codex review, then owner merge + `git pull` + Mac restart. Owner can then delete `UMUSHROOM_RAW_BASE` from the Mac `.env` (harmless if left) |
+| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41, D-43) | Claude (overseer) → Claude Opus 5.5 (builder) | not started | **Approved by the owner 2026-11-15** (no search limit, evidence check on Sonnet 5.5). Launch the Opus builder once the WO-02 PR is merged |
+| **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | — | PR #16 merged. The follow-up docs PR #17 (`claude/bold-babbage-isrzsv`) is contained in the WO-02 branch: merging the WO-02 PR also lands it |
 | WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Merged (PR #15, 2026-11-15); overseer re-ran `npm test` on `main`: 618 pass. Owner to `git pull` + restart the Mac, then press REFRESH RISK |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
 | Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | Merged (PR #7, 2026-10-21). Owner to `git pull` + restart the Mac, then check the Desk tab shows previous-close changes and 'unavailable' for Next event |
@@ -164,6 +164,24 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 (night) — Claude (overseer) + Claude Sonnet 5.5 (builder): WO-02 built, WO-03 approved
+- Owner's answers: build step 2 now, Sonnet 5.5 is fine for deletion work; models are chosen on effectiveness first, then cost (D-42); web searches are not capped anywhere, and the news card's evidence check runs on Sonnet 5.5 (D-43); **the news card (WO-03) is approved**, to be built on Opus 5.5 after WO-02 is merged.
+- **WO-02 is built** on `claude/admiring-ritchie-t8j3dv` (the session's assigned branch; `claude/cleanup-neutral` was never created). The overseer wrote `tests/cleanupNeutral.test.js` first (12 of 13 failed on the starting code), a Sonnet 5.5 builder made them pass, the overseer re-ran everything and read every changed prompt line.
+  - UMUSHROOM: `server/umushroom/`, its route, mount, tests, `.env.example` block and the client view + switch are gone (~217 client lines); `GET /api/umushroom` is a 404; D-23 and D-25 marked superseded.
+  - AMD: the `amdImplications` key is out of the equity template and its box out of the client. Nothing else reads the key, so an old stored report that carries it simply shows no box.
+  - Prompts: every named bank, strategist, publication series and house-phrase line in `server/providers/anthropic.js` is now a plain job title; three Research-tab type descriptions renamed ("Macro note", "US equity strategy", "Themes report"). Kept on purpose: the "Not affiliated with ..." disclaimers, real data-series names, glossary and interview-prep text.
+- Tests: **607 passing** (618 − 24 UMUSHROOM tests + 13 new). No other test file changed.
+- Browser check (headless Chromium, real server code): Journal and Research tabs load with no page error and no UMUSHROOM switch. **Not done:** no stored equity report was opened in the browser (none exists in the sandbox and generating one costs AI money) — the old-report case rests on a code search showing nothing reads `amdImplications`. Not verified live: Anthropic, FRED, Finnhub.
+- This branch also carries the docs-only commit from PR #17, so merging it lands #17 too.
+- Noticed, not changed: `server/engine/glossary.js` has an example naming Goldman Sachs as an AMD market maker (glossary text is allowed to stay under D-40; owner may still want it reworded).
+- Still open for the owner: archive the `dispatch-umushroom` repo on GitHub (D-37).
+- Next: Codex review of the WO-02 PR → owner merges → overseer launches the Opus 5.5 builder on WO-03.
+
+### 2026-11-15 (evening) — Claude (overseer: WO-02 did not run; WO-03 spec corrected)
+- **WO-02 was NOT built.** The Opus builder session stopped about 2 minutes after launch with "You've hit your monthly spend limit"; it pushed nothing (there is no `claude/cleanup-neutral` branch) and reported about $1 of usage. Nothing is half-done in the repo. Relaunch only when the owner says the limit allows it.
+- PR #16 (docs: WO-02 scope, WO-03 spec) was merged by the owner. Codex had raised two P1 findings on the WO-03 spec, both correct, fixed in the follow-up docs PR: (1) web-search sources must carry the passage text the API returned, or the gates have nothing to check a searched sentence against; (2) "What happened" sentences must go through the support check too.
+- State for the next agent: WO-01 merged and green (618 tests). WO-02 not started. WO-03 specified, waiting for the owner's go-ahead. No builder is running.
 
 ### 2026-11-15 — Claude (overseer: WO-01 checked, WO-02 launched, WO-03 spec)
 - Checked WO-01 on merged `main` (PR #15, merged by the owner): the diff matches the order, `npm test` 618 pass. The builder also replaced hard-coded forecast quarter labels with computed ones. Not verified against live AI or data.
