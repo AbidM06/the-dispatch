@@ -2081,6 +2081,7 @@ function App() {
   const [riskItems, setRiskItems]     = useState([]);
   const [riskMeta, setRiskMeta]       = useState(null);
   const [riskLoading, setRiskLoading] = useState(true);
+  const [riskError, setRiskError]     = useState(null);   // last load/refresh failure (plain reason), null after a success
 
   const [openExplainer, setOpenExplainer] = useState(null);
   const [explainData, setExplainData] = useState({});
@@ -2328,7 +2329,9 @@ function App() {
       const resp = await apiFetch('/api/risk');
       setRiskItems(resp.data.risks || []);
       setRiskMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale });
+      setRiskError(null);
     } catch (err) {
+      setRiskError(err.message);
       showToast('Risk error: ' + err.message, 'error');
     }
     setRiskLoading(false);
@@ -2354,8 +2357,10 @@ function App() {
       const resp = await apiFetch('/api/risk/refresh', { method: 'POST' });
       setRiskItems(resp.data.risks || []);
       setRiskMeta({ source: resp.source, fetchedAt: resp.fetchedAt, stale: resp.stale });
+      setRiskError(null);
       showToast('Risk scores refreshed with live news', 'success');
     } catch (err) {
+      setRiskError(err.message);
       showToast('Risk refresh failed: ' + err.message, 'error');
     }
     setRiskLoading(false);
@@ -3356,10 +3361,14 @@ function App() {
         React.createElement('span', { className:'spin' }, '↻'), ' Searching news & reassessing risks…'
       ),
       // "Up to 7, ranked" (WO-01): any count renders, and an empty list says why instead of showing a blank.
+      // A failed request is NOT an empty assessment: say it is unavailable, with the reason (D-02).
       !riskLoading && riskItems.length === 0 && React.createElement('div', { className:'card risk-empty', style:{marginBottom:12,color:'var(--steel)',fontSize:12,lineHeight:1.7} },
-        riskMeta && riskMeta.source === 'seeded'
-          ? 'Nothing met the evidence bar — none of the fetched market data triggered a rules-based risk. Press REFRESH RISK for a sourced assessment.'
-          : 'Nothing met the evidence bar — no risk was supported by a source found in the last refresh.'),
+        !riskMeta
+          ? 'Risk assessment unavailable — ' + (riskError || 'no response was received') + '. Nothing has been assessed; press REFRESH RISK to try again.'
+          : (riskMeta.source === 'seeded'
+              ? 'Nothing met the evidence bar — none of the fetched market data triggered a rules-based risk. Press REFRESH RISK for a sourced assessment.'
+              : 'Nothing met the evidence bar — no risk was supported by a source found in the last refresh.')
+            + (riskError ? ' (A later refresh failed: ' + riskError + '.)' : '')),
       !riskLoading && riskItems.map(r =>
         React.createElement('div', { key:r.id, className:'card', style:{marginBottom:12} },
           React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'} },

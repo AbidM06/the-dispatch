@@ -233,6 +233,10 @@ describe("/api/risk", () => {
     const tab = html.slice(html.indexOf("function renderRisk()"), html.indexOf("riskItems.map(r =>"));
     expect(tab).toMatch(/riskItems\.length === 0/);
     expect(tab).toMatch(/Nothing met the evidence bar/);
+    // Codex review on #15: a failed load is not an empty assessment.
+    expect(tab).toMatch(/!riskMeta\s*\?\s*'Risk assessment unavailable/);
+    const loaders = html.slice(html.indexOf("async function loadRisk()"), html.indexOf("async function refreshEvents()"));
+    expect(loaders).toMatch(/catch \(err\) \{\s*setRiskError\(err\.message\)/);
   });
 
   test("GET returns cached risks with source:cache after refresh", async () => {
