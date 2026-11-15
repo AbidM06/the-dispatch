@@ -170,7 +170,7 @@ on every turn. From WO-02 on:
 
 ---
 
-## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: in progress (Opus 5.5, `claude/cleanup-neutral`)
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: NOT STARTED (the first builder session stopped on the account spend limit and pushed nothing)
 
 **Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
 feature, no new AI call, no change to any report's JSON shape other than the one key named in
@@ -274,21 +274,30 @@ inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (cod
    Rules in the prompt: use figures exactly as given, never compute or recall one; no
    recommendation, direction, target or trade; a sentence with nothing to cite is left out;
    fewer sentences is correct. Web-search support arrives as the tool's cite markup — resolve
-   it server-side to the URLs actually returned (`parseCiteTags` / `extractSearchSources`
-   already do this for research) and register them as `W#` inputs. The model never writes a URL.
+   it server-side to the sources actually returned (`parseCiteTags` / `extractSearchSources`
+   do this for research) and register them as `W#` inputs. The model never writes a URL.
+   **A `W#` record must carry the passage text the API itself returned for that citation**,
+   not only URL, title and page age (which is all today's helpers keep — extend them, and
+   confirm against the API docs which response field holds the cited source text). The
+   writer's own sentence is never evidence for itself. If the response gives no passage for a
+   `W#`, that source cannot support anything: a sentence whose only evidence is such a source
+   is removed under "search evidence unavailable" (Codex review of PR #16).
    For the "top story" button the same call first picks the headline that best explains
    today's moves and returns `selection: { ref, reason, basedOn }`; it must not pick the
    previous card's story unless something new and material happened.
 4. **Gate A — code, $0 (cite or drop).** For each sentence: every id in `basedOn` exists in
    the registry and the sentence has at least one piece of evidence (an id or a resolved
    search source); a `sentiment` sentence cites at least one sentiment-eligible input; every
-   figure in the sentence appears in one of its cited inputs (reuse the number / date / tenor
+   figure in the sentence appears in the TEXT of one of its cited inputs — the registry line
+   for `N#` / `M:` / `C#` / `F:`, the API-returned passage for `W#` (reuse the number / date / tenor
    handling in `server/research/factCheck.js`; be conservative the same way). A sentence that
    fails is removed and recorded with its reason. A sentence citing a STALE input is kept and
    tagged STALE.
 5. **Gate B — one Haiku 5.5 call, no search (does the evidence support the sentence?).** It
-   sees ONLY each surviving `whyItMatters` / `sentiment` / `whatWouldChangeIt` sentence next to
-   the text of its own cited evidence — not the card, not the other sentences. Per sentence it
+   sees ONLY each surviving model-written sentence — `whatHappened` included, so a false
+   account of the story cannot pass on a citation alone — next to the text of its own cited
+   evidence (registry lines and API-returned passages, never the writer's prose): not the
+   card, not the other sentences. Per sentence it
    returns `{ verdict: SUPPORTS | PARTLY | NO, recommendation: true|false, reason }`. Code then
    applies it: `NO` → removed; `recommendation: true` → removed ("news cards explain only");
    `PARTLY` → shown with a "partly supported" tag and the reason. The model's own confidence is
@@ -347,7 +356,12 @@ correction arrives with WO-04). No schedule, no call on page load.
    state and still has What moved and What to watch.
 10. The stored card carries a receipt with both calls on it; the file is append-only (no
     route edits or deletes a card).
-11. No new timer, scheduler or page-load fetch (extend the existing guard in
+11. A sentence supported only by a `W#` source: with the figure present in the returned
+    passage it survives; with no passage returned it is removed under "search evidence
+    unavailable"; the writer's own text is never passed to either gate as evidence.
+12. A `whatHappened` sentence that contradicts its cited headline gets `NO` and is removed; a
+    recommendation placed in `whatHappened` is removed too.
+13. No new timer, scheduler or page-load fetch (extend the existing guard in
     `tests/reviewFixes.test.js` or equivalent).
 
 ### Scope

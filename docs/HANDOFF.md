@@ -41,7 +41,7 @@ Working and merged (PR #4, 2026-09-28):
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
-| WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Opus 5.5 (builder) | `claude/cleanup-neutral` | Launched 2026-11-15 from the overseer session |
+| WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Opus 5.5 (builder) | `claude/cleanup-neutral` | **Not built** — the builder session stopped after ~2 minutes on the account's spend limit and pushed nothing. Relaunch when the owner says |
 | WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41) | Claude (overseer) | `claude/bold-babbage-isrzsv` | Spec written; **waiting for the owner's go-ahead** before a builder is launched |
 | **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | `claude/bold-babbage-isrzsv` | PR open (draft), docs only. Merge this first |
 | WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Merged (PR #15, 2026-11-15); overseer re-ran `npm test` on `main`: 618 pass. Owner to `git pull` + restart the Mac, then press REFRESH RISK |
@@ -164,6 +164,11 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 (evening) — Claude (overseer: WO-02 did not run; WO-03 spec corrected)
+- **WO-02 was NOT built.** The Opus builder session stopped about 2 minutes after launch with "You've hit your monthly spend limit"; it pushed nothing (there is no `claude/cleanup-neutral` branch) and reported about $1 of usage. Nothing is half-done in the repo. Relaunch only when the owner says the limit allows it.
+- PR #16 (docs: WO-02 scope, WO-03 spec) was merged by the owner. Codex had raised two P1 findings on the WO-03 spec, both correct, fixed in the follow-up docs PR: (1) web-search sources must carry the passage text the API returned, or the gates have nothing to check a searched sentence against; (2) "What happened" sentences must go through the support check too.
+- State for the next agent: WO-01 merged and green (618 tests). WO-02 not started. WO-03 specified, waiting for the owner's go-ahead. No builder is running.
 
 ### 2026-11-15 — Claude (overseer: WO-01 checked, WO-02 launched, WO-03 spec)
 - Checked WO-01 on merged `main` (PR #15, merged by the owner): the diff matches the order, `npm test` 618 pass. The builder also replaced hard-coded forecast quarter labels with computed ones. Not verified against live AI or data.
