@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-11-15 · **by:** Claude Opus 5.5 (builder, WO-01) · **branch:** `claude/integrity-fixes`
+**Last updated:** 2026-11-15 · **by:** Claude (overseer) · **branch:** `claude/bold-babbage-isrzsv`
 
 ---
 
@@ -41,8 +41,10 @@ Working and merged (PR #4, 2026-09-28):
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
+| WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Opus 5.5 (builder) | `claude/cleanup-neutral` | Launched 2026-11-15 from the overseer session |
+| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41) | Claude (overseer) | `claude/bold-babbage-isrzsv` | Spec written; **waiting for the owner's go-ahead** before a builder is launched |
 | **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | `claude/bold-babbage-isrzsv` | PR open (draft), docs only. Merge this first |
-| WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | PR #15 open (draft), 618 tests green, CI green. Codex round 1: one finding (failed Risk load read as an empty assessment) fixed in 742a45e; round 2: no issues. Needs overseer check, then owner merge + `git pull` + Mac restart. Not verified against the live Anthropic API |
+| WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Merged (PR #15, 2026-11-15); overseer re-ran `npm test` on `main`: 618 pass. Owner to `git pull` + restart the Mac, then press REFRESH RISK |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
 | Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | Merged (PR #7, 2026-10-21). Owner to `git pull` + restart the Mac, then check the Desk tab shows previous-close changes and 'unavailable' for Next event |
 | Data-accuracy audit items 2–6 (D-30): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-29, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
@@ -162,6 +164,13 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 — Claude (overseer: WO-01 checked, WO-02 launched, WO-03 spec)
+- Checked WO-01 on merged `main` (PR #15, merged by the owner): the diff matches the order, `npm test` 618 pass. The builder also replaced hard-coded forecast quarter labels with computed ones. Not verified against live AI or data.
+- The WO-01 builder session reported about **$10 of usage**. Added cost rules for builders to `docs/WORK_ORDERS.md` (never read the big files whole, short output, no subagents).
+- Owner decided: go ahead with the UMUSHROOM removal; remove the equity AMD section; prompts go neutral, no named bank or person (D-40); the news card explains only and the idea button stays the one source of trade opinions; about $0.10 a card is acceptable (D-41).
+- WO-02 now bundles the three removals; launched on Opus 5.5. WO-03 (news card) is specified in full and waits for the owner's go-ahead.
+- Still open for the owner: archive the `dispatch-umushroom` repo on GitHub.
 
 ### 2026-11-15 — Claude Opus 5.5 (builder: WO-01 integrity fixes)
 - **Item 1:** the 3 failing tests were fixed-date fixtures read against the real clock; server code was right each time (idea horizon expired → `unavailable`; FRED curve fixture > 7 days old → 502; GDP's only fixture date now past → missing). Each test now pins `Date` to its fixture day; no assertion weakened.
