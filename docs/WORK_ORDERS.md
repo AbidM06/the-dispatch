@@ -1,6 +1,7 @@
 # WORK ORDERS — the evidence-gate programme
 
-> Written by the overseer model (Claude, Fable) for the builder model (Claude Opus 5.5).
+> Written by the overseer model (Claude, Fable) for the builder model (Claude Opus 5.5; Sonnet 5.5
+> for deletion-type orders, D-42).
 > One work order = one branch = one draft pull request. Codex cross-reviews as usual
 > (AGENTS.md). The overseer checks each result before the next order starts.
 > Decisions behind this file: D-33 to D-39 in `docs/DECISIONS.md`.
@@ -170,7 +171,7 @@ on every turn. From WO-02 on:
 
 ---
 
-## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: NOT STARTED (the first builder session stopped on the account spend limit and pushed nothing)
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Sonnet 5.5 builder, D-42; 607 tests pass), PR open, waiting for Codex review and the owner's merge
 
 **Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
 feature, no new AI call, no change to any report's JSON shape other than the one key named in
