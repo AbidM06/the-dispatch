@@ -42,7 +42,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Sonnet 5.5 (builder, D-42), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Merged** (PR #18, 2026-11-15; Codex found no issues). Owner to `git pull` + restart the Mac |
-| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41, D-43) | Claude Opus 5.5 (builder), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Built**, PR open (draft); 639 tests pass. Needs Codex review, then owner merge + `git pull` + Mac restart. **Never run against the live AI**: the owner presses EXPLAIN on one headline on the Mac and reports the card and its receipt. The Morning Bulletin stays until then (D-41) |
+| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41, D-43) | Claude Opus 5.5 (builder), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Merged** (PR #19, 2026-11-15; Codex found no issues on the third round). **Never run against the live AI**: the owner updates the Mac, presses EXPLAIN on one headline and reports the card and its receipt. The Morning Bulletin stays until then (D-41) |
 | **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | — | PR #16 merged. The follow-up docs PR #17 (`claude/bold-babbage-isrzsv`) is contained in the WO-02 branch: merging the WO-02 PR also lands it |
 | WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Merged (PR #15, 2026-11-15); overseer re-ran `npm test` on `main`: 618 pass. Owner to `git pull` + restart the Mac, then press REFRESH RISK |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
@@ -165,6 +165,12 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## Session log (newest first)
 
+### 2026-11-15 (end of day) — Claude (overseer): WO-03 merged, small follow-ups, credit interest
+- PR #19 (news card) merged by the owner. The owner has archived the `dispatch-umushroom` repo (D-37 complete).
+- `data/economic_calendar.json` was NOT in `.gitignore` although the brief said it was (the owner's `git status --short` listed it, which the update steps treat as "stop and ask"). Added, with its `.tmp`. It holds only FRED release dates.
+- **Owner's new interest: credit as an asset class** — high yield and distressed debt first, investment grade too — and whether it can become a Research report type. Today the app has: HY and IG OAS (FRED) and the HYG / LQD ETFs in Markets, and one credit fact (HY OAS) in the verified block every report receives. There is no credit report type. Questions were put to the owner; **nothing is approved or built**.
+- Open follow-ups: idea cards still use the unaged freshness label (`marketContext()`), which the news card fixed for itself; the Morning Bulletin removal waits on the owner seeing a real news card.
+
 ### 2026-11-15 (late) — Claude (overseer) + Claude Opus 5.5 (builder): WO-02 merged, WO-03 news card built
 - WO-02 merged by the owner (PR #18; Codex found no issues). Owner still to `git pull` + restart the Mac.
 - **WO-03 news card is built** on `claude/admiring-ritchie-t8j3dv`. The overseer wrote `tests/newsCard.test.js` first (contract in its header); the first Opus builder attempt stopped on the account spend limit before writing anything; the owner said "try again" and the second attempt finished.
@@ -189,7 +195,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 - Browser check (headless Chromium, real server code): Journal and Research tabs load with no page error and no UMUSHROOM switch. **Not done:** no stored equity report was opened in the browser (none exists in the sandbox and generating one costs AI money) — the old-report case rests on a code search showing nothing reads `amdImplications`. Not verified live: Anthropic, FRED, Finnhub.
 - This branch also carries the docs-only commit from PR #17, so merging it lands #17 too.
 - Noticed, not changed: `server/engine/glossary.js` has an example naming Goldman Sachs as an AMD market maker (glossary text is allowed to stay under D-40; owner may still want it reworded).
-- Still open for the owner: archive the `dispatch-umushroom` repo on GitHub (D-37).
+- (Done later the same day: the owner archived the `dispatch-umushroom` repo.)
 - Next: Codex review of the WO-02 PR → owner merges → overseer launches the Opus 5.5 builder on WO-03.
 
 ### 2026-11-15 (evening) — Claude (overseer: WO-02 did not run; WO-03 spec corrected)

@@ -47,6 +47,8 @@ data/journal.jsonl
 data/news_cards.jsonl
 data/journal_tracking.json
 data/journal_tracking.json.tmp
+data/economic_calendar.json
+data/economic_calendar.json.tmp
 
 # launchd auto-start logs
 logs/
