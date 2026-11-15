@@ -340,7 +340,15 @@ correction arrives with WO-04). No schedule, no call on page load.
 - Each sentence shows its evidence as small source chips (publisher, time, link), the same
   way idea cards show "based on". STALE, "partly supported" and "NOT CHECKED" tags are visible.
 
-### Acceptance tests (write these first; mock `callAgent` as `tests/ideas.test.js` does)
+### Acceptance tests (mock `callAgent` as `tests/ideas.test.js` does)
+
+**The overseer has already written `tests/newsCard.test.js`** (D-42): it covers tests 1-10 and 12
+below through the routes, and its header pins the contract — route shapes, the two `callAgent`
+roles (`newscard`, `newscheck`), the gate B prompt and reply format, the card shape, the removal
+reasons and the sentence tags. Build to that contract. The builder adds the tests that need the
+transport or the search-response shape: both calls on the receipt (10), `W#` passages (11) and
+the no-scheduler guard (13). If a test's plumbing is wrong, fix the plumbing and say so in the
+PR; do not loosen an assertion.
 
 1. A sentence with an empty `basedOn` and no search source is absent from the stored card and
    counted under "no evidence".
