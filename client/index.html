@@ -3355,6 +3355,11 @@ function App() {
       riskLoading && React.createElement('div', { style:{color:'var(--steel)',textAlign:'center',padding:'30px'} },
         React.createElement('span', { className:'spin' }, '↻'), ' Searching news & reassessing risks…'
       ),
+      // "Up to 7, ranked" (WO-01): any count renders, and an empty list says why instead of showing a blank.
+      !riskLoading && riskItems.length === 0 && React.createElement('div', { className:'card risk-empty', style:{marginBottom:12,color:'var(--steel)',fontSize:12,lineHeight:1.7} },
+        riskMeta && riskMeta.source === 'seeded'
+          ? 'Nothing met the evidence bar — none of the fetched market data triggered a rules-based risk. Press REFRESH RISK for a sourced assessment.'
+          : 'Nothing met the evidence bar — no risk was supported by a source found in the last refresh.'),
       !riskLoading && riskItems.map(r =>
         React.createElement('div', { key:r.id, className:'card', style:{marginBottom:12} },
           React.createElement('div', { style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start'} },

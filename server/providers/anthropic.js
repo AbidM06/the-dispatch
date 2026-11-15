@@ -483,14 +483,16 @@ async function fetchAllAnalysis(newsContext = "") {
   // made a quiet week read like a crisis.
   const prompt = `Search for the most market-moving financial and geopolitical news of the past 7 days as of ${today}, across central banks, rates, credit, FX, commodities, equities and geopolitics. Choose topics by what current sources show — do not assume any conflict, tariff or policy action is ongoing unless you found it this session.
 
-Return a single JSON object with EXACTLY these three keys:
+Return a single JSON object with these three keys (always all three).
 
-"events": array of exactly 5 objects, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD" (the date the event happened per your source — not today's date unless it happened today), "detail": string (one concise sentence with specific data from your search) }
+Each list is "up to N, ranked": include an item only if a source you found this session supports it. Fewer is correct when fewer are supported; an empty list is acceptable. Never pad a list to reach N.
 
-"risks": array of exactly 7 objects — the seven most material risks for a cross-asset portfolio right now, ranked by severity, each supported by evidence you found this session (include a risk only if current sources support it) — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100, "date": "${isoDate}" (the assessment date), "detail": string (2 sentences max, specific data from your search), "affects": string (asset classes) }
+"events": array of up to 5 objects, ranked by market impact, each: { "headline": string, "impact": "BULLISH"|"BEARISH"|"NEUTRAL", "ticker": string (most relevant or "MACRO"), "date": "YYYY-MM-DD" (the date the event happened per your source — not today's date unless it happened today), "detail": string (one concise sentence with specific data from your search) }
 
-"econ": array of exactly 3 objects: { "id": number, "label": string, "color": string, "bg": string, "border": string, "date": "${isoDate}", "title": string, "body": string (3 sentences max, specific current data) }
-Labels/colors: ["MACRO THEME","RATES ANALYSIS","EQUITY DEEP DIVE"] / ["#c8392b","#1a3a5c","#2c6e49"]
+"risks": array of up to 7 objects — the most material risks for a cross-asset portfolio right now, ranked by severity, each supported by evidence you found this session (include a risk only if current sources support it) — each: { "id": number, "title": string, "level": "HIGH"|"MEDIUM"|"LOW", "score": integer 0-100, "date": "${isoDate}" (the assessment date), "detail": string (2 sentences max, specific data from your search), "affects": string (asset classes) }
+
+"econ": array of up to 3 objects: { "id": number, "label": string, "color": string, "bg": string, "border": string, "date": "${isoDate}", "title": string, "body": string (3 sentences max, specific current data) }
+Each econ item takes one label and the colour, bg and border at the same position in these lists — Labels/colors: ["MACRO THEME","RATES ANALYSIS","EQUITY DEEP DIVE"] / ["#c8392b","#1a3a5c","#2c6e49"]
 Bg: ["rgba(200,57,43,.08)","rgba(26,58,92,.15)","rgba(44,110,73,.08)"]
 Border: ["rgba(200,57,43,.2)","rgba(88,166,255,.2)","rgba(63,185,80,.2)"]
 

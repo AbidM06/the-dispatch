@@ -251,6 +251,40 @@ describe("Anthropic fetchMacroView JSON parsing", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// WO-01 item 4: Events / Risk / econ are "up to N", never a fixed quota
+// ─────────────────────────────────────────────────────────────────────────────
+describe("Anthropic fetchAllAnalysis — up to N, fewer is correct", () => {
+  let anthropic;
+  beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    anthropic = require("../server/providers/anthropic");
+  });
+
+  const threeRisks = Array.from({ length: 3 }, (_, i) => ({ id: i + 1, title: `Risk ${i + 1}`, level: "LOW", score: 20, date: "2026-11-15", detail: "d.", affects: "Rates" }));
+
+  test("the prompt asks for 'up to' N, ranked, evidence-only, and accepts an empty list", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ content: [{ type: "text", text: JSON.stringify({ events: [], risks: threeRisks, econ: [] }) }] }));
+    await anthropic.fetchAllAnalysis("");
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const prompt = body.messages.map(m => typeof m.content === "string" ? m.content : JSON.stringify(m.content)).join("\n");
+    expect(prompt).not.toMatch(/exactly \d|exactly (three|five|seven)|the seven most/i);
+    expect(prompt).toMatch(/"events": array of up to 5 objects/);
+    expect(prompt).toMatch(/"risks": array of up to 7 objects/);
+    expect(prompt).toMatch(/"econ": array of up to 3 objects/);
+    expect(prompt).toMatch(/fewer is correct/i);
+    expect(prompt).toMatch(/an empty list is acceptable/i);
+  });
+
+  test("a response with 3 risks and 0 events parses and is returned as is", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse({ content: [{ type: "text", text: JSON.stringify({ events: [], risks: threeRisks, econ: [] }) }] }));
+    const out = await anthropic.fetchAllAnalysis("");
+    expect(out.events).toEqual([]);
+    expect(out.risks).toHaveLength(3);
+    expect(out.econ).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Alpha Vantage adapter
 // ─────────────────────────────────────────────────────────────────────────────
 describe("Alpha Vantage provider", () => {

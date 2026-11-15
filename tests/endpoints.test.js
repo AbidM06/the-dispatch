@@ -206,6 +206,35 @@ describe("/api/risk", () => {
     expect(anthropicMock.fetchRiskScores).not.toHaveBeenCalled();
   });
 
+  test("WO-01: 3 risks and 0 events validate and are served (no fixed count)", async () => {
+    const { schemas, validate } = require("../server/schemas");
+    const three = Array.from({ length: 3 }, (_, i) => ({ id: i + 1, title: `Risk ${i + 1}`, level: "LOW", score: 20, date: "2026-11-15", detail: "d.", affects: "Rates" }));
+    const env = { source: "live", fetchedAt: "2026-11-15T12:00:00.000Z", stale: false };
+    expect(validate(schemas.RiskResponse, { ...env, data: { risks: three } }).ok).toBe(true);
+    expect(validate(schemas.RiskResponse, { ...env, data: { risks: [] } }).ok).toBe(true);
+    expect(validate(schemas.EventsResponse, { ...env, data: { events: [], econ: [] } }).ok).toBe(true);
+    expect(validate(schemas.RiskResponse, { ...env, data: { risks: [...three, ...three, ...three] } }).ok).toBe(false);   // still capped at 7
+    expect(validate(schemas.RiskResponse, { ...env, analysisMode: "ai", data: { risks: three } }).data.analysisMode).toBe("ai");
+
+    mockAllAnalysis({ risks: three, events: [], econ: [] });
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const res = await request(app).post("/api/risk/refresh").send({ force: true });
+    expect(res.status).toBe(200);
+    expect(res.body.data.risks).toHaveLength(3);
+    expect(warn.mock.calls.some(c => /Schema warnings/.test(String(c[0])))).toBe(false);
+    warn.mockRestore();
+    const ev = await request(app).get("/api/events");
+    expect(ev.body.source).toBe("cache");
+    expect(ev.body.data.events).toEqual([]);
+  });
+
+  test("WO-01: the Risk tab shows a plain message for an empty list, not a blank", () => {
+    const html = require("fs").readFileSync(require("path").join(__dirname, "../client/index.html"), "utf8");
+    const tab = html.slice(html.indexOf("function renderRisk()"), html.indexOf("riskItems.map(r =>"));
+    expect(tab).toMatch(/riskItems\.length === 0/);
+    expect(tab).toMatch(/Nothing met the evidence bar/);
+  });
+
   test("GET returns cached risks with source:cache after refresh", async () => {
     mockAllAnalysis();
     await request(app).post("/api/risk/refresh").send({ force: true });
