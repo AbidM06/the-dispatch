@@ -171,7 +171,7 @@ on every turn. From WO-02 on:
 
 ---
 
-## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Sonnet 5.5 builder, D-42; 607 tests pass), PR open, waiting for Codex review and the owner's merge
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: MERGED (PR #18, 2026-11-15; 607 tests)
 
 **Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
 feature, no new AI call, no change to any report's JSON shape other than the one key named in
@@ -236,7 +236,7 @@ wording beyond the labels named above.
 
 ---
 
-## WO-03 — News card · status: APPROVED by the owner 2026-11-15 (D-43); builder Opus 5.5; launch after WO-02 is merged (D-35, D-38, D-41, D-43)
+## WO-03 — News card · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Opus 5.5 builder; 639 tests pass), PR open; NOT yet run against the live AI (D-35, D-38, D-41, D-43)
 
 **Goal:** press a button on a headline and get a card that says what happened, what moved, why
 it matters and what to watch — where every sentence shows its evidence, and anything without

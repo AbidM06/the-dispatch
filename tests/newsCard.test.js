@@ -214,6 +214,28 @@ describe("WO-03 gate A — cite or drop, in code", () => {
   });
 });
 
+describe("WO-03 gate A — digits in dates and tenor names are not figures", () => {
+  test("a figure cannot pass on the digits of its evidence's timestamp", async () => {
+    // N1 is dated 2026-09-28T08:00 — neither 9, 28 nor 8 is a figure the headline states.
+    const app = setup({ writer: writerReply({ whyItMatters: [
+      S("Brent is up 9% on the day.", "N1"),
+      S("Brent is up 28% on the day.", "N1"),
+      S("Brent is up 3.5% to 100.5.", "N1"),
+    ] }) });
+    const c = (await make(app)).body.card;
+    expect(texts(c.whyItMatters)).toEqual(["Brent is up 3.5% to 100.5."]);
+    expect(c.removed.byReason.figure_not_in_evidence).toBe(2);
+  });
+
+  test("a figure cannot pass on a tenor name, and a year in a date still counts", () => {
+    jest.resetModules();
+    const { figuresSupported } = require("../server/news/gates");
+    expect(figuresSupported("Yields rose 10bp.", ["US 10Y yield 4.31% (+2bp) as of 2026-09-28"])).toBe(false);
+    expect(figuresSupported("Yields rose 2bp to 4.31%.", ["US 10Y yield 4.31% (+2bp) as of 2026-09-28"])).toBe(true);
+    expect(figuresSupported("The move is the largest of 2026.", ["Oil jumps · 2026-09-28T08:00:00.000Z"])).toBe(true);
+  });
+});
+
 describe("WO-03 gate B — does the evidence support the sentence?", () => {
   test("5. NO → removed; recommendation → removed; PARTLY → kept with a tag and the reason", async () => {
     const app = setup({

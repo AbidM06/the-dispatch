@@ -138,8 +138,15 @@ function figuresOf(text) {
   const nums = (rest.match(NUMBER) || []).map(n => Math.abs(Number(n))).filter(Number.isFinite);
   return { dates, nums };
 }
+// Evidence lines carry timestamps ("2026-09-28T08:00:00.000Z") and tenor names ("10Y"). Their digits are not
+// figures: left in, "up 9%" would pass on the month of a date and "10bp" on the name of the 10-year. Only the
+// year of a date stays usable ("in 2026").
+const STAMP = /\b20\d\d-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)?)?/g;
 function numbersIn(text) {
-  return (String(text || "").replace(/(\d),(?=\d{3}\b)/g, "$1").match(NUMBER) || []).map(n => Math.abs(Number(n))).filter(Number.isFinite);
+  const s = String(text || "");
+  const years = (s.match(STAMP) || []).map(d => Number(d.slice(0, 4)));
+  const rest = s.replace(STAMP, " ").replace(TENOR, " ").replace(/(\d),(?=\d{3}\b)/g, "$1");
+  return years.concat((rest.match(NUMBER) || []).map(n => Math.abs(Number(n))).filter(Number.isFinite));
 }
 /** Every figure must appear in the text of at least one cited input (number equality, sign ignored: "up 3.5%" ↔ "+3.50%"). */
 function figuresSupported(text, evidenceTexts) {

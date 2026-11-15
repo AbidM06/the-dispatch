@@ -42,7 +42,7 @@ Working and merged (PR #4, 2026-09-28):
 | Task | Agent | Branch | Status |
 |---|---|---|---|
 | WO-02 cleanup: remove the UMUSHROOM view, the equity AMD box, and named-bank personas in prompts (D-37, D-40) | Claude Sonnet 5.5 (builder, D-42), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Merged** (PR #18, 2026-11-15; Codex found no issues). Owner to `git pull` + restart the Mac |
-| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41, D-43) | Claude Opus 5.5 (builder), overseen by Claude | `claude/admiring-ritchie-t8j3dv` | **In progress** since 2026-11-15. The overseer wrote `tests/newsCard.test.js` first (20 of 21 fail until the build is done — the branch is red on purpose until then) |
+| WO-03 news card: full spec in `docs/WORK_ORDERS.md` (D-41, D-43) | Claude Opus 5.5 (builder), checked by the overseer | `claude/admiring-ritchie-t8j3dv` | **Built**, PR open (draft); 639 tests pass. Needs Codex review, then owner merge + `git pull` + Mac restart. **Never run against the live AI**: the owner presses EXPLAIN on one headline on the Mac and reports the card and its receipt. The Morning Bulletin stays until then (D-41) |
 | **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | — | PR #16 merged. The follow-up docs PR #17 (`claude/bold-babbage-isrzsv`) is contained in the WO-02 branch: merging the WO-02 PR also lands it |
 | WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Merged (PR #15, 2026-11-15); overseer re-ran `npm test` on `main`: 618 pass. Owner to `git pull` + restart the Mac, then press REFRESH RISK |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
@@ -164,6 +164,18 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 (late) — Claude (overseer) + Claude Opus 5.5 (builder): WO-02 merged, WO-03 news card built
+- WO-02 merged by the owner (PR #18; Codex found no issues). Owner still to `git pull` + restart the Mac.
+- **WO-03 news card is built** on `claude/admiring-ritchie-t8j3dv`. The overseer wrote `tests/newsCard.test.js` first (contract in its header); the first Opus builder attempt stopped on the account spend limit before writing anything; the owner said "try again" and the second attempt finished.
+  - New: `server/inputs/registry.js` (the idea cards' input builders, moved and shared), `server/news/gates.js` (gate A in code, gate B prompt + verdicts), `server/news/card.js` (pipeline, What moved, What to watch, receipt), `server/news/store.js` (append-only `data/news_cards.jsonl`, hashed). Routes `POST /api/news/card`, `GET /api/news/cards[/:id]`. `callAgent` gained roles `newscard` / `newscheck` (both Sonnet) and an opt-in `withContent` return. Client: EXPLAIN per headline, "Explain top story", NEWS CARDS list and card.
+  - Web-search evidence (`W#`) is only the passage the API itself returns on a citation (`cited_text`, about 150 characters); a search source with no passage supports nothing and the sentence is removed and counted.
+  - **Overseer's review found one weakness and fixed it:** the figure check accepted a number if it matched digits inside an evidence line's timestamp or a tenor name ("up 9%" passed on the "09" of a date; "10bp" on "10Y"). Timestamps and tenor names are now excluded; only a date's year still counts. Two tests added (fail on the builder's code).
+- Tests: **639 passing** (607 + 23 overseer acceptance tests + 9 builder transport tests). Idea-card tests unchanged and green.
+- Browser check (headless Chromium, real client, the four news routes stubbed with fixture cards, day and night): sections in the specified order, STALE / PARTLY SUPPORTED / NOT CHECKED tags, the removed-count line, the receipt, the 503 panel; removed text never appears. The figures in those screenshots are fixture data, not a real card.
+- **NOT verified:** any live Anthropic call — whether the real model returns the JSON shape, how the search tool attaches citations to a JSON answer (if they do not line up with sentences, those sentences are removed and counted: it fails safe but could leave thin cards), and the real cost per card (builder's guess $0.10-0.25, overseer's $0.15-0.30; neither measured). Live Finnhub and FRED also unverified.
+- Not done, by decision (D-41): the Morning Bulletin is untouched until the owner has seen a real card work.
+- Next: Codex review → owner merges → owner runs one real card on the Mac and reports the receipt → then the bulletin removal, then WO-04.
 
 ### 2026-11-15 (night) — Claude (overseer) + Claude Sonnet 5.5 (builder): WO-02 built, WO-03 approved
 - Owner's answers: build step 2 now, Sonnet 5.5 is fine for deletion work; models are chosen on effectiveness first, then cost (D-42); web searches are not capped anywhere, and the news card's evidence check runs on Sonnet 5.5 (D-43); **the news card (WO-03) is approved**, to be built on Opus 5.5 after WO-02 is merged.
