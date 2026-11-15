@@ -45,6 +45,8 @@ const ROLE_DEFAULTS = {
   chair:     MODEL_OPUS,
   chat:      MODEL_SONNET,
   ideas:     MODEL_SONNET,
+  newscard:  MODEL_SONNET,   // news card writer (WO-03, D-43)
+  newscheck: MODEL_SONNET,   // news card gate B — Sonnet, not Haiku (D-43)
 };
 
 const ROLE_ENV = {
@@ -56,6 +58,8 @@ const ROLE_ENV = {
   chair:     "RESEARCH_CHAIR_MODEL",
   chat:      "RESEARCH_CHAT_MODEL",
   ideas:     "IDEAS_MODEL",
+  newscard:  "NEWS_CARD_MODEL",
+  newscheck: "NEWS_CHECK_MODEL",
 };
 
 function modelForRole(role) {
@@ -106,8 +110,11 @@ function buildUserContent(user, sharedPrefix) {
  * @param {string} role     one of lead|extract|auditor|redteam|portfolio|chair|chat|ideas
  * @param {string} system   system prompt
  * @param {string} user     user prompt (role-specific part)
- * @param {object} opts     { maxTokens, search: "force"|"auto"|false, usage, sharedPrefix }
- * @returns {Promise<string>} concatenated text blocks
+ * @param {object} opts     { maxTokens, search: "force"|"auto"|false, usage, sharedPrefix, withContent }
+ * @returns {Promise<string>} concatenated text blocks — or, with `withContent: true`,
+ *          { text, content, stopReason }: the same text plus the API's raw content blocks
+ *          (web_search_tool_result blocks, and text blocks with their `citations`), which
+ *          the news card needs to read the passage each citation quotes (`cited_text`).
  */
 async function callAgent(role, system, user, opts = {}) {
   if (process.env.DISABLE_AI === "true")     throw new Error("AI disabled via DISABLE_AI=true");
@@ -120,7 +127,7 @@ async function callAgent(role, system, user, opts = {}) {
 
   budget.checkAndIncrement();
 
-  const { maxTokens = 3000, search = false, usage = null, sharedPrefix = null } = opts;
+  const { maxTokens = 3000, search = false, usage = null, sharedPrefix = null, withContent = false, blockedDomains = null } = opts;
   const model = modelForRole(role);
 
   const body = {
@@ -129,10 +136,15 @@ async function callAgent(role, system, user, opts = {}) {
     system,
     messages: [{ role: "user", content: buildUserContent(user, sharedPrefix) }],
   };
+  // blockedDomains: bare domains the search may never return (the tool's own `blocked_domains` field).
+  const searchTool = () => {
+    const t = anthropic.webSearchTool(model);
+    return Array.isArray(blockedDomains) && blockedDomains.length ? { ...t, blocked_domains: blockedDomains } : t;
+  };
   if (search === "force") {
-    Object.assign(body, models.searchRequest(model, system, anthropic.webSearchTool(model)));
+    Object.assign(body, models.searchRequest(model, system, searchTool()));
   } else if (search) {
-    body.tools = [anthropic.webSearchTool(model)];
+    body.tools = [searchTool()];
   }
 
   let json;
@@ -148,10 +160,11 @@ async function callAgent(role, system, user, opts = {}) {
   const text = (json.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
   const noRoom = models.outOfRoomError(model, text, json.stop_reason);
   if (noRoom) throw noRoom;
-  return text;
+  return withContent ? { text, content: json.content || [], stopReason: json.stop_reason || null } : text;
 }
 
 const ROLE_LABEL = { lead: "lead analyst", auditor: "data auditor", redteam: "red team", portfolio: "cross-asset PM",
-  chair: "IC chair", chat: "interrogation", ideas: "trade idea", extract: "claim extraction" };
+  chair: "IC chair", chat: "interrogation", ideas: "trade idea", extract: "claim extraction",
+  newscard: "news card writer", newscheck: "news card evidence check" };
 
 module.exports = { callAgent, modelForRole, newUsageTracker, buildUserContent, MODEL_HAIKU, MODEL_SONNET, MODEL_OPUS };

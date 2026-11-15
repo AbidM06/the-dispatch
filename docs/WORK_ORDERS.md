@@ -171,7 +171,7 @@ on every turn. From WO-02 on:
 
 ---
 
-## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Sonnet 5.5 builder, D-42; 607 tests pass), PR open, waiting for Codex review and the owner's merge
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: MERGED (PR #18, 2026-11-15; 607 tests)
 
 **Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
 feature, no new AI call, no change to any report's JSON shape other than the one key named in
@@ -236,7 +236,7 @@ wording beyond the labels named above.
 
 ---
 
-## WO-03 — News card · status: APPROVED by the owner 2026-11-15 (D-43); builder Opus 5.5; launch after WO-02 is merged (D-35, D-38, D-41, D-43)
+## WO-03 — News card · status: BUILT on `claude/admiring-ritchie-t8j3dv` (Opus 5.5 builder; 639 tests pass), PR open; NOT yet run against the live AI (D-35, D-38, D-41, D-43)
 
 **Goal:** press a button on a headline and get a card that says what happened, what moved, why
 it matters and what to watch — where every sentence shows its evidence, and anything without
@@ -340,7 +340,15 @@ correction arrives with WO-04). No schedule, no call on page load.
 - Each sentence shows its evidence as small source chips (publisher, time, link), the same
   way idea cards show "based on". STALE, "partly supported" and "NOT CHECKED" tags are visible.
 
-### Acceptance tests (write these first; mock `callAgent` as `tests/ideas.test.js` does)
+### Acceptance tests (mock `callAgent` as `tests/ideas.test.js` does)
+
+**The overseer has already written `tests/newsCard.test.js`** (D-42): it covers tests 1-10 and 12
+below through the routes, and its header pins the contract — route shapes, the two `callAgent`
+roles (`newscard`, `newscheck`), the gate B prompt and reply format, the card shape, the removal
+reasons and the sentence tags. Build to that contract. The builder adds the tests that need the
+transport or the search-response shape: both calls on the receipt (10), `W#` passages (11) and
+the no-scheduler guard (13). If a test's plumbing is wrong, fix the plumbing and say so in the
+PR; do not loosen an assertion.
 
 1. A sentence with an empty `basedOn` and no search source is absent from the stored card and
    counted under "no evidence".

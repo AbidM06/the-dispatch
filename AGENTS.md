@@ -90,6 +90,8 @@ npm run test:coverage
 | `POLYMARKET_TAGS` / `POLYMARKET_COUNT` | Prediction markets shown (default economy,geopolitics / 4) |
 | `SONNET_MODEL` | The Sonnet every Sonnet job uses — research pipeline, chat, idea cards (default `claude-sonnet-5-5` since 2026-09-29, D-17; set `claude-sonnet-5` to switch back) |
 | `IDEAS_MODEL` | Model for idea cards (default: `SONNET_MODEL`) |
+| `NEWS_CARD_MODEL` / `NEWS_CHECK_MODEL` | News card writer / evidence check (default: `SONNET_MODEL`; the check stays on Sonnet, D-43) |
+| `NEWS_CHECK_RETRY_MS` / `NEWS_CARDS_PATH` | Pause before the evidence check's single retry (default 60000) / the append-only card file (default `data/news_cards.jsonl`) |
 | `PORT` | Default 3001 |
 | `LOW_COST_MODE=true` | Disables all AI calls (research returns 503 `available: false`) |
 | `ANTHROPIC_DAILY_CAP` | **USD** cap per UTC day, measured from real usage (default $5; 0 = off) |
@@ -121,6 +123,7 @@ server/routes/
   news.js                  GET /api/news — market headlines + economic calendar
                            GET /api/news/calendar — earnings + economic events
                            GET /api/news/:ticker — company news + sentiment
+                           POST /api/news/card | GET /api/news/cards | GET /api/news/cards/:id — news cards (WO-03)
 server/providers/
   macroContext.js          Cross-asset fact layer — 11 free FRED series with per-fact
                            provenance; feeds EVERY research report. Also derives the
@@ -138,6 +141,8 @@ server/providers/
   budget.js                USD caps over the spend ledger + auto API-fallback state machine
 server/markets/            instruments.js · sources.js · service.js · views.js · calendar.js — free Markets data + provenance
 server/ideas/              generator.js · store.js — on-demand idea cards (every one logged to the Journal)
+server/inputs/registry.js  the one registry of citable inputs (N#, M:ID, C#, REPORT/SRC-xxx, F:key) shared by idea and news cards
+server/news/               card.js · gates.js · store.js — news cards: writer, gate A (code), gate B, append-only store
 server/journal/            store.js · migrate.js — append-only trade Journal (stage 1)
 server/research/           five-agent pipeline — see "Institutional Research" below
 server/jobs/
@@ -236,6 +241,61 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   SRC-xxx) and must cite them; citations are resolved server-side so links are never invented.
   Level consistency + distance-from-price warnings; long text is clipped, not rejected.
 - No direction/universe restrictions (user choice). Saved to `data/idea_cards.json` (gitignored).
+
+## News card (`server/news/`, `routes/news.js`) — WO-03 (D-35, D-38, D-41, D-43)
+- **Button-driven only**: "Explain" on a headline → `POST /api/news/card {headlineId}`; "Explain top story" →
+  `{top: true}`. `GET /api/news/cards` (newest first) and `GET /api/news/cards/:id` read the store (no AI; the News
+  tab loads the list on open). No route edits or deletes a card. Routes sit before `/:ticker`. POST is behind `requireWriteAuth`.
+- **The card explains; it never recommends (D-41).** Trade opinions still come only from "generate idea".
+- **Graph**: inputs (code) → writer (`callAgent("newscard")`, Sonnet, web search on, **no `max_uses`**, JSON only) →
+  gate A (code) → gate B (`callAgent("newscheck")`, Sonnet — not Haiku — no search) → merge + store (code). Both calls run
+  inside one `transport.runWithContext({ receipt })`; the receipt is stored on the card.
+- **Inputs** (`server/inputs/registry.js`, shared with idea cards — the idea prompt and its `basedOn` entries are unchanged):
+  headlines `N#`, Markets lines `M:ID` (rates also carry the move in bp), stored FRED calendar `C#`, verified macro facts
+  `F:key` (`macroContext`), and web-search sources `W#`. Each id has an evidence TEXT (its registry line) that the gates read.
+- **`W#` = the passage the API returned.** The writer's text blocks carry `citations` of type `web_search_result_location`
+  with `cited_text` (up to ~150 characters of the page, per the API docs); that passage is the only evidence a `W#` has. A
+  citation with no `cited_text`, or index-only `(cite index=…>` markup (the search result's page text is `encrypted_content`,
+  unreadable), gives a `W#` with no passage: a sentence resting only on such a source is removed as
+  `search_evidence_unavailable`. The writer's own prose is never evidence. `callAgent(..., { withContent: true })` returns
+  `{ text, content, stopReason }` so the card can read those blocks; every other caller still gets plain text.
+- **Gate A (code, `news/gates.js`)**, per sentence: every `basedOn` id must exist (`unknown_source`); no id and no
+  citation → `no_evidence`; a `sentiment` sentence must cite a measured input — today a `predictions`-group market line
+  (`sentiment_needs_measured_input`); every figure (numbers and ISO dates; tenor labels such as "10-year" are names, using
+  `factCheck`'s NUMBER/TENOR/ISO_DATE) must appear in the evidence text of one of its cited inputs (`figure_not_in_evidence`;
+  sign is ignored, "3.5" matches "+3.50"). A sentence citing a STALE input is kept and tagged `stale`.
+- **Gate B**: one call. The prompt lists each surviving sentence (`whatHappened` included) as `[S<n>] text` followed only by
+  ITS OWN cited evidence text — never the card, other sentences, uncited inputs or removed text. Reply
+  `{verdicts:[{id, verdict: SUPPORTS|PARTLY|NO, recommendation, reason}]}`. `NO` → removed (`not_supported`);
+  `recommendation: true` → removed (`recommendation`); `PARTLY` → kept, tagged `partly_supported` with `checkReason`.
+  No verdict for a sentence → `not_checked`. A temporary error (429/529/5xx/timeout) is retried ONCE after
+  `NEWS_CHECK_RETRY_MS`; if it still fails the card is stored with every sentence `not_checked` and `check.reason` (banner).
+- **Code-built sections**: `whatMoved` — per group (rates, credit, fx, equities, commodities, crypto) the top 3 moves since
+  previous close from the Markets snapshot (rates/credit in bp, others in %), with source, time and STALE; `whatToWatch` — up to
+  3 stored-calendar events within 14 days with their previous reading. No model writes either.
+- **Top story**: the writer returns `selection {ref, reason, basedOn}`; a `ref` that is not a loaded headline → 503. The prompt
+  names the previous card's story; code refuses (503, nothing stored) a repeat of it unless `selection.newDevelopment` cites an
+  input dated AFTER the previous card (a later headline or a later market observation). That is all code can enforce about
+  "new and material".
+- **Failure (D-02, D-19)**: AI off, budget refusal, writer error or unreadable JSON → 503 `available: false` + plain reason,
+  nothing stored, gate B not called.
+- **Card**: `{ id, headline{text,source,url,publishedAt,newsId}, whatHappened[], whatMoved[], whyItMatters[], sentiment[],
+  whatWouldChangeIt[], whatToWatch[], removed{total, byReason}, check{status, reason?}, noExplanation, receipt, hash,
+  integrity, generatedAt }`; sentences `{ text, basedOn[{ref,label,url,publisher,publishedAt,passage?}], tags[], checkReason? }`.
+  No surviving `whyItMatters` → `noExplanation: true` ("No explanation met the evidence bar") and the code sections still show.
+- **Store**: append-only `data/news_cards.jsonl` (gitignored; memory-only in tests unless `NEWS_CARDS_PATH`), one line per
+  card with a SHA-256 hash (sorted keys, like the Journal) → `integrity: intact | MODIFIED` on read. Removed sentences are kept
+  in the file with their reasons for audit; the routes serve only their counts (D-33).
+- Client: NEWS CARDS panel on the News tab (`NewsCardsPanel`, `NewsCardView`, `.ncd-*` CSS on the `.idc*` frame, `RpCostReceipt`).
+  Tests: `tests/newsCard.test.js` (contract, mocked `callAgent`) and `tests/newsCardTransport.test.js` (real transport, receipt,
+  `W#` passages, top-story rule, no-scheduler guard).
+- **Financial Times content is never used (D-38).** The search tool is sent `blocked_domains: ["ft.com"]`; a search citation from
+  ft.com is registered with no passage (so it supports nothing); an FT headline is not offered to the writer and is refused as the
+  story (422 `available: false`). **Market freshness is aged against now** (`markets.ageFreshness`) before the evidence lines and
+  chips are built, so an hours-old print is never handed to the writer or the checker as "Real-time" (Codex review of PR #19).
+- **The top-story reason is a gated sentence too.** The writer's `selection.reason` is never stored or shown as written: it becomes the
+  one sentence of section `whySelected` ("Why this story"), passes gate A and gate B or is removed and counted. Only the top-story
+  button produces it.
 
 ## Trade Journal (`server/journal/`, `routes/journal.js`) — stages 1–2 of 3 (D-14, D-16, D-18)
 - **Every generated idea is logged automatically** by `ideas/generator.js` before it is
@@ -510,7 +570,7 @@ Current status: **all suites passing** (run `npm test` for the count).
 `server/middleware/auth.js` guards all mutating (POST/PATCH/DELETE) routes.
 - If `DISPATCH_ADMIN_KEY` env var is **not set**: no-op (dev mode, open access).
 - If set: requires `x-dispatch-key` header matching exactly.
-- Applied per-route (not globally) in: ideas.js, markets.js, import.js, events.js, risk.js, research.js.
+- Applied per-route (not globally) in: ideas.js, markets.js, import.js, events.js, risk.js, research.js, news.js (POST /api/news/card).
 
 ## Institutional Research — five-agent pipeline + interrogation
 

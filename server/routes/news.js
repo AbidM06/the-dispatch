@@ -3,12 +3,19 @@
  * GET /api/news              — live market headlines + macro calendar
  * GET /api/news/:ticker      — company-specific news + sentiment
  * GET /api/news/calendar     — earnings + economic events calendar
+ * POST /api/news/card        — { headlineId } | { top: true } → a news card (2 AI calls, button-driven; WO-03)
+ * GET  /api/news/cards       — stored news cards, newest first (no AI)
+ * GET  /api/news/cards/:id   — one stored card (no AI)
+ * No route edits or deletes a card: the store is append-only.
  */
 "use strict";
 
 const { Router } = require("express");
 const cache      = require("../cache");
 const finnhub    = require("../providers/finnhub");
+const requireWriteAuth = require("../middleware/auth");
+const newsCard   = require("../news/card");
+const cardStore  = require("../news/store");
 
 const router = Router();
 
@@ -96,6 +103,55 @@ router.get("/calendar", async (req, res) => {
     ...(econ.note ? { economicNote: econ.note } : {}),
     daysAhead,
   }));
+});
+
+// ── News cards (WO-03) — all before /:ticker, which would otherwise swallow "cards" ──
+async function currentHeadlines() {
+  const cached = cache.get("news:market");
+  if (cached && cached.length) return cached;
+  const fresh = await finnhub.getMarketNews("general", 12);
+  cache.set("news:market", fresh, finnhub.TTL_NEWS_MS);
+  return fresh;
+}
+
+/** The stored FRED calendar (never fetches); a copy older than 3 days is tagged, as for idea cards. */
+function currentCalendar() {
+  const cal = econCalendar.getCalendar({ daysAhead: 45 });
+  if (!cal.available) return [];
+  return cal.stale ? cal.events.map(e => ({ ...e, calendarStale: true })) : cal.events;
+}
+
+router.post("/card", requireWriteAuth, async (req, res) => {
+  const top = req.body?.top === true;
+  const headlineId = req.body?.headlineId ?? null;
+  if (!top && headlineId == null) return res.status(400).json({ error: "Send { headlineId } or { top: true }." });
+  let headlines;
+  try { headlines = await currentHeadlines(); }
+  catch (err) { return res.status(503).json({ available: false, reason: `Headlines could not be loaded (${err.message}). Nothing was stored.` }); }
+  if (!top && !headlines.some(h => String(h.id) === String(headlineId))) {
+    return res.status(404).json({ error: "That headline is no longer in the current news feed — reload News and try again." });
+  }
+  try {
+    const card = await newsCard.buildCard({ headlines, calendar: currentCalendar(), focusId: headlineId, top });
+    res.json({ card });
+  } catch (err) {
+    if (err.unavailable) {
+      return err.status === 404 ? res.status(404).json({ error: err.message })
+        : res.status(err.status || 503).json({ available: false, reason: err.message, at: new Date().toISOString() });
+    }
+    console.error("[news-card]", err);
+    res.status(503).json({ available: false, reason: "The news card could not be built: " + err.message, at: new Date().toISOString() });
+  }
+});
+
+router.get("/cards", (req, res) => {
+  res.json({ cards: cardStore.list({ limit: Math.min(parseInt(req.query.limit, 10) || 50, 200) }) });
+});
+
+router.get("/cards/:id", (req, res) => {
+  const card = cardStore.get(req.params.id);
+  if (!card) return res.status(404).json({ error: "News card not found" });
+  res.json({ card });
 });
 
 // GET /api/news/:ticker
