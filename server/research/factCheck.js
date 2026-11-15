@@ -138,4 +138,5 @@ function checkClaims(claims, macroCtx) {
   return { settledIds, sources: [...sourcesBySeries.values()], results };
 }
 
-module.exports = { checkClaims, RULES, NOT_A_LEVEL };
+// NUMBER / TENOR / ISO_DATE are shared with the news card's gate A (server/news/gates.js).
+module.exports = { checkClaims, RULES, NOT_A_LEVEL, NUMBER, TENOR, ISO_DATE };

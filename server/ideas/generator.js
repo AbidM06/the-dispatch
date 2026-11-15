@@ -24,7 +24,6 @@
 const crypto   = require("crypto");
 const { z }    = require("zod");
 const { callAgent, modelForRole } = require("../research/llm");
-const markets  = require("../markets/service");
 const store    = require("./store");
 const journal  = require("../journal/store");
 
@@ -55,73 +54,8 @@ const IdeaSchema = z.object({
   basedOn:      z.array(z.string()).min(1).transform(a => a.slice(0, 15)),
 });
 
-// ── context builders ─────────────────────────────────────────────────────────
-function marketContext() {
-  const snap = markets.getSnapshot();
-  const registry = {};
-  const lines = [];
-  for (const it of (snap?.items || []).filter(i => i.ok)) {
-    const q = it.quote;
-    const ref = `M:${it.id}`;
-    registry[ref] = {
-      kind: "market", ref, label: `${it.label} ${q.value}${it.unit === "%" ? "%" : ""}`,
-      url: q.sourceUrl, publisher: q.source, publishedAt: q.releasedAt || q.asOf, observedAt: q.asOf || null, marketId: it.id, value: q.value,
-      freshness: it.stale ? "stale" : it.freshness?.label, cadence: q.cadence || null,
-      history: it.history || null,   // dynamic markets: lets the Journal find history after the market leaves the snapshot
-    };
-    const chg = q.changePct != null ? `${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%` :
-                q.change != null ? `${q.change >= 0 ? "+" : ""}${q.change}` : "n/a";
-    lines.push(`[${ref}] ${it.label} (${it.group}) = ${q.value}${it.unit === "%" ? "%" : ""} | chg ${chg} | ${it.stale ? "STALE" : it.freshness?.label} | as of ${q.asOf} | ${q.source}`);
-  }
-  return { registry, text: lines.join("\n"), generatedAt: snap?.generatedAt || null };
-}
-
-/** `previous` is a plain value on Finnhub-shaped events and a list of { text } readings on FRED calendar events (D-31). */
-function previousText(p) {
-  return Array.isArray(p) ? p.map(r => r && r.text).filter(Boolean).join("; ") : (p == null ? "" : String(p));
-}
-
-function calendarContext(events = []) {
-  const registry = {}, lines = [];
-  events.slice(0, 12).forEach((e, i) => {
-    const ref = `C${i + 1}`;
-    const when = e.date || e.time || "";
-    const prev = previousText(e.previous);
-    registry[ref] = {
-      kind: "calendar", ref, label: `${`${e.event}${e.country ? ` (${e.country})` : ""} ${when}`.trim()}${e.calendarStale ? " (STALE calendar)" : ""}`,
-      url: e.sourceUrl || null,
-      publisher: e.source ? `${e.source} release calendar` : e.seeded ? "Dispatch calendar (seeded)" : "Finnhub",
-      publishedAt: null,
-      ...(e.calendarStale ? { stale: true } : {}),
-    };
-    lines.push(`[${ref}] ${[when, e.country, e.event].filter(Boolean).join(" ")}${e.estimate ? ` est ${e.estimate}` : ""}${prev ? ` prev ${prev}` : ""}${e.calendarStale ? " | STALE: calendar last refreshed over 3 days ago, this date may have changed" : ""}`);
-  });
-  return { registry, text: lines.join("\n") };
-}
-
-function newsContext(headlines = [], focusId = null) {
-  const registry = {}, lines = [];
-  headlines.slice(0, 15).forEach((h, i) => {
-    const ref = `N${i + 1}`;
-    registry[ref] = { kind: "news", ref, label: h.headline, url: h.url || null, publisher: h.source || "Finnhub", publishedAt: h.datetime || null, newsId: h.id };
-    const focus = focusId != null && String(h.id) === String(focusId) ? " ◀ FOCUS" : "";
-    lines.push(`[${ref}]${focus} ${h.datetime || ""} · ${h.source || ""} · ${h.headline}${h.summary ? ` — ${h.summary.slice(0, 280)}` : ""}`);
-  });
-  return { registry, text: lines.join("\n") };
-}
-
-function researchContext(report) {
-  const registry = {
-    REPORT: { kind: "report", ref: "REPORT", label: `${report.reportType} research report v${report.version || 1} (${report.reportId})`, url: null, publisher: "The Dispatch Research", publishedAt: report.generatedAt, reportId: report.reportId },
-  };
-  for (const s of (report.sources || [])) {
-    registry[s.sourceId] = { kind: "report-source", ref: s.sourceId, label: s.title, url: s.url || null, publisher: s.publisher, publishedAt: s.publishedAt || s.dataAsOf || null };
-  }
-  const body = JSON.stringify({ thesisFrame: report.thesisFrame, research: report.research }).slice(0, 14_000);
-  const srcLines = (report.sources || []).slice(0, 25).map(s => `[${s.sourceId}] ${s.publisher}: ${s.title}${s.publishedAt ? ` (${s.publishedAt})` : ""}`);
-  const qa = report.institutionalQA ? `QA status: ${report.institutionalQA.status || "n/a"}, score ${report.institutionalQA.score ?? "n/a"}` : "QA: not run";
-  return { registry, text: `[REPORT] generated ${report.generatedAt} · ${qa}\n${body}\n\nReport sources:\n${srcLines.join("\n")}` };
-}
+// ── context builders (shared with news cards: server/inputs/registry.js) ───
+const { marketContext, calendarContext, newsContext, researchContext } = require("../inputs/registry");
 
 // ── prompt ───────────────────────────────────────────────────────────────────
 const SYSTEM = `You are a senior cross-asset strategist writing ONE actionable trade idea for a sophisticated individual investor.
