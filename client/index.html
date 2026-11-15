@@ -5122,7 +5122,7 @@ function App() {
         )
       ),
 
-      // ── Numbered takeaways (like GS bullet points)
+      // ── Numbered takeaways (bullet-point summary)
       r.abstract && React.createElement('div', { className:'rp-takeaways' },
         r.abstract.map((bullet, i) =>
           React.createElement('div', { key:i, className:'rp-takeaway' },
@@ -5684,12 +5684,12 @@ function App() {
     const src = researchSource || 'seeded';
 
     const REPORT_TYPES = [
-      { id:'macro',       label:'MACRO',       desc:'Global Economics Comment — macro transmission, CB policy, cross-asset' },
+      { id:'macro',       label:'MACRO',       desc:'Macro note — macro transmission, CB policy, cross-asset' },
       { id:'commodities', label:'COMMODITIES', desc:'Commodities Comment — supply/demand, price targets, Dispatch Angle' },
-      { id:'equity',      label:'EQUITY',      desc:'US Equity Views — EPS forecasts, AI uplift, sector rotation, consensus vs Dispatch' },
+      { id:'equity',      label:'EQUITY',      desc:'US equity strategy — EPS forecasts, AI uplift, sector rotation, consensus vs Dispatch' },
       { id:'fx',          label:'FX',          desc:'G10 FX Viewpoint — pair views, CB reaction functions, trade barbell' },
       { id:'rates',       label:'RATES',       desc:'Rates & Carry deep-dive — the puzzle, CFTC flows, catalysts, level targets' },
-      { id:'thematic',    label:'THEMATIC',    desc:'Thematic Lens — 4 structural themes, 8 predictions, key debates, stock focus list' },
+      { id:'thematic',    label:'THEMATIC',    desc:'Themes report — 4 structural themes, 8 predictions, key debates, stock focus list' },
       { id:'sector',      label:'SECTOR',      desc:'Sector Deep-Dive — industry structure, margins, valuation, leaders/laggards, relative value' },
     ];
 
