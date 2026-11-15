@@ -127,7 +127,7 @@ async function callAgent(role, system, user, opts = {}) {
 
   budget.checkAndIncrement();
 
-  const { maxTokens = 3000, search = false, usage = null, sharedPrefix = null, withContent = false } = opts;
+  const { maxTokens = 3000, search = false, usage = null, sharedPrefix = null, withContent = false, blockedDomains = null } = opts;
   const model = modelForRole(role);
 
   const body = {
@@ -136,10 +136,15 @@ async function callAgent(role, system, user, opts = {}) {
     system,
     messages: [{ role: "user", content: buildUserContent(user, sharedPrefix) }],
   };
+  // blockedDomains: bare domains the search may never return (the tool's own `blocked_domains` field).
+  const searchTool = () => {
+    const t = anthropic.webSearchTool(model);
+    return Array.isArray(blockedDomains) && blockedDomains.length ? { ...t, blocked_domains: blockedDomains } : t;
+  };
   if (search === "force") {
-    Object.assign(body, models.searchRequest(model, system, anthropic.webSearchTool(model)));
+    Object.assign(body, models.searchRequest(model, system, searchTool()));
   } else if (search) {
-    body.tools = [anthropic.webSearchTool(model)];
+    body.tools = [searchTool()];
   }
 
   let json;

@@ -88,6 +88,7 @@ Rules:
 - Use figures EXACTLY as they appear in the inputs or in a page you searched. Never compute, round, convert or recall a figure.
 - No recommendation, no trade, no direction call, no price target, no "should". Explain; do not advise.
 - Every sentence lists in "basedOn" the input ids it rests on (e.g. "N1", "M:BRENT", "C2", "F:dgs10"). Cite only ids that appear in the inputs. A sentence that rests on a web page you searched must contain the cited text from that page.
+- Do not use Financial Times (ft.com) content, in a search or from memory.
 - A sentence with nothing to cite is left out. Fewer sentences is correct; zero is allowed in every section.
 - "sentiment" is allowed ONLY when it cites a measured sentiment input (a prediction-market line, group "predictions"); otherwise return an empty list.
 - Do not write URLs. Do not describe the inputs' formatting.
@@ -189,8 +190,17 @@ async function buildCard({ headlines = [], calendar = [], focusId = null, top = 
   }
   if (!headlines.length) throw unavailable("No headlines are loaded (check FINNHUB_API_KEY), so there is nothing to explain.");
 
+  // Financial Times content is not used (D-38): refused as the story, never offered as an input.
+  const isFt = (h) => gates.isExcludedSource(h.url, h.source);
+  if (!top && headlines.some(h => String(h.id) === String(focusId) && isFt(h))) {
+    throw unavailable("Financial Times content is not used for news cards, so this headline cannot be explained. Nothing was stored.", 422);
+  }
+  headlines = headlines.filter(h => !isFt(h));
+  if (!headlines.length) throw unavailable("No usable headlines are loaded, so there is nothing to explain.");
+
   const previous = top ? store.latest() : null;
-  const snapshot = markets.getSnapshot();
+  // Aged against now: a print labelled "Real-time" at the last refresh is not real-time hours later.
+  const snapshot = markets.ageFreshness(markets.getSnapshot());
   const news  = inputsLib.newsEvidence(headlines, top ? null : focusId);
   const mk    = inputsLib.marketEvidence();
   const cal   = inputsLib.calendarEvidence(calendar);
@@ -205,7 +215,7 @@ async function buildCard({ headlines = [], calendar = [], focusId = null, top = 
     const system = WRITER_SYSTEM.replace("<SELECTION>", top ? SELECTION_FIELD : "");
     try {
       out = await callAgent("newscard", system, writerPrompt({ focusRef, top, news, mk, cal, facts, previous }),
-        { maxTokens: 8000, search: true, withContent: true });   // web search on, no max_uses (D-43)
+        { maxTokens: 8000, search: true, withContent: true, blockedDomains: gates.EXCLUDED_DOMAINS });   // web search on, no max_uses (D-43)
     } catch (err) {
       throw unavailable(`The news card writer failed: ${err.message} Nothing was stored.`);
     }

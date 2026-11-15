@@ -49,6 +49,8 @@ const SNAPSHOT = {
   items: [
     { id: "BRENT", label: "Brent crude", group: "commodities", ok: true, unit: null, quote: q(100.5, 3.5), freshness: { label: "Delayed ~10 min" } },
     { id: "GOLD", label: "Gold", group: "commodities", ok: true, unit: null, stale: true, staleSince: "2026-09-25T20:00:00.000Z", quote: q(2600, -0.4), freshness: { label: "Last trade" } },
+    // graded "Real-time" at refresh time, but the print is long past by the time a card is made
+    { id: "SPX", label: "S&P 500", group: "equities", ok: true, unit: null, quote: q(5700, 0.2), freshness: { code: "realtime", label: "Real-time" } },
     { id: "PM-FEDCUT", label: "Fed cuts in December?", group: "predictions", ok: true, unit: "%",
       quote: q(62, null, { source: "Polymarket", sourceUrl: "https://polymarket.com/event/fed-cut" }), freshness: { label: "Delayed ~10 min" } },
   ],
@@ -233,6 +235,52 @@ describe("WO-03 gate A — digits in dates and tenor names are not figures", () 
     expect(figuresSupported("Yields rose 10bp.", ["US 10Y yield 4.31% (+2bp) as of 2026-09-28"])).toBe(false);
     expect(figuresSupported("Yields rose 2bp to 4.31%.", ["US 10Y yield 4.31% (+2bp) as of 2026-09-28"])).toBe(true);
     expect(figuresSupported("The move is the largest of 2026.", ["Oil jumps · 2026-09-28T08:00:00.000Z"])).toBe(true);
+  });
+});
+
+describe("Codex review of PR #19 — freshness is aged, Financial Times is excluded", () => {
+  test("an old print is never given to the writer or the checker as Real-time", async () => {
+    const app = setup({ writer: writerReply({ whyItMatters: [S("The S&P 500 is up 0.2% at 5700.", "M:SPX")] }) });
+    const c = (await make(app)).body.card;
+    expect(c.whyItMatters).toHaveLength(1);
+    expect(seen.newscard[0].user).toContain("S&P 500");
+    expect(seen.newscard[0].user).not.toContain("Real-time");
+    expect(seen.newscheck[0].user).not.toContain("Real-time");
+    expect(allText(c)).not.toContain("Real-time");
+  });
+
+  test("a Financial Times headline is refused as the story and never offered as an input", async () => {
+    mockHeadlines.push({ id: 103, headline: "FT-ONLY-HEADLINE about bond markets", summary: "", source: "Financial Times", url: "https://www.ft.com/content/abc", datetime: "2026-09-28T06:00:00.000Z" });
+    try {
+      const app = setup();
+      const refused = await make(app, { headlineId: 103 });
+      expect(refused.status).toBe(422);
+      expect(refused.body.available).toBe(false);
+      expect(refused.body.reason).toMatch(/Financial Times/);
+      expect(callAgent).not.toHaveBeenCalled();
+      await make(app, { headlineId: 101 });
+      expect(seen.newscard[0].user).not.toContain("FT-ONLY-HEADLINE");
+    } finally { mockHeadlines.pop(); }
+  });
+
+  test("a search citation from ft.com supports nothing, even with a passage", () => {
+    jest.resetModules();
+    const gates = require("../server/news/gates");
+    const cite = (url) => ({ type: "web_search_result_location", url, title: "t", cited_text: "Refinery margins hit 32 dollars a barrel." });
+    const reply = (url) => ({ content: [
+      { type: "text", text: '{"whatHappened":[],"whyItMatters":[{"text":"' },
+      { type: "text", text: "Refinery margins hit 32 dollars a barrel.", citations: [cite(url)] },
+      { type: "text", text: '","basedOn":[]}],"sentiment":[],"whatWouldChangeIt":[]}' },
+    ] });
+    const run = (url) => {
+      const r = gates.readWriterReply(reply(url));
+      const inputs = { registry: r.searchInputs.registry, evidence: r.searchInputs.evidence, stale: new Set(), sentiment: new Set() };
+      return gates.gateA(r.sentences, inputs);
+    };
+    expect(run("https://example.org/margins").kept).toHaveLength(1);
+    const ft = run("https://www.ft.com/content/abc");
+    expect(ft.kept).toHaveLength(0);
+    expect(ft.removed[0].reason).toBe("search_evidence_unavailable");
   });
 });
 

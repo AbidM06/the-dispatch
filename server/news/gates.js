@@ -47,6 +47,17 @@ const MARK = /⟦cite:(\d+)⟧([\s\S]*?)⟦\/cite⟧/g;
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
+// Publishers whose content a news card never uses (D-38: Financial Times, for now). A search
+// citation from one is registered without a passage, so it can support nothing; a headline
+// from one is not offered to the writer at all (card.js).
+const EXCLUDED_DOMAINS = ["ft.com"];
+function isExcludedSource(url, publisher = "") {
+  let host = "";
+  try { host = new URL(String(url || "")).hostname.toLowerCase().replace(/^www\./, ""); } catch { /* not a URL */ }
+  if (host && EXCLUDED_DOMAINS.some(d => host === d || host.endsWith("." + d))) return true;
+  return /^\s*(?:the\s+)?financial\s+times\s*$|^\s*ft(?:\.com)?\s*$/i.test(String(publisher || ""));
+}
+
 /**
  * readWriterReply — parse the writer's JSON and collect its search evidence.
  * @param {string|{text,content}} out  callAgent's result (a string when no content was returned)
@@ -64,6 +75,7 @@ function readWriterReply(out) {
   const byKey = new Map();
   const meta = content ? resultMeta(content) : new Map();
   const register = (url, title, passage) => {
+    if (isExcludedSource(url)) passage = null;   // excluded publisher: never evidence (D-38)
     const key = `${url}\u0000${passage || ""}`;
     if (byKey.has(key)) return byKey.get(key);
     const ref = `W${byKey.size + 1}`;
@@ -226,4 +238,4 @@ function applyVerdicts(kept, reply) {
   return { kept: out, removed, unchecked };
 }
 
-module.exports = { SECTIONS, REASONS, readWriterReply, gateA, checkPrompt, applyVerdicts, CHECK_SYSTEM, figuresSupported, _internal: { figuresOf, finalTextBlocks } };
+module.exports = { SECTIONS, REASONS, EXCLUDED_DOMAINS, isExcludedSource, readWriterReply, gateA, checkPrompt, applyVerdicts, CHECK_SYSTEM, figuresSupported, _internal: { figuresOf, finalTextBlocks } };

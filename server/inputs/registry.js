@@ -108,10 +108,14 @@ function bpMove(it) {
  */
 function marketEvidence() {
   const base = marketContext();
-  const snap = markets.getSnapshot();
+  // Freshness is graded at refresh time; re-grade it against NOW so an hours-old print is never
+  // handed to the writer, the checker or the card's chips as "Real-time" (Codex review of PR #19).
+  const snap = markets.ageFreshness(markets.getSnapshot());
+  const registry = { ...base.registry };
   const evidence = {}, stale = new Set(), sentiment = new Set(), lines = [];
   for (const it of (snap?.items || []).filter(i => i.ok)) {
     const q = it.quote, ref = `M:${it.id}`;
+    if (registry[ref]) registry[ref] = { ...registry[ref], freshness: it.stale ? "stale" : it.freshness?.label };
     const bp = bpMove(it);
     const line = `${it.label} (${it.group}) = ${q.value}${it.unit === "%" ? "%" : ""} | chg ${fmtChg(q)}${bp != null ? ` (${bp >= 0 ? "+" : ""}${bp}bp)` : ""} | ${it.stale ? "STALE" : it.freshness?.label} | as of ${q.asOf} | ${q.source}`;
     evidence[ref] = line;
@@ -119,7 +123,7 @@ function marketEvidence() {
     if (it.stale) stale.add(ref);
     if (it.group === "predictions") sentiment.add(ref);
   }
-  return { registry: base.registry, text: lines.join("\n"), generatedAt: base.generatedAt, evidence, stale, sentiment };
+  return { registry, text: lines.join("\n"), generatedAt: base.generatedAt, evidence, stale, sentiment };
 }
 
 function newsEvidence(headlines = [], focusId = null) {

@@ -289,6 +289,10 @@ data/                      portfolio_snapshot.json lives here (gitignored)
 - Client: NEWS CARDS panel on the News tab (`NewsCardsPanel`, `NewsCardView`, `.ncd-*` CSS on the `.idc*` frame, `RpCostReceipt`).
   Tests: `tests/newsCard.test.js` (contract, mocked `callAgent`) and `tests/newsCardTransport.test.js` (real transport, receipt,
   `W#` passages, top-story rule, no-scheduler guard).
+- **Financial Times content is never used (D-38).** The search tool is sent `blocked_domains: ["ft.com"]`; a search citation from
+  ft.com is registered with no passage (so it supports nothing); an FT headline is not offered to the writer and is refused as the
+  story (422 `available: false`). **Market freshness is aged against now** (`markets.ageFreshness`) before the evidence lines and
+  chips are built, so an hours-old print is never handed to the writer or the checker as "Real-time" (Codex review of PR #19).
 
 ## Trade Journal (`server/journal/`, `routes/journal.js`) — stages 1–2 of 3 (D-14, D-16, D-18)
 - **Every generated idea is logged automatically** by `ideas/generator.js` before it is

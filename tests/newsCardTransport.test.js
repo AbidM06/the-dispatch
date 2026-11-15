@@ -100,6 +100,7 @@ describe("10. both model calls are priced and on the stored card's receipt", () 
     expect(w.tools).toHaveLength(1);
     expect(w.tools[0].name).toBe("web_search");
     expect(w.tools[0]).not.toHaveProperty("max_uses");                 // D-43: search not capped
+    expect(w.tools[0].blocked_domains).toEqual(["ft.com"]);            // D-38: no Financial Times content
     expect(b.tools).toBeUndefined();
 
     const stored = (await request(app).get(`/api/news/cards/${res.body.card.id}`)).body.card;
