@@ -44,6 +44,7 @@ data/ai_spend.json
 data/ai_spend.json.tmp
 data/redteam_log.jsonl
 data/journal.jsonl
+data/news_cards.jsonl
 data/journal_tracking.json
 data/journal_tracking.json.tmp
 
