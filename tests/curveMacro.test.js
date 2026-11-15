@@ -223,13 +223,21 @@ describe("macro series", () => {
   });
 });
 
+// Fake ONLY the Date object (timers stay real, so supertest's sockets still work).
+const ONLY_DATE = ["hrtime", "nextTick", "performance", "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
+  "requestIdleCallback", "cancelIdleCallback", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout"];
+
 describe("routes", () => {
+  afterEach(() => jest.useRealTimers());
   function app() {
     jest.doMock("../server/providers/anthropic", () => ({ fetchAllAnalysis: jest.fn(), fetchTickerExplain: jest.fn(), callClaude: jest.fn() }));
     return require("../server/index");
   }
 
   test("GET /macro lists the catalogue; /macro/:id validates id and range; /curve serves the curve", async () => {
+    // The route builds the curve against the real clock; pin it to the fixture's day so the
+    // fixture (FRED data ending 2026-10-19) is still "latest" whatever today's date is.
+    jest.useFakeTimers({ now: NOW, doNotFake: ONLY_DATE });
     global.fetch = curveFetch();
     const a = app();
     const list = await request(a).get("/api/markets/macro");
