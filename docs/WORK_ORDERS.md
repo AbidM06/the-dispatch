@@ -235,12 +235,14 @@ wording beyond the labels named above.
 
 ---
 
-## WO-03 — News card · status: spec written, waiting for the owner's go-ahead (D-35, D-38, D-41)
+## WO-03 — News card · status: APPROVED by the owner 2026-11-15 (D-43); builder Opus 5.5; launch after WO-02 is merged (D-35, D-38, D-41, D-43)
 
 **Goal:** press a button on a headline and get a card that says what happened, what moved, why
 it matters and what to watch — where every sentence shows its evidence, and anything without
 evidence has been removed by code and counted. This is the first full build of the target
-shape. Target cost about $0.10 a card, shown on a receipt.
+shape. There is no per-card cost target and no search limit (D-43): the real cost is shown on
+the receipt. Overseer's rough estimate $0.15-0.30 a card, NOT measured; the daily USD cap
+stays the runaway guard.
 
 **The card explains; it does not recommend.** A trade opinion still comes only from the
 existing "generate idea" button, which already cites supplied inputs, is logged to the Journal
@@ -250,7 +252,7 @@ later cleanup, after the owner has seen the card work on the Mac with the real A
 ### The graph
 
 ```
-inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (code) ─► gate B (Haiku, 1 call) ─► merge + store (code)
+inputs (code) ─► writer (Sonnet, 1 call, web search not capped) ─► gate A (code) ─► gate B (Sonnet, 1 call) ─► merge + store (code)
 ```
 
 1. **Inputs — code, $0.** Build one registry of everything the writer may cite, each with an
@@ -261,9 +263,10 @@ inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (cod
 2. **What moved — code, $0.** From the snapshot alone: per asset group, the instruments with
    the largest move since their previous close (rates and spreads in bp, others in %). Each row
    keeps its source, time and STALE flag. No model writes this section.
-3. **Writer — one Sonnet call** (`callAgent`, new role `newscard`), at most ONE web search
-   (`max_uses: 1` on the search tool — confirm the parameter against the API docs; if it is
-   not supported, send no search tool and say so in the PR). It receives the focus headline,
+3. **Writer — one Sonnet call** (`callAgent`, new role `newscard`), with the web-search tool and
+   **no limit on the number of searches** (D-43: the owner wants accuracy first; do not send
+   `max_uses`). Build the request with `webSearchTool(model)` / `models.searchRequest` as
+   research does. The receipt shows how many searches ran and what they cost. It receives the focus headline,
    the other headlines, the market lines, calendar and facts. It returns JSON only:
    - `whatHappened`: 2–3 sentences, each `{ text, basedOn: [ids] }`
    - `whyItMatters`: 2–5 sentences, each `{ text, basedOn }` — the chain from event to
@@ -293,7 +296,7 @@ inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (cod
    handling in `server/research/factCheck.js`; be conservative the same way). A sentence that
    fails is removed and recorded with its reason. A sentence citing a STALE input is kept and
    tagged STALE.
-5. **Gate B — one Haiku 5.5 call, no search (does the evidence support the sentence?).** It
+5. **Gate B — one Sonnet call (`models.sonnetModel()`, D-43; not Haiku), no search (does the evidence support the sentence?).** It
    sees ONLY each surviving model-written sentence — `whatHappened` included, so a false
    account of the story cannot pass on a citation alone — next to the text of its own cited
    evidence (registry lines and API-returned passages, never the writer's prose): not the
