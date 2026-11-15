@@ -293,6 +293,9 @@ data/                      portfolio_snapshot.json lives here (gitignored)
   ft.com is registered with no passage (so it supports nothing); an FT headline is not offered to the writer and is refused as the
   story (422 `available: false`). **Market freshness is aged against now** (`markets.ageFreshness`) before the evidence lines and
   chips are built, so an hours-old print is never handed to the writer or the checker as "Real-time" (Codex review of PR #19).
+- **The top-story reason is a gated sentence too.** The writer's `selection.reason` is never stored or shown as written: it becomes the
+  one sentence of section `whySelected` ("Why this story"), passes gate A and gate B or is removed and counted. Only the top-story
+  button produces it.
 
 ## Trade Journal (`server/journal/`, `routes/journal.js`) — stages 1–2 of 3 (D-14, D-16, D-18)
 - **Every generated idea is logged automatically** by `ideas/generator.js` before it is

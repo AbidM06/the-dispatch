@@ -18,7 +18,9 @@
 
 const { NUMBER, TENOR, ISO_DATE } = require("../research/factCheck");
 
-const SECTIONS = ["whatHappened", "whyItMatters", "sentiment", "whatWouldChangeIt"];
+// "whySelected" is the writer's reason for its top-story pick (card.js fills it from `selection`). It is a
+// sentence like any other: it goes through both gates or it is not shown (Codex review of PR #19).
+const SECTIONS = ["whySelected", "whatHappened", "whyItMatters", "sentiment", "whatWouldChangeIt"];
 const REASONS = ["no_evidence", "unknown_source", "search_evidence_unavailable", "sentiment_needs_measured_input",
   "figure_not_in_evidence", "not_supported", "recommendation"];
 

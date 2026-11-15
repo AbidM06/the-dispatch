@@ -235,11 +235,17 @@ async function buildCard({ headlines = [], calendar = [], focusId = null, top = 
       if (repeatsWithoutNews(p.selection, { ...news.registry[ref], ref }, previous, inputsSoFar)) {
         throw unavailable("The writer picked the same story as the previous card without citing anything new since that card. Nothing was stored — open the previous card, or try again later.");
       }
-      selection = { ref, reason: typeof p.selection.reason === "string" ? p.selection.reason.slice(0, 400) : null,
+      selection = { ref,
         basedOn: (Array.isArray(p.selection.basedOn) ? p.selection.basedOn : []).filter(id => inputsSoFar.registry[id]),
         repeatOfPrevious: Boolean(previous && sameStory({ newsId: news.registry[ref].newsId, text: news.registry[ref].label }, previous.headline)) };
     }
     const h = news.registry[headlineRef];
+    // The writer's reason for its pick is gated like every other sentence — never shown unchecked.
+    // Only the top-story button produces one; a "whySelected" the writer adds on its own is ignored.
+    const why = top && p.selection && typeof p.selection.reason === "string" ? p.selection.reason.trim().slice(0, 400) : "";
+    const whyRead = why ? reply.attach(why) : null;
+    reply.sentences.whySelected = whyRead && whyRead.text
+      ? [{ text: whyRead.text, basedOn: Array.isArray(p.selection.basedOn) ? p.selection.basedOn : [], wIds: whyRead.ids }] : [];
 
     // 3. gate A — code
     const inputs = mergeInputs(news, mk, cal, facts, reply.searchInputs);
@@ -283,7 +289,7 @@ async function buildCard({ headlines = [], calendar = [], focusId = null, top = 
       generatedAt: new Date().toISOString(),
       origin: top ? "top" : "headline",
       headline: { text: h.label, source: h.publisher, url: h.url, publishedAt: h.publishedAt, newsId: h.newsId, ref: headlineRef },
-      ...(selection ? { selection } : {}),
+      ...(selection ? { selection, whySelected: section("whySelected") } : {}),
       whatHappened: section("whatHappened"),
       whatMoved: whatMoved(snapshot),
       whyItMatters: section("whyItMatters"),

@@ -16,6 +16,7 @@
  *           followed by the text of ITS OWN cited evidence only.
  *           reply { verdicts: [{ id: "S<n>", verdict: "SUPPORTS"|"PARTLY"|"NO", recommendation: bool, reason }] }
  *  Card     { id, headline: { text, source, url, publishedAt },
+ *             whySelected[]  (top-story cards only: the writer's reason for its pick, gated like any sentence),
  *             whatHappened[], whyItMatters[], sentiment[], whatWouldChangeIt[]   — sentences
  *               { text, basedOn: [{ ref, label, url, publisher, ... }], tags: [] , checkReason? },
  *             whatMoved[], whatToWatch[],
@@ -434,6 +435,38 @@ describe("WO-03 failure and storage rules", () => {
     expect(c.removed.total).toBe(1);
     const served = allText(c) + JSON.stringify((await request(app).get("/api/news/cards")).body);
     expect(served).not.toContain("SECRET-REMOVED-SENTENCE");
+  });
+
+  test("the top-story reason is gated like any sentence: never shown unchecked", async () => {
+    const pick = (reason, basedOn) => ({ ...writerReply(), selection: { ref: "N1", reason, basedOn } });
+
+    // an unsupported figure and a recommendation, with nothing cited → removed by code, counted, never served
+    const bad = setup({ writer: pick("Brent jumped 15%, so buy oil now.", []) });
+    const b = (await make(bad, { top: true })).body.card;
+    expect(b.whySelected).toEqual([]);
+    expect(b.removed.byReason.no_evidence).toBe(1);
+    expect(allText(b)).not.toContain("buy oil now");
+    expect(b.selection.reason).toBeUndefined();
+
+    // cited, but the checker calls it a recommendation → removed
+    const rec = setup({ writer: pick("It is the story to trade today.", ["N1"]),
+      check: checker({ "story to trade today": { verdict: "SUPPORTS", recommendation: true, reason: "advice" } }) });
+    const r = (await make(rec, { top: true })).body.card;
+    expect(r.whySelected).toEqual([]);
+    expect(r.removed.byReason.recommendation).toBe(1);
+
+    // supported → shown with its evidence, and it was sent to the checker
+    const good = setup({ writer: pick("It explains the 3.5% move in Brent.", ["N1", "M:BRENT"]) });
+    const g = (await make(good, { top: true })).body.card;
+    expect(texts(g.whySelected)).toEqual(["It explains the 3.5% move in Brent."]);
+    expect(g.whySelected[0].basedOn.map((x) => x.ref)).toEqual(expect.arrayContaining(["N1", "M:BRENT"]));
+    expect(seen.newscheck[0].user).toContain("It explains the 3.5% move in Brent.");
+
+    // a card made from a chosen headline has no such section, whatever the writer adds
+    const plain = setup({ writer: { ...writerReply(), whySelected: [S("Smuggled in.", "N1")], selection: { ref: "N1", reason: "Smuggled reason.", basedOn: ["N1"] } } });
+    const p = (await make(plain)).body.card;
+    expect(p.whySelected).toBeUndefined();
+    expect(allText(p)).not.toContain("Smuggled");
   });
 
   test("the top-story button: the writer's selection must be a real headline, else 503", async () => {
