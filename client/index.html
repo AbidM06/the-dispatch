@@ -1205,6 +1205,25 @@ tbody tr:hover td { background: var(--bg-alt); }
 .news-idea-btn { background: transparent; border: 1px solid var(--border); color: var(--ink-mid); font-family: var(--font); font-size: 8.5px; letter-spacing: .1em; padding: 1px 7px; border-radius: 2px; cursor: pointer; margin-left: 8px; }
 .news-idea-btn:hover:not(:disabled) { border-color: var(--gold-border); color: var(--gold); }
 .news-idea-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* News card (WO-03): reuses the idea-card frame (.idc*); only the sentence/evidence pieces are new */
+.ncd-sec { margin: 10px 0 2px; }
+.ncd-sent { margin: 4px 0 8px; font-size: 12.5px; line-height: 1.6; color: var(--ink); }
+.ncd-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.ncd-chip { font-family: var(--mono); font-size: 9px; color: var(--ink-mid); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; text-decoration: none; }
+a.ncd-chip:hover { color: var(--gold); border-color: var(--gold-border); }
+.ncd-tag { font-family: var(--mono); font-size: 8.5px; letter-spacing: .08em; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 6px; border: 1px solid currentColor; vertical-align: 1px; }
+.ncd-tag-stale { color: var(--neg); }
+.ncd-tag-partly { color: var(--gold); }
+.ncd-tag-unchecked { color: var(--ink-low); }
+.ncd-why { font-size: 10.5px; color: var(--ink-mid); margin-left: 2px; }
+.ncd-banner { margin: 8px 12px; padding: 7px 10px; border: 1px solid var(--neg); border-radius: 4px; color: var(--neg); font-size: 11px; line-height: 1.5; }
+.ncd-table { width: 100%; border-collapse: collapse; font-size: 11px; margin: 4px 0 6px; }
+.ncd-table th { text-align: left; font-family: var(--mono); font-size: 8.5px; letter-spacing: .08em; color: var(--ink-low); font-weight: 700; padding: 3px 6px 3px 0; border-bottom: 1px solid var(--border); }
+.ncd-table td { padding: 4px 6px 4px 0; border-bottom: 1px solid var(--border); color: var(--ink); vertical-align: top; }
+.ncd-table td.ncd-num { font-family: var(--mono); white-space: nowrap; }
+.ncd-pos { color: var(--pos); } .ncd-neg { color: var(--neg); }
+.ncd-removed { font-family: var(--mono); font-size: 9.5px; color: var(--ink-low); margin: 10px 0 6px; letter-spacing: .03em; }
+.ncd-empty { font-size: 11.5px; color: var(--ink-mid); font-style: italic; margin: 4px 0 8px; }
 @media (max-width: 760px) { .idc-levels { grid-template-columns: repeat(3, 1fr); } .idc-grid { grid-template-columns: 1fr; } }
 /* ── Journal (stage 1) ── */
 .idc-sealed { padding: 12px; }
@@ -2047,6 +2066,11 @@ function App() {
   const [tickerNews, setTickerNews]   = useState(null);
   const [ideaCards, setIdeaCards]     = useState([]);
   const [ideaBusy, setIdeaBusy]       = useState(null);   // { origin, headlineId? } while generating
+  // News cards (WO-03): stored cards are READ on load (free); a new one is written only from a button.
+  const [newsCards, setNewsCards]           = useState([]);
+  const [newsCardOpen, setNewsCardOpen]     = useState(null);   // id of the open card
+  const [newsCardBusy, setNewsCardBusy]     = useState(null);   // 'top' | headline id while writing
+  const [newsCardUnavailable, setNewsCardUnavailable] = useState(null);   // 503 reason
   const [ideaOpen, setIdeaOpen]       = useState(null);   // id of expanded card
   const [ideaShowAll, setIdeaShowAll] = useState({});
   // Journal (stage 1). Pitch mode and sealed ideas persist per browser.
@@ -2199,6 +2223,7 @@ function App() {
     loadBrief();
     loadNews();
     loadIdeaCards();
+    loadNewsCards();
     loadBulletin();
     loadGlossary();
     loadBudgetStatus();
@@ -2375,6 +2400,33 @@ function App() {
       const resp = await apiFetch('/api/ideas?limit=100');
       setIdeaCards(resp.ideas || []);
     } catch (err) { /* non-critical */ }
+  }
+
+  // Stored news cards — a GET of the append-only file, no AI, no cost.
+  async function loadNewsCards() {
+    try {
+      const resp = await apiFetch('/api/news/cards');
+      setNewsCards(resp.cards || []);
+    } catch (err) { /* non-critical */ }
+  }
+
+  // Write a news card — two AI calls (writer with web search + evidence check). Button-driven only.
+  async function explainNews(body) {
+    setNewsCardBusy(body && body.top ? 'top' : body.headlineId);
+    setNewsCardUnavailable(null);
+    try {
+      const resp = await apiFetch('/api/news/card', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+      });
+      setNewsCards(list => [resp.card].concat(list.filter(c => c.id !== resp.card.id)));
+      setNewsCardOpen(resp.card.id);
+      loadBudgetStatus();
+    } catch (err) {
+      if (err.payload && err.payload.available === false) setNewsCardUnavailable(err.payload.reason || 'The news card could not be written.');
+      else showToast('News card failed: ' + err.message, 'error');
+      loadBudgetStatus();
+    }
+    setNewsCardBusy(null);
   }
 
   async function generateIdea(origin, body) {
@@ -4637,17 +4689,18 @@ function App() {
   // What this report actually cost — every figure from the API's own usage
   // counts, priced at list rates. Unpriced calls (e.g. the OpenAI fallback)
   // are counted, never shown as $0.
-  function RpCostReceipt(c) {
+  function RpCostReceipt(c, title) {
     if (!c) return null;
     const usd = (n) => '$' + (n || 0).toFixed(n >= 1 ? 2 : 3);
     const roleNames = { draft:'Lead draft', extract:'Claim extraction', auditor:'Data auditor', redteam:'Red team',
-                        portfolio:'Cross-asset PM', chair:'IC chair', lead:'Revision', other:'Other' };
+                        portfolio:'Cross-asset PM', chair:'IC chair', lead:'Revision', other:'Other',
+                        newscard:'News card writer', newscheck:'Evidence check' };
     const roles = Object.entries(c.byRole || {});
     const savings = [];
     if (c.batchSavingsUSD > 0) savings.push('saved ' + usd(c.batchSavingsUSD) + ' by batching');
     return React.createElement('details', { className:'rp-cost' },
       React.createElement('summary', null,
-        React.createElement('span', null, 'COST OF THIS REPORT'),
+        React.createElement('span', null, title || 'COST OF THIS REPORT'),
         React.createElement('span', { className:'rp-cost-total' }, usd(c.totalUSD)),
         React.createElement('span', null, c.calls + ' AI calls · ' + c.webSearches + ' web searches' +
           (c.durationMs ? ' · took ' + (c.durationMs >= 60000 ? Math.floor(c.durationMs / 60000) + 'm ' + Math.round((c.durationMs % 60000) / 1000) + 's' : Math.round(c.durationMs / 1000) + 's') : '') +
@@ -6485,6 +6538,140 @@ function App() {
     );
   }
 
+  // ── NEWS CARDS (WO-03) ─────────────────────────────────────────────────────
+  // A card explains one headline; it never recommends (D-41). Every sentence shows the
+  // inputs it rests on as chips; removed sentences are counted, never shown (D-33).
+  const NCD_REASONS = {
+    no_evidence: 'no evidence', unknown_source: 'cited an unknown source', figure_not_in_evidence: 'figure not in its evidence',
+    sentiment_needs_measured_input: 'sentiment without a measured input', not_supported: 'not supported by its evidence',
+    recommendation: 'a recommendation (news cards explain only)', search_evidence_unavailable: 'search evidence unavailable',
+  };
+
+  function ncdRemovedLine(r) {
+    if (!r || !r.total) return 'No sentences removed.';
+    const parts = Object.entries(r.byReason || {}).map(([k, n]) => n + ' ' + (NCD_REASONS[k] || k));
+    return r.total + (r.total === 1 ? ' sentence' : ' sentences') + ' removed: ' + parts.join(', ');
+  }
+
+  function ncdChip(b, i) {
+    const text = [b.publisher || b.ref, b.publishedAt ? mkFmtWhen(b.publishedAt) : null, b.stale ? 'STALE' : null].filter(Boolean).join(' · ');
+    const title = b.ref + ' — ' + (b.label || '') + (b.passage ? '\n"' + b.passage + '"' : '');
+    return b.url
+      ? React.createElement('a', { key: i, className: 'ncd-chip', href: b.url, target: '_blank', rel: 'noopener noreferrer', title: title }, text + ' ↗')
+      : React.createElement('span', { key: i, className: 'ncd-chip', title: title }, text);
+  }
+
+  function ncdSentence(s, i) {
+    const tags = s.tags || [];
+    return React.createElement('div', { key: i, className: 'ncd-sent' },
+      s.text,
+      tags.includes('stale') && React.createElement('span', { className: 'ncd-tag ncd-tag-stale', title: 'Cites an input marked STALE — the last known value, not today\'s' }, 'STALE'),
+      tags.includes('partly_supported') && React.createElement('span', { className: 'ncd-tag ncd-tag-partly' }, 'PARTLY SUPPORTED'),
+      tags.includes('not_checked') && React.createElement('span', { className: 'ncd-tag ncd-tag-unchecked', title: 'The evidence check did not run on this sentence' }, 'NOT CHECKED'),
+      tags.includes('partly_supported') && s.checkReason && React.createElement('span', { className: 'ncd-why' }, ' — ' + s.checkReason),
+      React.createElement('div', { className: 'ncd-chips' }, (s.basedOn || []).map(ncdChip))
+    );
+  }
+
+  function ncdSection(label, list, emptyText) {
+    return React.createElement('div', { className: 'ncd-sec', 'data-ncd': label },
+      React.createElement('div', { className: 'idc-lbl' }, label),
+      (list && list.length) ? list.map(ncdSentence) : React.createElement('div', { className: 'ncd-empty' }, emptyText || 'Nothing in this section met the evidence bar.'));
+  }
+
+  function NewsCardView(c) {
+    const fmtMove = (r) => (r.move > 0 ? '+' : '') + r.move + (r.moveUnit === 'bp' ? 'bp' : '%');
+    return React.createElement('div', { className: 'idc-body ncd-body' },
+      c.check && c.check.status === 'not_checked' && React.createElement('div', { className: 'ncd-banner', role: 'status' },
+        'NOT CHECKED — ' + (c.check.reason || 'the evidence check did not run.') + ' Sentences marked NOT CHECKED passed the code check only.'),
+      c.selection && React.createElement('div', { className: 'idc-sub', style: { marginBottom: 6 } },
+        'Picked as the top story' + (c.selection.reason ? ': ' + c.selection.reason : '') + (c.selection.repeatOfPrevious ? ' (same story as the previous card — a newer input was cited)' : '')),
+      ncdSection('What happened', c.whatHappened),
+      React.createElement('div', { className: 'ncd-sec', 'data-ncd': 'What moved' },
+        React.createElement('div', { className: 'idc-lbl' }, 'What moved'),
+        (c.whatMoved && c.whatMoved.length)
+          ? React.createElement('table', { className: 'ncd-table' },
+              React.createElement('thead', null, React.createElement('tr', null, ['Instrument', 'Level', 'Move', 'Source · time'].map(h => React.createElement('th', { key: h }, h)))),
+              React.createElement('tbody', null, c.whatMoved.map(r => React.createElement('tr', { key: r.id },
+                React.createElement('td', null, r.label, React.createElement('span', { className: 'idc-sub' }, ' · ' + r.group)),
+                React.createElement('td', { className: 'ncd-num' }, String(r.value) + (r.unit === '%' ? '%' : '')),
+                React.createElement('td', { className: 'ncd-num ' + (r.move > 0 ? 'ncd-pos' : r.move < 0 ? 'ncd-neg' : '') }, fmtMove(r)),
+                React.createElement('td', null,
+                  r.sourceUrl ? React.createElement('a', { className: 'ncd-chip', href: r.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, (r.source || '') + ' · ' + mkFmtWhen(r.asOf) + ' ↗')
+                              : React.createElement('span', { className: 'ncd-chip' }, (r.source || '') + ' · ' + mkFmtWhen(r.asOf)),
+                  r.stale && React.createElement('span', { className: 'ncd-tag ncd-tag-stale' }, 'STALE'))
+              ))))
+          : React.createElement('div', { className: 'ncd-empty' }, 'No Markets snapshot moves to show.'),
+        React.createElement('div', { className: 'idc-sub' }, 'From the Markets snapshot' + (c.marketsSnapshotAt ? ' of ' + mkFmtFull(c.marketsSnapshotAt) : '') + ' · move since previous close (rates in bp) · built by code, not the model')),
+      c.noExplanation
+        ? React.createElement('div', { className: 'ncd-sec', 'data-ncd': 'Why it matters' },
+            React.createElement('div', { className: 'idc-lbl' }, 'Why it matters'),
+            React.createElement('div', { className: 'ncd-empty' }, 'No explanation met the evidence bar.'))
+        : ncdSection('Why it matters', c.whyItMatters),
+      (c.sentiment && c.sentiment.length > 0) && ncdSection('Sentiment (measured)', c.sentiment),
+      ncdSection('What would change it', c.whatWouldChangeIt),
+      React.createElement('div', { className: 'ncd-sec', 'data-ncd': 'What to watch' },
+        React.createElement('div', { className: 'idc-lbl' }, 'What to watch'),
+        (c.whatToWatch && c.whatToWatch.length)
+          ? c.whatToWatch.map((e, i) => React.createElement('div', { key: i, className: 'ncd-sent' },
+              React.createElement('strong', null, e.date), ' · ' + e.event,
+              (e.previous && e.previous.length) ? React.createElement('span', { className: 'idc-sub' }, ' · last reading: ' + e.previous.map(p => p.text).join('; ')) : null,
+              e.stale && React.createElement('span', { className: 'ncd-tag ncd-tag-stale' }, 'STALE'),
+              React.createElement('div', { className: 'ncd-chips' }, e.sourceUrl
+                ? React.createElement('a', { className: 'ncd-chip', href: e.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, (e.source || 'calendar') + ' ↗')
+                : React.createElement('span', { className: 'ncd-chip' }, e.source || 'calendar'))))
+          : React.createElement('div', { className: 'ncd-empty' }, 'No release in the stored FRED calendar in the next 14 days.')),
+      React.createElement('div', { className: 'ncd-removed', 'data-ncd': 'removed' }, ncdRemovedLine(c.removed)),
+      RpCostReceipt(c.receipt, 'COST OF THIS CARD'),
+      React.createElement('div', { className: 'idc-foot' },
+        React.createElement('span', null, 'Generated ' + mkFmtFull(c.generatedAt) + ' · explains, does not advise' + (c.integrity === 'MODIFIED' ? ' · ⚠ stored copy MODIFIED since generation' : '')),
+        c.headline && c.headline.newsId != null && React.createElement('button', { className: 'btn', disabled: !!ideaBusy,
+          title: 'Generate a trade idea focused on this headline (1 AI call) — ideas are logged to the Journal',
+          onClick: () => generateIdea('news', { headlineId: c.headline.newsId }) },
+          ideaBusy && ideaBusy.headlineId === c.headline.newsId ? 'Generating…' : 'Generate idea from this headline'))
+    );
+  }
+
+  function NewsCardItem(c) {
+    const open = newsCardOpen === c.id;
+    const h = c.headline || {};
+    return React.createElement('div', { key: c.id, className: 'idc' + (open ? ' open' : '') },
+      React.createElement('div', { className: 'idc-head', onClick: () => setNewsCardOpen(open ? null : c.id), role: 'button', tabIndex: 0,
+        onKeyDown: e => { if (e.key === 'Enter') setNewsCardOpen(open ? null : c.id); } },
+        React.createElement('div', { className: 'idc-title' },
+          React.createElement('div', { className: 'idc-instr' }, h.url
+            ? React.createElement('a', { href: h.url, target: '_blank', rel: 'noopener noreferrer', onClick: e => e.stopPropagation(), style: { color: 'inherit' } }, h.text, ' ↗')
+            : h.text),
+          React.createElement('div', { className: 'idc-sub' }, [h.source, h.publishedAt ? mkFmtWhen(h.publishedAt) : null].filter(Boolean).join(' · '))),
+        React.createElement('div', { className: 'idc-meta' },
+          React.createElement('div', null, c.check && c.check.status === 'not_checked' ? 'NOT CHECKED' : 'Checked'),
+          React.createElement('div', { className: 'idc-sub' }, mkFmtWhen(c.generatedAt)))),
+      open && NewsCardView(c)
+    );
+  }
+
+  function NewsCardsPanel() {
+    const busyTop = newsCardBusy === 'top';
+    return React.createElement('div', { className: 'card idc-panel', 'data-ncd': 'panel' },
+      React.createElement('div', { className: 'idc-panel-head' },
+        React.createElement('div', null,
+          React.createElement('div', { className: 'idc-panel-title' }, 'NEWS CARDS'),
+          React.createElement('div', { className: 'idc-sub' }, 'What happened, what moved, why it matters, what to watch — each sentence shows its evidence; anything without evidence is removed and counted. Use "Explain" on a headline, or:')),
+        React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          React.createElement('button', { className: 'btn btn-primary', disabled: !!newsCardBusy, onClick: () => explainNews({ top: true }) },
+            busyTop ? React.createElement(React.Fragment, null, React.createElement('span', { className: 'spin' }, '↻'), ' Writing…') : 'Explain top story'),
+          React.createElement('span', { className: 'ai-cost-badge', title: 'Two Anthropic calls per card (writer with web search, then an evidence check) — counted against your daily/monthly AI cap; the real cost is on each card' }, '⚡ 2 AI calls + web search'))),
+      newsCardBusy != null && newsCardBusy !== 'top' && React.createElement('div', { className: 'idc-sub', style: { margin: '6px 0' } },
+        React.createElement('span', { className: 'spin' }, '↻'), ' Writing a card for the selected headline…'),
+      newsCardUnavailable && React.createElement('div', { className: 'rp-unavailable', style: { padding: '22px 16px' }, 'data-ncd': 'unavailable' },
+        React.createElement('div', { className: 'rp-unavail-hd' }, 'NEWS CARD UNAVAILABLE'),
+        React.createElement('div', { className: 'rp-unavail-reason' }, newsCardUnavailable),
+        React.createElement('div', { className: 'rp-unavail-note' }, 'No card is shown because none could be written and checked. Nothing was stored.')),
+      newsCards.length === 0 && !newsCardBusy && React.createElement('div', { className: 'idc-sub', style: { padding: '8px 0' } }, 'No news cards yet.'),
+      newsCards.map(NewsCardItem)
+    );
+  }
+
   // ── NEWS TAB ──────────────────────────────────────────────────────────────
   function renderNews() {
     var headlines      = (news && news.market && news.market.headlines) || [];
@@ -6681,6 +6868,8 @@ function App() {
         )
       ),
 
+      NewsCardsPanel(),
+
       IdeasPanel('news'),
 
       // Main grid: Headlines + Economic Calendar
@@ -6700,7 +6889,12 @@ function App() {
                         className:'news-idea-btn', disabled: !!ideaBusy,
                         title:'Generate a trade idea focused on this headline (1 AI call)',
                         onClick: function() { generateIdea('news', { headlineId: h.id }); },
-                      }, ideaBusy && ideaBusy.headlineId === h.id ? '…' : 'IDEA')
+                      }, ideaBusy && ideaBusy.headlineId === h.id ? '…' : 'IDEA'),
+                      h.id != null && React.createElement('button', {
+                        className:'news-idea-btn', disabled: !!newsCardBusy, style:{ marginLeft: 4 },
+                        title:'Explain this headline: what happened, what moved, why it matters (2 AI calls incl. web search)',
+                        onClick: function() { explainNews({ headlineId: h.id }); },
+                      }, newsCardBusy === h.id ? '…' : 'EXPLAIN')
                     )
                   );
                 })
