@@ -57,7 +57,7 @@ Rules that follow:
 
 ---
 
-## WO-01 — Integrity fixes · status: PR open (Opus 5.5, `claude/integrity-fixes`)
+## WO-01 — Integrity fixes · status: MERGED (PR #15, 2026-11-15; 618 tests pass on `main`)
 
 **Goal:** remove four places where the system asserts something it has not checked, or is
 pushed to produce an opinion. No new features, no extra AI cost.
@@ -157,21 +157,205 @@ named-strategist personas in report prompts (owner has not decided), any new sta
 
 ---
 
-## WO-02 — Remove the UMUSHROOM view · status: queued (D-37)
+## Cost discipline for every order (added after WO-01)
 
-Delete the Journal tab's UMUSHROOM view and switch, `server/umushroom/`,
-`server/routes/umushroom.js`, its mount in `server/index.js`, `tests/umushroom.test.js`,
-`UMUSHROOM_RAW_BASE` in `.env.example`, and its sections in `AGENTS.md`. Mark D-23 and D-25
-"Superseded by D-37". The idea-card Journal becomes the only Journal view. The owner archives
-the `dispatch-umushroom` repo on GitHub themselves. `tests/publicRepoGuard.test.js` stays.
+The WO-01 session reported about $10 of usage, most of it from re-reading a very large context
+on every turn. From WO-02 on:
 
-## WO-03 — News card, replacing the Morning Bulletin · status: spec to be written (D-35)
+- **Never read `client/index.html` or `server/providers/anthropic.js` whole.** Search for the
+  lines you need (`grep -n`) and read only those ranges.
+- Keep command output short (`npm test --silent 2>&1 | tail -8`; pipe diffs through `head`).
+- Do not use subagents. Do not re-read files you have already read.
+- One browser check at the end, not after every change.
 
-First full build of the target shape. One card per story, on demand: what happened (source,
-time) → what moved (Markets snapshot, code) → why it matters (explanation lane) → what to
-watch (FRED calendar, code) → optional opinion (opinion lane). One paid web search per card
-is allowed (D-38). The Morning Bulletin is removed once the card works. The overseer writes
-the full spec and shows it to the owner before launch.
+---
+
+## WO-02 — Cleanup: UMUSHROOM view, AMD box, neutral prompts · status: in progress (Opus 5.5, `claude/cleanup-neutral`)
+
+**Goal:** remove three leftovers the owner no longer wants. Deletions and wording only; no new
+feature, no new AI call, no change to any report's JSON shape other than the one key named in
+item 2.
+
+### 1. Remove the UMUSHROOM view (D-37)
+
+Delete: the Journal tab's UMUSHROOM view and its view switch in `client/index.html`,
+`server/umushroom/`, `server/routes/umushroom.js`, its mount in `server/index.js`,
+`tests/umushroom.test.js`, `UMUSHROOM_RAW_BASE` in `.env.example`, and every UMUSHROOM mention
+in `AGENTS.md` (env table, architecture list, the D-22 paragraph's paper-portfolio sentence).
+The idea-card Journal becomes the only Journal view, with no switch. In `docs/DECISIONS.md`
+mark D-23 and D-25 "Superseded by D-37" (edit only those two rows' Decision cell prefix; the
+table is otherwise append-only). `tests/publicRepoGuard.test.js` stays as it is.
+
+Acceptance: `git grep -i umushroom -- server client tests .env.example AGENTS.md` prints
+nothing; `GET /api/umushroom` is a 404; the Journal tab loads with no page error.
+
+### 2. Remove the dedicated AMD section from equity reports (D-40)
+
+The equity template in `server/providers/anthropic.js` still asks for an `amdImplications`
+object, and `client/index.html` renders it as its own box (search `amdImplications`). AMD was
+one of the owner's old holdings. Remove the key from the template, the box from the client, and
+any validator, schema or test that expects it. Reports already stored that carry the key must
+still open without error (the box simply no longer shows).
+
+Do NOT touch: AMD in the Markets watchlist (`server/markets/instruments.js`,
+`service.js`), the glossary examples, or the Alpha Vantage / Polygon providers.
+
+Acceptance: the equity prompt (via `{ specOnly: true }`) does not contain "amd" in any case;
+a stored report fixture with `amdImplications` renders with no page error.
+
+### 3. No prompt claims to be a named bank or a named person (D-40)
+
+Report and macro prompts in `server/providers/anthropic.js` tell the model it works at a real
+firm ("BofA Global Research", "Goldman Sachs", "Morgan Stanley", "JPMorgan / Goldman Sachs
+tier"), name real strategists, name a real publication series ("World Through a Thematic
+Lens", "US Equity Views", "Global Economics Comment"), and ask for a firm's house phrases
+("BofA language: ..."). The app is shown live to people in the industry; it must not present
+itself as any of them.
+
+- Replace each with a neutral role that names only the job, e.g. "a senior G10 FX strategist
+  writing for institutional readers". Keep the analytical instructions and every JSON key.
+- Remove the house-phrase instruction and any "X-style" wording in prompts and in code
+  comments next to them.
+- Check `client/index.html` for labels or titles that present a report as a bank's product
+  (search the firm names). A disclaimer that says the app is NOT affiliated with a firm may
+  stay. Interview-prep and glossary text that discusses real banks as subject matter stays.
+- Data-series names stay (e.g. "ICE BofA US High Yield OAS" is the real name of the index).
+
+Acceptance test: for all seven report types plus the macro view/clients and pitch prompts that
+expose a spec, the system and user prompt contain none of: BofA, Bank of America, Goldman,
+Morgan Stanley, JPMorgan, JPM, Struyven, Currie, bulge-bracket. Where a prompt has no
+`specOnly` path, a source-level test over the prompt-building file is acceptable, with the
+data-series names allow-listed explicitly.
+
+### Scope
+
+In: the three items, their tests, `AGENTS.md`, HANDOFF (also mark WO-01 as merged there).
+Out: the Morning Bulletin, the news card (WO-03), the report gate (WO-04), any reader-facing
+wording beyond the labels named above.
+
+---
+
+## WO-03 — News card · status: spec written, waiting for the owner's go-ahead (D-35, D-38, D-41)
+
+**Goal:** press a button on a headline and get a card that says what happened, what moved, why
+it matters and what to watch — where every sentence shows its evidence, and anything without
+evidence has been removed by code and counted. This is the first full build of the target
+shape. Target cost about $0.10 a card, shown on a receipt.
+
+**The card explains; it does not recommend.** A trade opinion still comes only from the
+existing "generate idea" button, which already cites supplied inputs, is logged to the Journal
+and is scored (D-41). The Morning Bulletin is NOT touched in this order: it is removed in a
+later cleanup, after the owner has seen the card work on the Mac with the real AI.
+
+### The graph
+
+```
+inputs (code) ─► writer (Sonnet, 1 call, ≤1 web search) ─► gate A (code) ─► gate B (Haiku, 1 call) ─► merge + store (code)
+```
+
+1. **Inputs — code, $0.** Build one registry of everything the writer may cite, each with an
+   id, source, time and link: headlines `N#` (Finnhub, as the News tab holds them), market
+   lines `M:ID` (Markets snapshot: value, change, freshness, STALE flag), calendar `C#` (stored
+   FRED calendar), verified macro facts `F:key` (`macroContext`). Reuse the builders in
+   `server/ideas/generator.js` — move them to a shared module both use; do not copy them.
+2. **What moved — code, $0.** From the snapshot alone: per asset group, the instruments with
+   the largest move since their previous close (rates and spreads in bp, others in %). Each row
+   keeps its source, time and STALE flag. No model writes this section.
+3. **Writer — one Sonnet call** (`callAgent`, new role `newscard`), at most ONE web search
+   (`max_uses: 1` on the search tool — confirm the parameter against the API docs; if it is
+   not supported, send no search tool and say so in the PR). It receives the focus headline,
+   the other headlines, the market lines, calendar and facts. It returns JSON only:
+   - `whatHappened`: 2–3 sentences, each `{ text, basedOn: [ids] }`
+   - `whyItMatters`: 2–5 sentences, each `{ text, basedOn }` — the chain from event to
+     variable to asset, one link per sentence
+   - `sentiment`: 0–2 sentences, each `{ text, basedOn }` — allowed ONLY when it cites a
+     measured sentiment input (today: prediction-market lines); otherwise omit
+   - `whatWouldChangeIt`: 1–2 sentences, each `{ text, basedOn }`
+   Rules in the prompt: use figures exactly as given, never compute or recall one; no
+   recommendation, direction, target or trade; a sentence with nothing to cite is left out;
+   fewer sentences is correct. Web-search support arrives as the tool's cite markup — resolve
+   it server-side to the URLs actually returned (`parseCiteTags` / `extractSearchSources`
+   already do this for research) and register them as `W#` inputs. The model never writes a URL.
+   For the "top story" button the same call first picks the headline that best explains
+   today's moves and returns `selection: { ref, reason, basedOn }`; it must not pick the
+   previous card's story unless something new and material happened.
+4. **Gate A — code, $0 (cite or drop).** For each sentence: every id in `basedOn` exists in
+   the registry and the sentence has at least one piece of evidence (an id or a resolved
+   search source); a `sentiment` sentence cites at least one sentiment-eligible input; every
+   figure in the sentence appears in one of its cited inputs (reuse the number / date / tenor
+   handling in `server/research/factCheck.js`; be conservative the same way). A sentence that
+   fails is removed and recorded with its reason. A sentence citing a STALE input is kept and
+   tagged STALE.
+5. **Gate B — one Haiku 5.5 call, no search (does the evidence support the sentence?).** It
+   sees ONLY each surviving `whyItMatters` / `sentiment` / `whatWouldChangeIt` sentence next to
+   the text of its own cited evidence — not the card, not the other sentences. Per sentence it
+   returns `{ verdict: SUPPORTS | PARTLY | NO, recommendation: true|false, reason }`. Code then
+   applies it: `NO` → removed; `recommendation: true` → removed ("news cards explain only");
+   `PARTLY` → shown with a "partly supported" tag and the reason. The model's own confidence is
+   never asked for or used. If this call fails (after one retry on a temporary error, as
+   `safeReview` does) the card is saved and shown with every such sentence tagged
+   "NOT CHECKED" and a banner giving the reason — never shown as checked.
+6. **What to watch — code, $0.** The next calendar events (up to 3, within 14 days) with date
+   and previous reading, straight from the stored calendar.
+7. **Merge and store — code.** Assemble the card from what passed. Append it to an
+   append-only file `data/news_cards.jsonl` (gitignored; memory-only in tests unless a path
+   env var is set), frozen with a hash like Journal entries. Store the removed sentences with
+   their reasons for audit. If no `whyItMatters` sentence survives, the card says "No
+   explanation met the evidence bar" and still shows the code-built sections.
+
+No rewrite loop in this order: a failed sentence is dropped, not sent back (single-sentence
+correction arrives with WO-04). No schedule, no call on page load.
+
+### Routes (all button-driven; POST routes behind `requireWriteAuth`)
+
+- `POST /api/news/card` `{ headlineId }` or `{ top: true }` → the stored card.
+- `GET /api/news/cards` (newest first) · `GET /api/news/cards/:id`.
+- AI off, budget cap hit, or the writer fails → 503 `available: false` + the plain reason;
+  nothing is stored (D-02, D-19). Every call goes through `claudeTransport` inside
+  `runWithContext({ receipt })`; the receipt is stored on the card.
+
+### Client (News tab)
+
+- An "Explain" button on each headline and an "Explain top story" button, each showing the
+  usual spend chip; a list of stored cards, newest first, which open instantly (this is what
+  a live demo shows).
+- The card, top to bottom: headline with source, time and link → What happened → What moved
+  (table) → Why it matters → Sentiment (measured), only if present → What would change it →
+  What to watch → a line such as "3 sentences removed: 2 no evidence, 1 figure not in its
+  evidence" (counts and reasons only; removed text is never displayed, D-33) → the cost
+  receipt → the existing "generate idea" button for that headline.
+- Each sentence shows its evidence as small source chips (publisher, time, link), the same
+  way idea cards show "based on". STALE, "partly supported" and "NOT CHECKED" tags are visible.
+
+### Acceptance tests (write these first; mock `callAgent` as `tests/ideas.test.js` does)
+
+1. A sentence with an empty `basedOn` and no search source is absent from the stored card and
+   counted under "no evidence".
+2. A sentence citing an id that is not in the registry is removed (the model cannot invent a
+   source).
+3. A sentence stating a figure that appears in none of its cited inputs is removed and counted
+   under "figure not in its evidence"; the same sentence with the figure present survives.
+4. A `sentiment` sentence citing only a headline is removed; one citing a prediction-market
+   line survives and is labelled as sentiment.
+5. Gate B `NO` → removed; `recommendation: true` → removed; `PARTLY` → kept with the tag.
+6. Gate B is called with only sentences and their own evidence text (assert the prompt does
+   not contain an uncited headline).
+7. Gate B failing twice → the card is stored with "NOT CHECKED" on those sentences and a
+   banner reason; it is never marked checked.
+8. Writer failure or AI off → 503 `available: false`, nothing stored.
+9. No `whyItMatters` survives → the card carries the "no explanation met the evidence bar"
+   state and still has What moved and What to watch.
+10. The stored card carries a receipt with both calls on it; the file is append-only (no
+    route edits or deletes a card).
+11. No new timer, scheduler or page-load fetch (extend the existing guard in
+    `tests/reviewFixes.test.js` or equivalent).
+
+### Scope
+
+In: the above, `AGENTS.md` section for the news card, HANDOFF, `.env.example` for any new
+setting (e.g. a model override for the two roles). Out: the Morning Bulletin and its
+providers, idea cards' behaviour, research reports, any FT or paywalled source, any rewrite
+loop, the Journal record view (WO-05).
 
 ## WO-04 — Research reports on the same gate · status: queued
 
