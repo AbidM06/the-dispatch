@@ -4,7 +4,7 @@
 > protocol). Newest entry at the top of the log. Keep "In progress" accurate — it is how
 > two models avoid editing the same thing.
 
-**Last updated:** 2026-10-22 · **by:** Claude (Claude Code, cloud session) · **branch:** `claude/confident-hamilton-o9ugju`
+**Last updated:** 2026-11-15 · **by:** Claude (overseer, cloud session) · **branch:** `claude/bold-babbage-isrzsv`
 
 ---
 
@@ -41,6 +41,8 @@ Working and merged (PR #4, 2026-09-28):
 
 | Task | Agent | Branch | Status |
 |---|---|---|---|
+| **Evidence-gate programme** (D-33 to D-39): plan, decisions and work orders in `docs/WORK_ORDERS.md` | Claude (overseer) | `claude/bold-babbage-isrzsv` | PR open (draft), docs only. Merge this first |
+| WO-01 integrity fixes: 3 date-dependent tests, revision relabel → `REVISED_UNCHECKED`, pre-filled report templates, Events/Risk 'exactly N' quotas | Claude Opus 5.5 (builder) | `claude/integrity-fixes` | Launched 2026-11-15 from the overseer session |
 | Research uses current prices: refresh before each report, newest source wins, STALE flags (D-20) | Claude | `claude/fresh-report-data` | Merged (PR #11, 2026-09-30) |
 | Daily Brief: no seed data (D-29) — Markets snapshot only, previous-close deltas, 'unavailable' when missing, Actionable setup removed, Next event 'unavailable' | Claude | `claude/brief-no-seed` | Merged (PR #7, 2026-10-21). Owner to `git pull` + restart the Mac, then check the Desk tab shows previous-close changes and 'unavailable' for Next event |
 | Data-accuracy audit items 2–6 (D-30): FRED `limit=1`, bulletin data block (3bps / 'as of today' / dropped block), schemas stripping `basis`, stale rates + freshness aging, research `dataAsOf` | Claude | `claude/audit-data-integrity` | PR open (draft); needs Codex review, then owner merge + `git pull` + Mac restart. Audit item 1 (Brief) is separate (`claude/brief-no-seed`, D-29, PR #7) — this branch is cut from `main` and does not touch `brief.js`; the two only meet in HANDOFF/DECISIONS/AGENTS (merge those by hand). |
@@ -62,6 +64,8 @@ Working and merged (PR #4, 2026-09-28):
 ## 3. Next up (agreed with the owner, not started)
 
 In the owner's order of interest. **Propose and confirm before building each one.**
+
+**From 2026-11-15 the agreed order is the evidence-gate programme in `docs/WORK_ORDERS.md`** (D-35): WO-01 integrity fixes → WO-02 remove UMUSHROOM → WO-03 news card (replaces the Morning Bulletin) → WO-04 research on the same gate → WO-05 scoring, lessons ledger and the record. Items below that it does not cover (prediction-market charts, idea card format) wait behind it. Journal stage 3 (item 1) is folded into WO-05.
 
 1. **Journal tab** — design agreed; build in three reviewed stages (D-16):
    stage 1 logging/browsing/pitch toggle → stage 2 outcome tracking & scoring →
@@ -131,6 +135,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 
 ## 5. Owner & environment notes
 
+- The app is shown to interviewers and desk contacts by **live demo** on the owner's Mac (2026-11-15).
 - The owner wants to be **questioned before anything is built** (what exactly, and why),
   and wants **plain-English explanations** — learning JS/Node/shell from the basics.
 - Mac path `~/Desktop/the_dispatch`; restart the server with
@@ -157,6 +162,15 @@ In the owner's order of interest. **Propose and confirm before building each one
 ---
 
 ## Session log (newest first)
+
+### 2026-11-15 — Claude (overseer: agent-setup review, evidence-gate programme)
+- Owner asked for a review of the news and research agents against an X article ("Loops and Graphs") and for Claude to act as overseer guiding Opus 5.5. Owner's answers: they are the reader (a student recruiting for Sales & Trading); an opinion without evidence must not be shown; AI stays manual; the goal is showable proof of credibility, shown by live demo.
+- Audit findings (details in `docs/WORK_ORDERS.md`): the gate fails only unsupported FACTS, opinions skip checking; a revision relabels failed claims `PARTIALLY_VERIFIED` without re-checking; prompts force counts and some templates arrive with opinions filled in; news is explained from headlines by one unchecked call; report opinions and red-team warnings are never scored.
+- Decided: D-33 to D-39. Wrote `docs/WORK_ORDERS.md` (WO-01 in full, WO-02 to WO-05 in outline). Launched Opus 5.5 on WO-01.
+- **`npm test` on a clean `main` today: 600 passed, 3 failed** (`journalTracking`, `curveMacro`, `economicCalendar`). No code changed since they passed on 2026-10-22; fixed-date fixtures are the likely cause (not confirmed). WO-01 fixes them first. CI is red until then.
+- Not done / open for the owner: archive the `dispatch-umushroom` repo on GitHub (D-37); whether report prompts should keep naming real banks and strategists ("BofA Global Research", "Goldman Sachs", "Daan Struyven / Jeff Currie school") — a credibility question for a public demo, not yet asked.
+- The GitHub connector failed to connect in this session (proxy 403), so PR creation from here may not work; the branch is pushed either way.
+- Next: overseer checks the WO-01 result, then writes the full WO-03 spec and shows it to the owner before launch.
 
 ### 2026-10-22 — Claude (research token limits, D-32)
 - Owner's macro report failed: Sonnet 5.5 spent its whole 8,000-token limit thinking and wrote no answer, after the automatic retries. Raised every draft ceiling ~2x (see D-32), the revision call to 16,000, and the request timeout to 10 min for limits over 8,000. Tests 603 passing.
