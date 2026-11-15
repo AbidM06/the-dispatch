@@ -266,6 +266,60 @@ describe("research report specs", () => {
     expect(spec.prompt).not.toContain("<e.g. $310>");
   });
 
+  describe("WO-01: no report template arrives with an opinion or an example figure filled in", () => {
+    const ALL = ["macro", "fx", "rates", "thematic", "equity", "commodities", "sector"];
+    const specs = async () => Promise.all(ALL.map(async t => [t, await anthropic.buildResearchSpec("CTX", "", t)]));
+
+    test("no 'e.g.' followed by a figure, in any of the seven types", async () => {
+      for (const [t, spec] of await specs()) {
+        const hit = spec.prompt.match(/e\.g\.\s*["'(]?\s*[-+$£€]?\d[^\n]{0,30}/i);
+        expect([t, hit && hit[0]]).toEqual([t, null]);
+      }
+    });
+
+    test("no pre-filled direction, stance or role next to a named instrument or slot", async () => {
+      // A literal one-word opinion as a JSON value ("direction": "SHORT"); descriptors list choices ("<LONG|SHORT>").
+      const filled = /"\w+"\s*:\s*"(LONG|SHORT|POSITIVE|NEGATIVE|MIXED|LEADER|LAGGARD|OVERWEIGHT|UNDERWEIGHT|BUY|SELL)"/i;
+      // An example that writes the stance for the model ("<e.g. Hawkish hold>", e.g. "Long 10Y UST vs. short HY").
+      const exampleStance = /e\.g\.\s*["']?\s*(hawkish|dovish|gradual|slow|long|short|bullish|bearish|overweight|underweight)\b/i;
+      // Takeaway slots that pre-write the conclusion.
+      const preWritten = /Long X vs Y|bearish\/bullish|bullish\/bearish/i;
+      for (const [t, spec] of await specs()) {
+        for (const re of [filled, exampleStance, preWritten]) {
+          const hit = spec.prompt.match(re);
+          expect([t, String(re), hit && hit[0]]).toEqual([t, String(re), null]);
+        }
+      }
+    });
+
+    test("no leftover holdings (AMD), anchor scenarios or example prices/dates/sources", async () => {
+      for (const [t, spec] of await specs()) {
+        expect([t, /\bAMD\b/.test(spec.prompt)]).toEqual([t, false]);
+        expect([t, /Strait|31bp|\$112\.40|Apr 4, 2026|e\.g\. CME|Think Outside the Barrel|JPY Carry Trade to JPY Weakness/.test(spec.prompt)]).toEqual([t, false]);
+      }
+    });
+
+    test("fx asks for 2-4 pair views, only where the evidence supports one; keys unchanged", async () => {
+      const spec = await anthropic.buildResearchSpec("CTX", "", "fx");
+      expect(spec.prompt).toMatch(/2 to 4 entries/);
+      expect(spec.prompt).toMatch(/only for pairs the evidence/i);
+      for (const k of ['"pair"', '"direction"', '"type"', '"rationale"', '"horizon"', '"cbReactionFunctions"', '"tradeBarbell"', '"keyTakeaways"'])
+        expect(spec.prompt).toContain(k);
+      for (const bank of ["Federal Reserve", "Bank of Japan", "ECB"]) expect(spec.prompt).toContain(bank);   // naming banks is fine
+    });
+
+    test("forecast chart periods are the coming quarters, not fixed 2026 labels", async () => {
+      jest.useFakeTimers({ now: new Date("2026-11-15T12:00:00Z"), doNotFake: ["nextTick", "setImmediate", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask"] });
+      try {
+        for (const t of ["macro", "commodities"]) {
+          const spec = await anthropic.buildResearchSpec("CTX", "", t);
+          expect(spec.prompt).not.toContain('"Q2-26"');
+          for (const q of ["Q1-27", "Q2-27", "Q3-27", "Q4-27"]) expect(spec.prompt).toContain(`"period": "${q}"`);
+        }
+      } finally { jest.useRealTimers(); }
+    });
+  });
+
   test("extractJSON preserves citations for research, strips them elsewhere", () => {
     const payload = JSON.stringify({ note: 'Oil at ' + String.fromCharCode(40) + 'cite index="0-0">$97.73</cite> today' });
 

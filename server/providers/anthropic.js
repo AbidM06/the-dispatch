@@ -972,6 +972,20 @@ function finalizeResearchReport(reportType, rawText, sources = [], grounded = tr
  * Cached 24h — call is ~$0.015, generated once daily unless force-refreshed.
  * topic: optional focus (e.g. "US tariffs", "Iran geopolitics", "Fed policy")
  */
+/**
+ * The scenario_chart rows for the next four calendar quarters after today ("Q1-27" …), computed —
+ * the template used to carry fixed labels (Q2-26 … Q1-27) that went stale as time passed (WO-01).
+ */
+function forecastQuarterRows(indent = "", now = new Date()) {
+  let y = now.getUTCFullYear(), q = Math.floor(now.getUTCMonth() / 3) + 1;
+  const rows = [];
+  for (let i = 0; i < 4; i++) {
+    q += 1; if (q > 4) { q = 1; y += 1; }
+    rows.push(`${indent}{ "period": "Q${q}-${String(y).slice(-2)}", "bear": <number>, "base": <number>, "bull": <number>, "actual": null }`);
+  }
+  return rows.join(",\n");
+}
+
 async function fetchResearchReport(ratesContext = "", topic = "", reportType = "macro", { specOnly = false } = {}) {
   const today   = todayString();
   const isoDate = new Date().toISOString().slice(0, 10);
@@ -990,27 +1004,24 @@ Use web_search to find current G10 FX rates, CB statements, oil prices, CFTC pos
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<punchy headline like Think Outside the Barrel>",
+  "title": "<punchy headline naming the FX driver your search found>",
   "subtitle": "<one sentence: key tension in FX markets right now>",
   "date": "${isoDate}",
   "keyTakeaways": [
     "<max 2 sentences — headline finding with number>",
-    "<max 2 sentences — Long X vs Y screens well...>",
-    "<max 2 sentences — We stay bearish/bullish beyond...>",
+    "<max 2 sentences — the relative-value observation the evidence supports, if any>",
+    "<max 2 sentences — what the evidence implies for the pairs below, and what would change it>",
     "<max 2 sentences — tail risk or positioning observation>"
   ],
   "thesis": "<max 2 sentences — dominant driver of G10 FX today>",
   "framework": "<max 2 sentences — analytical lens that explains the price action>",
   "pairViews": [
-    { "pair": "EUR/USD", "direction": "SHORT", "type": "conviction", "rationale": "<max 2 sentences>", "horizon": "3 months" },
-    { "pair": "USD/JPY", "direction": "LONG", "type": "conviction", "rationale": "<max 2 sentences>", "horizon": "near-term" },
-    { "pair": "AUD/NZD", "direction": "LONG", "type": "normalisation", "rationale": "<max 2 sentences>", "horizon": "1-3 months" },
-    { "pair": "EUR/NOK", "direction": "SHORT", "type": "normalisation", "rationale": "<max 2 sentences>", "horizon": "medium-term" }
+    { "pair": "<G10 currency pair>", "direction": "<LONG|SHORT>", "type": "<conviction|normalisation>", "rationale": "<max 2 sentences — the evidence for this view>", "horizon": "<holding period the evidence supports>" }
   ],
   "cbReactionFunctions": [
-    { "bank": "Federal Reserve", "stance": "<e.g. Hawkish hold>", "rationale": "<max 1 sentence>" },
-    { "bank": "Bank of Japan", "stance": "<e.g. Slow normaliser>", "rationale": "<max 1 sentence>" },
-    { "bank": "ECB", "stance": "<e.g. Gradual easer>", "rationale": "<max 1 sentence>" }
+    { "bank": "Federal Reserve", "stance": "<the bank's current stance, as its latest statement shows it>", "rationale": "<max 1 sentence>" },
+    { "bank": "Bank of Japan", "stance": "<the bank's current stance, as its latest statement shows it>", "rationale": "<max 1 sentence>" },
+    { "bank": "ECB", "stance": "<the bank's current stance, as its latest statement shows it>", "rationale": "<max 1 sentence>" }
   ],
   "tradeBarbell": {
     "hedges": ["<near-term hedge 1>", "<near-term hedge 2>"],
@@ -1019,6 +1030,7 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "risks": ["<tail risk 1>", "<tail risk 2>", "<tail risk 3>"]
 }
 
+"pairViews": 2 to 4 entries, only for pairs the evidence you found supports — choose the pairs and their directions yourself; never add a pair to fill a slot.
 BofA language: "screens well for", "we stay bearish beyond", "fading the skew premium". Return pure JSON only.`;
 
     if (specOnly) return { reportType: "fx", system, prompt, maxTokens: REPORT_MAX_TOKENS.fx, tier: "haiku" };
@@ -1045,7 +1057,7 @@ Use web_search to find CFTC positioning, CB minutes, real yield differentials, a
 Return EXACTLY this JSON object (pure JSON, no markdown):
 
 {
-  "title": "<specific title like Linking the JPY Carry Trade to JPY Weakness>",
+  "title": "<specific title naming the puzzle your search found>",
   "subtitle": "<the central paradox in one sentence>",
   "date": "${isoDate}",
   "keyTakeaways": [
@@ -1060,13 +1072,13 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "flowAnalysis": "<max 2 sentences — who is doing what, CFTC/MoF data>",
   "clientConversations": "<max 2 sentences on what institutional investors are actively debating, grounded in PUBLIC commentary, positioning data, or published surveys — never claim private client conversations>",
   "catalysts": [
-    { "catalyst": "<event>", "impact": "POSITIVE", "detail": "<max 1 sentence>" },
-    { "catalyst": "<event>", "impact": "NEGATIVE", "detail": "<max 1 sentence>" },
-    { "catalyst": "<event>", "impact": "MIXED", "detail": "<max 1 sentence>" }
+    { "catalyst": "<event>", "impact": "<POSITIVE|NEGATIVE|MIXED>", "detail": "<max 1 sentence>" },
+    { "catalyst": "<event>", "impact": "<POSITIVE|NEGATIVE|MIXED>", "detail": "<max 1 sentence>" },
+    { "catalyst": "<event>", "impact": "<POSITIVE|NEGATIVE|MIXED>", "detail": "<max 1 sentence>" }
   ],
   "levelTargets": [
-    { "pair": "USD/JPY", "target": "<e.g. 145>", "rationale": "<max 1 sentence>" },
-    { "pair": "EUR/USD", "target": "<e.g. 1.05-1.09>", "rationale": "<max 1 sentence>" }
+    { "pair": "USD/JPY", "target": "<level or range the evidence supports>", "rationale": "<max 1 sentence>" },
+    { "pair": "EUR/USD", "target": "<level or range the evidence supports>", "rationale": "<max 1 sentence>" }
   ]
 }
 
@@ -1152,13 +1164,13 @@ Return ONLY valid JSON — no markdown fences, no preamble, no trailing text.` +
 
     const focusInstruction = topic
       ? `Focus this equity views report on: ${topic}.`
-      : `Produce a current S&P 500 earnings outlook covering 2026–2027 EPS forecasts, AI-driven margin dynamics, and sector rotation implications. Include specific AMD implications given its AI accelerator position.`;
+      : `Produce a current S&P 500 earnings outlook covering 2026–2027 EPS forecasts, AI-driven margin dynamics, and sector rotation implications.`;
 
     const prompt = `${focusInstruction}
 
 ${ratesContext}
 
-Use web_search for figures NOT in the verified block above: S&P 500 EPS consensus, mega-cap tech earnings, AI capex announcements, AMD estimates, and any market-moving developments in the last week.
+Use web_search for figures NOT in the verified block above: S&P 500 EPS consensus, mega-cap tech earnings, AI capex announcements, and any market-moving developments in the last week.
 
 CROSS-ASSET REASONING IS MANDATORY. Equities do not price in isolation. Work all three transmission channels explicitly, using the verified levels:
   - ENERGY: crude prices feed input costs and transport costs. Sustained higher oil compresses margins across Consumer Discretionary, Industrials and Transport, and lifts headline inflation, which in turn constrains the policy path. Energy producers gain. Quantify the direction and rough magnitude.
@@ -1296,22 +1308,19 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
     "balance": "<1-2 sentences — market balance: surplus/deficit in mb/d or metric tons, current vs 5-year average inventory.>"
   },
   "price_targets": [
-    { "commodity": "<e.g. Brent Crude>", "current": "<$/bbl>", "dispatch_base": "<$/bbl 3m>", "dispatch_bull": "<$/bbl>", "dispatch_bear": "<$/bbl>", "rationale": "<1 sentence>" },
-    { "commodity": "<e.g. Gold>", "current": "<$/oz>", "dispatch_base": "<$/oz 3m>", "dispatch_bull": "<$/oz>", "dispatch_bear": "<$/oz>", "rationale": "<1 sentence>" }
+    { "commodity": "<commodity name>", "current": "<price with unit>", "dispatch_base": "<price with unit, 3m>", "dispatch_bull": "<price with unit>", "dispatch_bear": "<price with unit>", "rationale": "<1 sentence>" },
+    { "commodity": "<commodity name>", "current": "<price with unit>", "dispatch_base": "<price with unit, 3m>", "dispatch_bull": "<price with unit>", "dispatch_bear": "<price with unit>", "rationale": "<1 sentence>" }
   ],
   "scenarios": {
-    "bear": { "label": "Bear", "probability": "<e.g. 20%>", "trigger": "<what causes this>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
-    "base": { "label": "Base", "probability": "<e.g. 55%>", "trigger": "<conditions for base case>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
-    "bull": { "label": "Bull", "probability": "<e.g. 25%>", "trigger": "<what causes upside>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" }
+    "bear": { "label": "Bear", "probability": "<percent>", "trigger": "<what causes this>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
+    "base": { "label": "Base", "probability": "<percent>", "trigger": "<conditions for base case>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" },
+    "bull": { "label": "Bull", "probability": "<percent>", "trigger": "<what causes upside>", "price_outcome": "<commodity price in this scenario>", "narrative": "<2-3 sentences>" }
   },
   "scenario_chart": [
     { "period": "NOW", "bear": null, "base": null, "bull": null, "actual": <current price as number> },
-    { "period": "Q2-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-    { "period": "Q3-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-    { "period": "Q4-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-    { "period": "Q1-27", "bear": <number>, "base": <number>, "bull": <number>, "actual": null }
+${forecastQuarterRows("    ")}
   ],
-  "scenario_chart_label": "<e.g. 'Brent Crude ($/bbl)' or 'Gold ($/oz)'>",
+  "scenario_chart_label": "<the commodity projected, with its unit>",
   "dispatch_angle": {
     "headline": "<max 12 words — the overlooked second-order consequence>",
     "mechanism": "<3 sentences — the causal chain A → B → C → D that consensus is missing. Specific magnitudes.>",
@@ -1328,9 +1337,9 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "macro_linkages": "<2-3 sentences — how commodity moves feed through to FX (petrocurrencies, EM terms of trade), rates (inflation pass-through), and equities (sector rotation).>",
   "key_watchpoints": ["<data release or event to watch 1>", "<watchpoint 2>", "<watchpoint 3>"],
   "live_market_data": [
-    { "label": "<e.g. Brent Crude>", "value": "<e.g. $112.40/bbl>", "change": "<e.g. +1.2% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
-    { "label": "<e.g. WTI Crude>",   "value": "<e.g. $108.20/bbl>", "change": "<e.g. +0.8% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" },
-    { "label": "<e.g. Henry Hub NG>","value": "<e.g. $3.10/mmbtu>","change": "<e.g. -0.5% 1D>", "direction": "<up|down|flat>", "source": "<e.g. CME / Bloomberg>", "as_of": "<e.g. Apr 4, 2026>" }
+    { "label": "Brent Crude",  "value": "<price with unit>", "change": "<1-day change in percent>", "direction": "<up|down|flat>", "source": "<publisher of the price you found>", "as_of": "<date of that price>" },
+    { "label": "WTI Crude",    "value": "<price with unit>", "change": "<1-day change in percent>", "direction": "<up|down|flat>", "source": "<publisher of the price you found>", "as_of": "<date of that price>" },
+    { "label": "Henry Hub NG", "value": "<price with unit>", "change": "<1-day change in percent>", "direction": "<up|down|flat>", "source": "<publisher of the price you found>", "as_of": "<date of that price>" }
   ]
 }
 
@@ -1388,10 +1397,10 @@ Return EXACTLY this JSON object (pure JSON, no markdown):
   "earningsRevisions": "<max 2 sentences — direction of consensus revisions with data>",
   "macroSensitivities": "<max 2 sentences — rates/FX/commodity sensitivities>",
   "leadersLaggards": [
-    { "name": "<ticker or company>", "role": "LEADER", "rationale": "<max 1 sentence>" },
-    { "name": "<ticker or company>", "role": "LEADER", "rationale": "<max 1 sentence>" },
-    { "name": "<ticker or company>", "role": "LAGGARD", "rationale": "<max 1 sentence>" },
-    { "name": "<ticker or company>", "role": "LAGGARD", "rationale": "<max 1 sentence>" }
+    { "name": "<ticker or company>", "role": "<LEADER|LAGGARD>", "rationale": "<max 1 sentence>" },
+    { "name": "<ticker or company>", "role": "<LEADER|LAGGARD>", "rationale": "<max 1 sentence>" },
+    { "name": "<ticker or company>", "role": "<LEADER|LAGGARD>", "rationale": "<max 1 sentence>" },
+    { "name": "<ticker or company>", "role": "<LEADER|LAGGARD>", "rationale": "<max 1 sentence>" }
   ],
   "consensusView": "<max 2 sentences — what the sell-side/buy-side consensus believes>",
   "variantPerception": "<max 2 sentences — precisely where we differ and why the market may be wrong>",
@@ -1445,23 +1454,23 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 "scenarios": object with two keys:
   "baseline": {
     "label": string (e.g. "Baseline"),
-    "anchor": string (e.g. "Oil at $80/bbl, Strait disruption 5 days"),
-    "gdpImpact": string (e.g. "-0.1pp to global GDP growth"),
-    "cpiImpact": string (e.g. "+0.2pp to headline inflation"),
+    "anchor": string (the conditions this scenario assumes — levels and durations taken from your search, not assumed),
+    "gdpImpact": string (signed change to global GDP growth, in pp),
+    "cpiImpact": string (signed change to headline inflation, in pp),
     "narrative": string (3 sentences — what happens under this scenario, why, what data supports it)
   }
   "stress": {
     "label": string (e.g. "Upside / Stress"),
-    "anchor": string (e.g. "Oil spikes to $100/bbl, Strait closed 5 weeks"),
+    "anchor": string (the conditions this scenario assumes — levels and durations taken from your search, not assumed),
     "gdpImpact": string,
     "cpiImpact": string,
     "narrative": string (3 sentences — what makes this scenario materialise, magnitude of impact, policy response)
   }
 
 "secondaryRisks": array of 2-3 objects, each: {
-  "channel": string (e.g. "Financial conditions tightening"),
-  "magnitude": string (e.g. "31bp FCI tightening"),
-  "growthImpact": string (e.g. "-0.3pp if sustained 1 year"),
+  "channel": string (the transmission channel, named),
+  "magnitude": string (size of the move in that channel, with its unit),
+  "growthImpact": string (signed growth effect in pp, and over what period),
   "narrative": string (2 sentences — mechanism and historical precedent)
 }
 
@@ -1477,7 +1486,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
   "equities": string (2 sentences — sector rotation, multiple compression, earnings impact),
   "credit": string (2 sentences — IG vs HY, spread trajectory),
   "fx": string (2 sentences — USD, EM FX, commodity currencies),
-  "topTrade": string (1 sentence — the single best expression of this view: e.g. "Long 10Y UST vs. short HY credit")
+  "topTrade": string (1 sentence — the single best expression of this view: instrument, direction and the evidence it rests on)
 }
 
 "keyMetrics": array of 4-6 objects, each: {
@@ -1509,10 +1518,7 @@ Produce a Goldman Sachs-style Global Economics Comment. Return a single JSON obj
 "scenario_chart": array of 5 objects — forward projection for the primary variable in this report (e.g. oil price, 10Y yield, EPS). Label each point as a quarter. Use real numbers consistent with your scenario analysis above:
 [
   { "period": "NOW", "bear": null, "base": null, "bull": null, "actual": <current value as number> },
-  { "period": "Q2-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-  { "period": "Q3-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-  { "period": "Q4-26", "bear": <number>, "base": <number>, "bull": <number>, "actual": null },
-  { "period": "Q1-27", "bear": <number>, "base": <number>, "bull": <number>, "actual": null }
+${forecastQuarterRows("  ")}
 ]
 "scenario_chart_label": string — what metric is being projected (e.g. "Brent Crude ($/bbl)", "10Y UST Yield (%)", "S&P 500 EPS ($)")
 
