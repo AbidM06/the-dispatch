@@ -67,6 +67,12 @@ Working and merged (PR #4, 2026-09-28):
 
 In the owner's order of interest. **Propose and confirm before building each one.**
 
+**Order from 2026-11-15 (evening), set by the overseer at the owner's request (D-44, D-45):**
+(1) the owner runs one real news card on the Mac and reports the receipt → fix what it shows; (2) remove the Morning Bulletin (D-35, D-41);
+(3) WO-06 Part A, credit data in Markets (free, no AI); (4) WO-04, research on the evidence gate; (5) WO-06 Part B, the credit report type;
+(6) WO-05. **The overseer model will change** (Fable → Opus 5.5) when the owner's allowance runs out: read "When the overseer changes model" in
+`docs/WORK_ORDERS.md` before overseeing anything. WO-04, WO-06 Part B and WO-05 still need their full work orders written — start a FRESH session for each.
+
 **From 2026-11-15 the agreed order is the evidence-gate programme in `docs/WORK_ORDERS.md`** (D-35): WO-01 integrity fixes → WO-02 remove UMUSHROOM → WO-03 news card (replaces the Morning Bulletin) → WO-04 research on the same gate → WO-05 scoring, lessons ledger and the record. Items below that it does not cover (prediction-market charts, idea card format) wait behind it. Journal stage 3 (item 1) is folded into WO-05.
 
 1. **Journal tab** — design agreed; build in three reviewed stages (D-16):
@@ -168,7 +174,7 @@ In the owner's order of interest. **Propose and confirm before building each one
 ### 2026-11-15 (end of day) — Claude (overseer): WO-03 merged, small follow-ups, credit interest
 - PR #19 (news card) merged by the owner. The owner has archived the `dispatch-umushroom` repo (D-37 complete).
 - `data/economic_calendar.json` was NOT in `.gitignore` although the brief said it was (the owner's `git status --short` listed it, which the update steps treat as "stop and ask"). Added, with its `.tmp`. It holds only FRED release dates.
-- **Owner's new interest: credit as an asset class** — high yield and distressed debt first, investment grade too — and whether it can become a Research report type. Today the app has: HY and IG OAS (FRED) and the HYG / LQD ETFs in Markets, and one credit fact (HY OAS) in the verified block every report receives. There is no credit report type. Questions were put to the owner; **nothing is approved or built**.
+- **Credit is now decided (D-44):** high yield and distressed first, investment grade too; US, free data; market level and single names (CoreWeave was the spark, from genuine curiosity). Two steps — Markets data, then a report type after WO-04 — planned as WO-06. **Model change (D-45):** the owner will run out of the stronger model; the safeguards that survive it are written into `docs/WORK_ORDERS.md`. Nothing built yet.
 - Open follow-ups: idea cards still use the unaged freshness label (`marketContext()`), which the news card fixed for itself; the Morning Bulletin removal waits on the owner seeing a real news card.
 
 ### 2026-11-15 (late) — Claude (overseer) + Claude Opus 5.5 (builder): WO-02 merged, WO-03 news card built

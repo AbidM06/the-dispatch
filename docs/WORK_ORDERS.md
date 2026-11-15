@@ -394,3 +394,86 @@ correction with code merge and a real re-check (replaces `REVISED_UNCHECKED`); t
 Score report opinions and red-team warnings the way idea cards are scored (D-18); build the
 lessons ledger already designed in D-14; one organised, append-only record view in the
 Journal tab, built for a live demo (D-36).
+
+## WO-06 — Credit · status: PLANNED, not started (D-44). Part A may start once the owner has seen a real news card; Part B waits for WO-04
+
+**Why:** the owner wants credit covered as its own subject: high yield and distressed first,
+investment grade too; US, free data; market level and single names (CoreWeave was the spark).
+
+### Part A — credit data in the Markets tab (free, no AI; a Sonnet-sized order)
+
+Add to `server/markets/instruments.js`, in a new group `credit` (move HYOAS, IGOAS, HYG, LQD
+into it; keep their ids so the Daily Brief, exhibits and saved ideas still resolve):
+
+- Spreads by rating (ICE BofA OAS series on FRED): BB, B, CCC-and-lower; AAA, AA, A, BBB.
+- Effective yield: US high yield, US investment grade.
+- Lending conditions: the Fed's loan officer survey (share of banks tightening standards on
+  business loans) and the business-loan delinquency rate — both quarterly; label the cadence.
+- Price proxies from Yahoo: one leveraged-loan fund, one more high-yield fund.
+- Two computed views, labelled computed (like 2s10s): **CCC − BB** (the distress gap) and
+  **HY − IG**. Use the existing compare/spread machinery; never fill a missing day.
+
+**Verify before building, on the owner's Mac (the sandbox cannot reach FRED):** each FRED
+series id exists and returns data; how much history FRED serves for the ICE BofA series (it
+may be limited to a few recent years — if so the 5Y chart option is hidden for them, not
+padded). A series that fails verification is left out and named in the PR, never substituted.
+
+Acceptance tests (write first): every new instrument has a source and a unit; a failed series
+is `stale` or missing, never invented; the two computed spreads refuse mixed units; the Brief's
+five series and `tests/reportExhibits.test.js` still pass with the group change; the news
+card's `whatMoved` shows the `credit` group in bp.
+
+Add the credit facts (BB, B, CCC, IG OAS) to `macroContext` so every report's verified block
+and the fact check can see them. Cost impact: none.
+
+### Part B — a credit report type in the Research tab (after WO-04)
+
+An eighth report type, `credit`, on the evidence gate from the start. Sections:
+
+1. **Where spreads are** — code-built from Part A (levels, change, the two computed gaps).
+2. **What is priced and why** — explanation sentences, cite-or-drop.
+3. **Stress and distress** — the CCC tier, lending standards, delinquencies; searched figures
+   (default rates, distressed ratio) allowed ONLY with an API-returned passage, labelled
+   "searched, not code-verified".
+4. **Names in focus** — single issuers the search evidence shows are most discussed or most
+   moved (no free feed ranks them; the section says so). Per name: what happened, the debt in
+   question, what the evidence says — every sentence cited. No rating, price, coupon or
+   maturity appears unless it is in a cited passage. Zero names is a valid result (D-34).
+5. **Opinions** — only with evidence, a "proved wrong if" condition scoreable against a
+   Markets instrument, and a record entry (the WO-04 / WO-05 rules).
+
+Open design question for the overseer who writes the full order: whether SEC EDGAR's free
+company-facts data (debt, cash, interest expense from filings) can serve as code-verified
+single-name fundamentals. Verify the endpoint, its terms and its freshness before specifying
+it; do not assume. Fixed exhibits: HY vs IG spread; CCC − BB; HYG vs LQD rebased.
+
+---
+
+## When the overseer changes model (D-45)
+
+The owner's allowance of the stronger model is limited. When the overseer and the builder are
+the same model, these stay mandatory, because they do not depend on which model runs them:
+
+1. **Tests first, by the overseer session.** The acceptance tests are written and shown to
+   FAIL before any build starts, and their header states the contract. The builder may not
+   loosen an assertion; it may fix test plumbing and must say so.
+2. **Two sessions, never one.** The session that builds does not review its own work. A fresh
+   session (same model is fine) reads the diff cold against the work order.
+3. **The overseer's checklist, every order:**
+   - Re-run `npm test` yourself; confirm the new tests fail on the previous commit.
+   - Read every changed line of any gate, check or prompt (not just the summary).
+   - Ask of each check: *what wrong thing could still pass?* Try one concrete bad input.
+     (2026-11-15: "up 9%" passed on the `09` of a timestamp — found only by trying it.)
+   - Ask of each decision in `docs/DECISIONS.md` the change touches: *is it enforced in code,
+     or only written down?* (Same day: the Financial Times exclusion was only written down.)
+   - Ask of each thing shown to the owner: *did it go through the gate, or around it?*
+     (Same day: the top-story reason went around it.)
+   - One browser check, both themes. Fixture data is labelled as fixture data.
+   - Write down what was NOT verified (live AI, live data) in the PR and in HANDOFF.
+4. **Codex reviews every PR** and the author verifies each finding before fixing it.
+5. **Spend the stronger model on design while it lasts**: a full work order per session, in a
+   fresh session (a long session re-reads its whole history on every turn and costs far more).
+   Order of value: WO-04, then WO-06 Part B, then WO-05. Part A and the bulletin removal do
+   not need it.
+6. **If a model is unsure, it says so and stops** — "not verified" is an acceptable result;
+   a confident guess is not (D-02).
